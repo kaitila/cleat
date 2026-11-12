@@ -1,24 +1,39 @@
 // The real agent: Claude Code through the Claude Agent SDK's query().
 // The SDK changes often: read node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts before changing this.
-import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentDriver, AgentOutput, NewEvent, TurnInput } from "./agent";
 
 /** tool_result content is cut to this many characters before it is stored. */
 export const MAX_TOOL_RESULT = 20_000;
 
-export const NO_APPROVALS = "Approvals are not available yet in intuition, so this tool call was denied. Carry on without it.";
+export const DENIED = "The user denied this tool call.";
+
+/**
+ * Every call that would prompt waits here for the person's Allow or Deny (input.approve). An allow
+ * runs the call with its input unchanged. updatedPermissions is never returned: there is no
+ * "always allow".
+ */
+export function canUseToolFor(input: TurnInput): CanUseTool {
+  return async (toolName, toolInput, options) => {
+    const decision = await input.approve(
+      { toolUseId: options.toolUseID, toolName, input: toolInput, ...(options.decisionReason ? { reason: options.decisionReason } : {}) },
+      options.signal,
+    );
+    return decision === "allow" ? { behavior: "allow", updatedInput: toolInput } : { behavior: "deny", message: DENIED };
+  };
+}
 
 /**
  * The options every session runs with. permissionMode is always "default", and settingSources is
  * left out so the workspace's own settings (user, project and local) load, as in the CLI.
- * A call that would prompt reaches canUseTool, which denies it: nothing is ever auto-approved.
+ * A call that would prompt reaches canUseTool, which waits for the person: nothing is ever auto-approved.
  */
 export function claudeOptions(input: TurnInput, abortController: AbortController, stderr: (data: string) => void): Options {
   return {
     cwd: input.cwd,
     permissionMode: "default",
     includePartialMessages: true,
-    canUseTool: async () => ({ behavior: "deny", message: NO_APPROVALS }),
+    canUseTool: canUseToolFor(input),
     abortController,
     stderr,
     ...(input.resume ? { resume: input.resume } : {}),

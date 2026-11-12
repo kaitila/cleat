@@ -1,12 +1,13 @@
 // Starts sessions, continues them with replies, and runs their turns in the background: every
 // output of the agent driver is stored (events) or passed on (deltas), and sent to the WebSocket clients.
-import type { ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
-import type { AgentDriver, NewEvent } from "./agent";
+import type { ApprovalDecision, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
+import type { AgentDriver, ApprovalAsk, NewEvent } from "./agent";
 import type { Store } from "./store";
 
 export const NO_RESULT = "the turn ended without a result";
 export const BUSY = "a turn is running: wait for it to finish";
 export const APPROVAL_OPEN = "an approval is open: answer it first";
+export const NO_APPROVAL = "no such open approval";
 
 /** Why a session can't take a reply now, or null. Only an idle or failed session can. */
 export function busy(session: SessionMeta): string | null {
@@ -26,6 +27,8 @@ export function promptWithImage(prompt: string, imagePath?: string): string {
 
 export class Sessions {
   private readonly turns = new Map<string, { abort: AbortController; done: Promise<void> }>();
+  /** The open approvals, by approvalId. `settle` gives the waiting tool call its answer. */
+  private readonly approvals = new Map<string, { sessionId: string; settle: (decision: ApprovalDecision) => void }>();
 
   constructor(
     private readonly store: Store,
@@ -90,10 +93,63 @@ export class Sessions {
     this.send({ type: "session", session: status ? this.store.update(id, { status }) : this.store.get(id)! });
   }
 
+  /**
+   * The person's answer to an open approval: stores approval_resolved, lets the tool call go on, and
+   * the session is running again once no approval of its is open. Null when the session has no open
+   * approval with that id (unknown, or already answered).
+   */
+  answer(id: string, approvalId: string, decision: ApprovalDecision): SessionMeta | null {
+    if (this.approvals.get(approvalId)?.sessionId !== id) return null;
+    this.close(approvalId, decision);
+    return this.store.get(id)!;
+  }
+
+  /** Ends an open approval: recorded (unless `quiet`: the runner is stopping), then the tool call gets its answer. */
+  private close(approvalId: string, decision: ApprovalDecision, quiet = false): void {
+    const open = this.approvals.get(approvalId);
+    if (!open) return;
+    this.approvals.delete(approvalId);
+    if (!quiet) {
+      const more = [...this.approvals.values()].some((a) => a.sessionId === open.sessionId);
+      this.record(open.sessionId, { kind: "approval_resolved", approvalId, decision }, more ? undefined : "running");
+    }
+    open.settle(decision);
+  }
+
   private async turn(id: string, prompt: string, signal: AbortSignal): Promise<void> {
     const session = this.store.get(id)!;
+    /** This turn's open approvals. */
+    const mine = new Set<string>();
+    let ended = false;
+    const approve = (ask: ApprovalAsk, callSignal?: AbortSignal): Promise<ApprovalDecision> => {
+      // Nobody can be asked any more: the call is denied, never allowed.
+      if (ended || signal.aborted || callSignal?.aborted) return Promise.resolve("deny");
+      const approvalId = crypto.randomUUID();
+      return new Promise((resolve) => {
+        // The agent gave up on the call. While the runner stops, nothing more is recorded.
+        const onAbort = () => this.close(approvalId, "deny", signal.aborted);
+        this.approvals.set(approvalId, {
+          sessionId: id,
+          settle: (decision) => {
+            callSignal?.removeEventListener("abort", onAbort);
+            mine.delete(approvalId);
+            resolve(decision);
+          },
+        });
+        mine.add(approvalId);
+        callSignal?.addEventListener("abort", onAbort, { once: true });
+        const { toolUseId, toolName, input, reason } = ask;
+        this.record(id, { kind: "approval_request", approvalId, ...(toolUseId ? { toolUseId } : {}), toolName, input, ...(reason ? { reason } : {}) }, "waiting_approval");
+      });
+    };
+    /** The turn's last event. An approval still open then is denied first: its call will never run. */
+    const end = (event: NewEvent, status: SessionStatus) => {
+      ended = true;
+      for (const approvalId of [...mine]) this.close(approvalId, "deny");
+      this.record(id, event, status);
+    };
     try {
-      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, signal })) {
+      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, signal, approve })) {
         // A turn cut off by the runner stopping stays "running" on disk, and the next start records it as failed.
         if (signal.aborted) return;
         if (out.type === "delta") {
@@ -101,25 +157,31 @@ export class Sessions {
         } else if (out.type === "session_id") {
           if (session.claudeSessionId !== out.id) this.send({ type: "session", session: this.store.update(id, { claudeSessionId: out.id }) });
         } else if (out.event.kind === "result") {
-          this.record(id, out.event, out.event.ok ? "idle" : "error");
+          end(out.event, out.event.ok ? "idle" : "error");
           return;
         } else if (out.event.kind === "error") {
-          this.record(id, out.event, "error");
+          end(out.event, "error");
           return;
         } else {
           this.record(id, out.event);
         }
       }
-      if (!signal.aborted) this.record(id, { kind: "error", message: NO_RESULT }, "error");
+      if (!signal.aborted) end({ kind: "error", message: NO_RESULT }, "error");
     } catch (e) {
-      if (!signal.aborted) this.record(id, { kind: "error", message: (e as Error).message || String(e) }, "error");
+      if (!signal.aborted) end({ kind: "error", message: (e as Error).message || String(e) }, "error");
+    } finally {
+      ended = true;
     }
   }
 
-  /** Ends every running turn without recording anything more. */
+  /**
+   * Ends every running turn without recording anything more. A tool call that waits for approval
+   * is denied, so its agent isn't left waiting; the next start records the approval as denied.
+   */
   async stop(): Promise<void> {
     const running = [...this.turns.values()];
     for (const t of running) t.abort.abort();
+    for (const approvalId of [...this.approvals.keys()]) this.close(approvalId, "deny", true);
     await Promise.all(running.map((t) => t.done));
   }
 }
