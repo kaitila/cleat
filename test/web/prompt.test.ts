@@ -7,7 +7,13 @@ import { testRunner } from "../runner/helpers";
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
 // A plain JavaScript module with no types: imported by a computed path, so tsc leaves it alone.
 const modulePath = join(WEB, "prompt.js");
-const { initialWorkspace, altDigit, errorText, UNREACHABLE } = (await import(modulePath)) as {
+type Attachment = { capturedAt: string; kind: "image"; imagePath: string } | { capturedAt: string; kind: "text"; text: string };
+const { initialWorkspace, altDigit, errorText, UNREACHABLE, attachmentOf, preview, sessionBody, FRESH_MS, CLIPBOARD_POLLS } = (await import(modulePath)) as {
+  attachmentOf(capture: unknown, now?: number): Attachment | null;
+  preview(text: string): string;
+  sessionBody(workspace: string, task: string, attachment: Attachment | null): { workspace: string; prompt: string; imagePath?: string };
+  FRESH_MS: number;
+  CLIPBOARD_POLLS: number[];
   initialWorkspace(workspaces: { name: string; exists: boolean }[], lastUsed: string | null): string | null;
   altDigit(event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; code?: string; key?: string }): number | null;
   errorText(status: number, body: unknown): string;
@@ -115,4 +121,60 @@ describe("errorText", () => {
     expect(errorText(400, { error: "  " })).toBe("the runner answered 400");
   });
   test("the line for a runner that doesn't answer", () => expect(UNREACHABLE).toBe("the runner is not reachable"));
+});
+
+describe("attachmentOf", () => {
+  const now = Date.parse("2026-11-13T10:00:30.000Z");
+  const at = (secondsAgo: number) => new Date(now - secondsAgo * 1000).toISOString();
+
+  test("a capture from the last 30 seconds is attached: its text, or its image", () => {
+    expect(FRESH_MS).toBe(30_000);
+    expect(attachmentOf({ capturedAt: at(1), text: "copied" }, now)).toEqual({ capturedAt: at(1), kind: "text", text: "copied" });
+    expect(attachmentOf({ capturedAt: at(30), imagePath: "/mnt/c/a.png" }, now)).toEqual({ capturedAt: at(30), kind: "image", imagePath: "/mnt/c/a.png" });
+  });
+  test("an image wins over text", () => {
+    expect(attachmentOf({ capturedAt: at(1), text: "copied", imagePath: "/mnt/c/a.png" }, now)?.kind).toBe("image");
+  });
+  test("an older capture is not attached", () => {
+    expect(attachmentOf({ capturedAt: at(31), text: "copied" }, now)).toBeNull();
+    expect(attachmentOf({ capturedAt: at(3600), imagePath: "/mnt/c/a.png" }, now)).toBeNull();
+  });
+  test("nothing is attached for no capture, an empty one, or one without a readable time", () => {
+    expect(attachmentOf({}, now)).toBeNull();
+    expect(attachmentOf(null, now)).toBeNull();
+    expect(attachmentOf({ capturedAt: at(1) }, now)).toBeNull();
+    expect(attachmentOf({ capturedAt: at(1), text: "  \n " }, now)).toBeNull();
+    expect(attachmentOf({ capturedAt: "soon", text: "copied" }, now)).toBeNull();
+    expect(attachmentOf({ capturedAt: at(-60), text: "copied" }, now)).toBeNull();
+    expect(attachmentOf({ text: "copied" }, now)).toBeNull();
+  });
+  test("the page asks on load and a few more times over the first two seconds", () => {
+    expect(CLIPBOARD_POLLS[0]).toBe(0);
+    expect(CLIPBOARD_POLLS.length).toBeGreaterThanOrEqual(4);
+    expect(Math.max(...CLIPBOARD_POLLS)).toBe(2000);
+  });
+});
+
+describe("preview", () => {
+  test("is the first two lines with something on them", () => {
+    expect(preview("\n  one  \n\ntwo\nthree")).toBe("one\ntwo");
+    expect(preview("only")).toBe("only");
+    expect(preview("a\r\nb\r\nc")).toBe("a\nb");
+  });
+  test("cuts a long line", () => expect(preview("x".repeat(5000))).toHaveLength(200));
+});
+
+describe("sessionBody", () => {
+  test("without an attachment it is the task", () => {
+    expect(sessionBody("work", "Do it", null)).toEqual({ workspace: "work", prompt: "Do it" });
+  });
+  test("an attached image goes as imagePath", () => {
+    expect(sessionBody("work", "Do it", { capturedAt: "t", kind: "image", imagePath: "/mnt/c/a.png" })).toEqual({ workspace: "work", prompt: "Do it", imagePath: "/mnt/c/a.png" });
+  });
+  test("attached text goes after the task, under a line 'Clipboard:'", () => {
+    expect(sessionBody("work", "Explain this\n", { capturedAt: "t", kind: "text", text: "line 1\nline 2" })).toEqual({
+      workspace: "work",
+      prompt: "Explain this\n\nClipboard:\nline 1\nline 2",
+    });
+  });
 });

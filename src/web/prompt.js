@@ -1,6 +1,8 @@
 // The pop-up prompt (/prompt): pick a workspace, type a task, Enter starts the session.
 // The shell opens it in a small window on the hotkey, so everything works from the keyboard:
 // Enter starts, Shift+Enter is a new line, Alt+1..9 picks a workspace, Esc closes.
+// The shell captures the clipboard as the window opens: the capture shows under the task box and
+// goes with the task, unless it is removed (its × or Alt+Backspace).
 // The API is docs/protocol.md; the types are src/shared/protocol.ts.
 
 export const UNREACHABLE = "the runner is not reachable";
@@ -30,6 +32,44 @@ export function errorText(status, body) {
   return text || `the runner answered ${status}`;
 }
 
+/** A capture older than this was not made for this pop-up, and is not attached. */
+export const FRESH_MS = 30_000;
+/** When the page asks for the capture, in ms after it loads: the shell posts it while the window opens. */
+export const CLIPBOARD_POLLS = [0, 150, 400, 800, 1300, 2000];
+
+/**
+ * What a capture attaches: its image, else its text, or null when it has neither, is older than
+ * FRESH_MS, or is not a capture at all.
+ */
+export function attachmentOf(capture, now = Date.now()) {
+  if (!capture || typeof capture !== "object" || typeof capture.capturedAt !== "string") return null;
+  const age = now - Date.parse(capture.capturedAt);
+  // A little slack for a capture stamped just ahead of this clock.
+  if (!(age <= FRESH_MS && age >= -5000)) return null;
+  const base = { capturedAt: capture.capturedAt };
+  if (typeof capture.imagePath === "string" && capture.imagePath) return { ...base, kind: "image", imagePath: capture.imagePath };
+  if (typeof capture.text === "string" && capture.text.trim()) return { ...base, kind: "text", text: capture.text };
+  return null;
+}
+
+/** The first two lines of clipboard text that have something on them, each cut to 200 characters. */
+export function preview(text) {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((line) => line.slice(0, 200))
+    .join("\n");
+}
+
+/** The body of POST /api/sessions: an attached image goes by its path, attached text after the task. */
+export function sessionBody(workspace, task, attachment) {
+  if (attachment?.kind === "image") return { workspace, prompt: task, imagePath: attachment.imagePath };
+  if (attachment?.kind === "text") return { workspace, prompt: `${task.trimEnd()}\n\nClipboard:\n${attachment.text}` };
+  return { workspace, prompt: task };
+}
+
 /** Fetches JSON from the runner. Throws an Error whose message is the line to show. */
 async function api(path, init) {
   let res;
@@ -50,6 +90,11 @@ function start() {
   const status = document.getElementById("status");
   let loaded = false;
   let busy = false;
+  const clip = document.getElementById("clipboard");
+  /** The capture that goes with the task, or null. */
+  let attachment = null;
+  /** capturedAt of the capture that was removed: a later poll doesn't bring it back. */
+  let removed = null;
 
   const say = (text, kind = "") => {
     status.textContent = text;
@@ -95,8 +140,61 @@ function start() {
     }
   }
 
+  function drawAttachment() {
+    clip.hidden = attachment === null;
+    if (attachment === null) return clip.replaceChildren();
+    let what;
+    if (attachment.kind === "image") {
+      what = document.createElement("img");
+      what.className = "clip-image";
+      what.alt = "Image from the clipboard";
+      what.src = `/api/clipboard/image?at=${encodeURIComponent(attachment.capturedAt)}`;
+    } else {
+      what = document.createElement("span");
+      what.className = "clip-text";
+      what.textContent = preview(attachment.text);
+    }
+    const label = document.createElement("span");
+    label.className = "clip-label muted";
+    label.textContent = attachment.kind === "image" ? "Clipboard image" : "Clipboard";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "clip-remove";
+    remove.textContent = "×";
+    remove.title = "Remove (Alt+Backspace)";
+    remove.setAttribute("aria-label", "Remove the clipboard attachment");
+    remove.setAttribute("aria-keyshortcuts", "Alt+Backspace");
+    remove.addEventListener("click", removeAttachment);
+    clip.replaceChildren(label, what, remove);
+  }
+
+  function removeAttachment() {
+    if (attachment === null) return;
+    removed = attachment.capturedAt;
+    attachment = null;
+    drawAttachment();
+    task.focus();
+  }
+
+  /** Takes the runner's latest capture when it is fresh, new to the page and not the one removed. */
+  async function pollClipboard() {
+    let found;
+    try {
+      found = attachmentOf(await api("/api/clipboard"));
+    } catch {
+      return; // The workspace load already says when the runner can't be reached.
+    }
+    if (busy || found === null || found.capturedAt === removed || found.capturedAt === attachment?.capturedAt) return;
+    // An older answer that arrives late doesn't replace a newer capture.
+    if (attachment !== null && Date.parse(found.capturedAt) < Date.parse(attachment.capturedAt)) return;
+    attachment = found;
+    drawAttachment();
+  }
+
   function started(session) {
     task.value = "";
+    attachment = null;
+    drawAttachment();
     window.close();
     // Still here a moment later: the browser refused to close a window it didn't open.
     setTimeout(() => {
@@ -123,7 +221,7 @@ function start() {
       const { session } = await api("/api/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ workspace, prompt }),
+        body: JSON.stringify(sessionBody(workspace, prompt, attachment)),
       });
       started(session);
     } catch (e) {
@@ -151,6 +249,12 @@ function start() {
       void submit();
       return;
     }
+    if (e.key === "Backspace" && e.altKey && !e.ctrlKey && !e.metaKey) {
+      // Always swallowed: in a text box Alt+Backspace is undo, which would surprise here.
+      e.preventDefault();
+      removeAttachment();
+      return;
+    }
     const position = altDigit(e);
     if (position === null) return;
     e.preventDefault();
@@ -160,6 +264,7 @@ function start() {
 
   task.focus();
   void load();
+  for (const ms of CLIPBOARD_POLLS) setTimeout(() => void pollClipboard(), ms);
 }
 
 if (typeof document !== "undefined") start();

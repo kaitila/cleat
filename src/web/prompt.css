@@ -57,7 +57,46 @@ body { overflow: hidden; }
 .task::placeholder { color: var(--muted); }
 .task:focus-visible { outline: none; border-color: var(--accent); }
 
+/* The clipboard attachment: one quiet row under the task box, a label, the thumbnail or the first
+   lines of the text, and the remove control. */
+.clipboard {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-3);
+  min-width: 0;
+  padding: var(--gap-1) var(--gap-1) var(--gap-1) var(--gap-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  font-size: var(--text-s);
+}
 .clipboard[hidden] { display: none; }
+.clip-label { flex: none; }
+.clip-text {
+  flex: 1;
+  min-width: 0;
+  max-height: calc(var(--gap-4) * 2);
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+}
+.clip-image {
+  max-width: calc(var(--gap-4) * 6);
+  height: calc(var(--gap-4) * 2);
+  margin-right: auto;
+  object-fit: contain;
+  border-radius: var(--radius-s);
+}
+.clip-remove {
+  flex: none;
+  padding: 0 var(--gap-2);
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.clip-remove:hover { color: var(--text); }
 
 .foot {
   display: flex;

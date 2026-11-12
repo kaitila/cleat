@@ -18,8 +18,8 @@ export interface TestRunner extends Runner {
   startSession(prompt: string): Promise<SessionMeta>;
 }
 
-/** `dir` reuses an earlier runner's folders, as a restart does. */
-export function testRunner(options: { dir?: string; driver?: AgentDriver } = {}): TestRunner {
+/** `dir` reuses an earlier runner's folders, as a restart does. `mounts` stands in for /mnt, which CI lacks. */
+export function testRunner(options: { dir?: string; driver?: AgentDriver; mounts?: string } = {}): TestRunner {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), "intuition-runner-"));
   const workspace = join(dir, "work");
   mkdirSync(workspace, { recursive: true });
@@ -34,7 +34,7 @@ export function testRunner(options: { dir?: string; driver?: AgentDriver } = {})
     JSON.stringify({ workspaces: [{ name: "work", path: workspace }, { name: "gone", path: join(dir, "gone") }] }),
   );
   const config = loadConfig(env);
-  const runner = startServer(config, options.driver);
+  const runner = startServer(config, options.driver, options.mounts);
   const get = (path: string) => fetch(runner.url + path);
   const post = (path: string, body: unknown) =>
     fetch(runner.url + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
