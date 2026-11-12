@@ -84,7 +84,7 @@ What nobody has seen. The self-test cannot press keys, click or look at the scre
 `shell start` and `shell stop` were run once by hand on 2026-11-12: the process list showed the shell running after start, still one shell after a second start, and none after stop.
 
 ## Hand-test checklist
-Nobody has gone through this list yet. Steps 10 to 15 are the toasts.
+Steps 10 to 15 are the toasts, which nobody has seen yet.
 
 1. In WSL: `bun run start`, then `bun src/cli.ts shell install` and `bun src/cli.ts shell start`. **See**: a small blue-violet disc in the tray (maybe under the `^` arrow), with the tooltip "intuition". No window.
 2. Copy some text anywhere, then press Ctrl+Alt+Space. **See**: a small window without a title bar in the middle of the screen the mouse is on, above other windows, with the keyboard focus in it. In WSL, `curl http://127.0.0.1:4777/api/clipboard` shows the text (once the runner's clipboard route exists).
