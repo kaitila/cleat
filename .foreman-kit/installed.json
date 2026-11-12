@@ -1,0 +1,28 @@
+{
+  "$comment": "Written by foreman's create, init and sync: the hash of each kit file as installed, so sync can tell the project's changes from the kit's. Delete an entry to let sync restore a file you deleted.",
+  "source": "0.1.0",
+  "preset": "bun-ts-postgres",
+  "pieces": [
+    "docs",
+    "guardrails",
+    "skills",
+    "ci",
+    "test-kit",
+    "design"
+  ],
+  "files": {
+    ".claude/agents/design-critic.md": "f4f0fc0be28ab8250a91925d88bbcfbce0bedb831d9fbe98753374335f169fe5",
+    ".claude/agents/docs-writer.md": "3b038df45e376e9c6a0dcd439d84c2df219dd25f52ba942b7d8437cd35077829",
+    ".claude/agents/reviewer.md": "904ad954ee8f211778326dba1a9f94e678d5a8531027b0393da2039931665cf8",
+    ".claude/agents/test-writer.md": "2c2b491bf2d5178b71538037a6db7035cbdff1cdd9f69d774e5f2b2f7db842d9",
+    ".claude/hooks/guard.ts": "57c7853e9dd4ce69904a83f71fd1308d63ee623e8608e794360f367793b6b761",
+    ".claude/hooks/scope.ts": "34f6bc5b7f85cb6253db549dc8a3be9371c872fbe2d03b4691fa5ac2b044fc05",
+    ".claude/hooks/session-start.ts": "e788cee5486c0253ff787131cb8b75765b0e7ebbb41bc6baacd6379388d4d7ac",
+    ".claude/skills/ship/SKILL.md": "aea4e1ac63b6e46150341c5fa7e8e6a4a9e94a558b89da941ce13cc036c3735b",
+    ".claude/skills/verify/SKILL.md": "8cb360ba3aa8c28de7e7b404c4af1fa901da5b7f1288be215c371672a83c5350"
+  },
+  "hooks": {
+    "PreToolUse: command -v bun >/dev/null 2>&1 || { echo \"guard: bun is not installed, so commands and edits cannot be checked (install it from https://bun.sh)\" >&2; exit 2; }; bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard.ts\"": "10bdcddbade46b83de9573da620f2ac087bba932b5318baab3dc093b008d5b47",
+    "SessionStart: command -v bun >/dev/null 2>&1 || exit 0; bun \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.ts\"": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
