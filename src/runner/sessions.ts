@@ -19,6 +19,11 @@ export function titleOf(prompt: string): string {
   return (prompt.trim().split("\n")[0] ?? "").trim().slice(0, 80);
 }
 
+/** The prompt Claude sees: the task, then the attached image's path for it to read. */
+export function promptWithImage(prompt: string, imagePath?: string): string {
+  return imagePath ? `${prompt}\n\nAttached image (read this file): ${imagePath}` : prompt;
+}
+
 export class Sessions {
   private readonly turns = new Map<string, { abort: AbortController; done: Promise<void> }>();
 
@@ -29,7 +34,7 @@ export class Sessions {
   ) {}
 
   /** Creates the session, stores the prompt as its first event and starts the turn in the background. */
-  start(workspace: Workspace, prompt: string): SessionMeta {
+  start(workspace: Workspace, prompt: string, imagePath?: string): SessionMeta {
     const now = new Date().toISOString();
     const session = this.store.create({
       id: crypto.randomUUID(),
@@ -43,7 +48,7 @@ export class Sessions {
       lastSeq: 0,
     });
     this.store.lastWorkspace = workspace.name;
-    this.begin(session.id, prompt);
+    this.begin(session.id, prompt, imagePath);
     return session;
   }
 
@@ -54,14 +59,18 @@ export class Sessions {
    * runner, since that id is on disk. A session that failed before Claude Code reported an id has
    * no conversation to resume: its turn starts a new one in the same workspace.
    */
-  reply(id: string, prompt: string): SessionMeta {
-    this.begin(id, prompt);
+  reply(id: string, prompt: string, imagePath?: string): SessionMeta {
+    this.begin(id, prompt, imagePath);
     return this.store.get(id)!;
   }
 
-  /** Stores the prompt as a user event, with the session running, and starts its turn. */
-  private begin(id: string, prompt: string): void {
-    this.record(id, { kind: "user", text: prompt }, "running");
+  /**
+   * Stores the prompt as a user event, with the session running, and starts its turn. The event
+   * keeps the text and the image's path apart; the agent gets them as one prompt.
+   */
+  private begin(id: string, text: string, imagePath?: string): void {
+    this.record(id, { kind: "user", text, ...(imagePath ? { imagePath } : {}) }, "running");
+    const prompt = promptWithImage(text, imagePath);
     const abort = new AbortController();
     const entry = {
       abort,

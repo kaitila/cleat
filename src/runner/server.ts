@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import {
   HOST,
+  type ClipboardCapture,
   type ErrorResponse,
   type EventsResponse,
   type ServerMessage,
@@ -11,6 +12,7 @@ import {
   type WorkspacesResponse,
 } from "../shared/protocol";
 import { driverFor, type AgentDriver } from "./agent";
+import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
 import type { Config } from "./config";
 import { Sessions, busy } from "./sessions";
 import { Store } from "./store";
@@ -57,6 +59,9 @@ interface App {
   config: Config;
   store: Store;
   sessions: Sessions;
+  clipboard: Clipboard;
+  /** Where the Windows drives are mounted (/mnt). */
+  mounts: string;
 }
 
 /** The request's JSON body as an object, or null when it isn't one. */
@@ -69,6 +74,11 @@ async function body(req: Request): Promise<Record<string, unknown> | null> {
   }
 }
 
+/** The request's imagePath as a WSL path, undefined without one, or null when it is refused. */
+function imageOf(b: Record<string, unknown>, app: App): string | undefined | null {
+  return b.imagePath === undefined ? undefined : imagePathOf(b.imagePath, app.mounts);
+}
+
 async function startSession(req: Request, app: App): Promise<Response> {
   const b = await body(req);
   if (!b) return fail(400, "the body must be a JSON object");
@@ -77,7 +87,9 @@ async function startSession(req: Request, app: App): Promise<Response> {
   const workspace = app.config.workspaces.find((w) => w.name === b.workspace);
   if (!workspace) return fail(400, `unknown workspace "${b.workspace}"`);
   if (!existsSync(workspace.path)) return fail(400, `the folder of workspace "${workspace.name}" is missing: ${workspace.path}`);
-  return json({ session: app.sessions.start(workspace, b.prompt) } satisfies SessionResponse, 201);
+  const imagePath = imageOf(b, app);
+  if (imagePath === null) return fail(400, NOT_AN_IMAGE);
+  return json({ session: app.sessions.start(workspace, b.prompt, imagePath) } satisfies SessionResponse, 201);
 }
 
 async function reply(req: Request, app: App, id: string): Promise<Response> {
@@ -85,11 +97,27 @@ async function reply(req: Request, app: App, id: string): Promise<Response> {
   const b = await body(req);
   if (!b) return fail(400, "the body must be a JSON object");
   if (typeof b.prompt !== "string" || !b.prompt.trim()) return fail(400, "prompt is empty");
+  const imagePath = imageOf(b, app);
+  if (imagePath === null) return fail(400, NOT_AN_IMAGE);
   // Nothing awaits between this check and the turn starting, so two replies sent at once
   // can't both start one.
   const why = busy(app.store.get(id)!);
   if (why) return fail(409, why);
-  return json({ session: app.sessions.reply(id, b.prompt) } satisfies SessionResponse, 202);
+  return json({ session: app.sessions.reply(id, b.prompt, imagePath) } satisfies SessionResponse, 202);
+}
+
+async function postClipboard(req: Request, app: App): Promise<Response> {
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  const stored = app.clipboard.post(b);
+  return typeof stored === "string" ? fail(400, stored) : json(stored satisfies ClipboardCapture);
+}
+
+/** The latest capture's PNG, for the pop-up's thumbnail. No path is taken from the request. */
+function clipboardImage(app: App): Response {
+  const path = app.clipboard.image();
+  if (path === null) return fail(404, "no image");
+  return new Response(Bun.file(path), { headers: { "content-type": "image/png", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
 
 async function handle(req: Request, app: App): Promise<Response> {
@@ -97,6 +125,7 @@ async function handle(req: Request, app: App): Promise<Response> {
   const path = url.pathname;
   if (req.method === "POST") {
     if (path === "/api/sessions") return startSession(req, app);
+    if (path === "/api/clipboard") return postClipboard(req, app);
     const messages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path);
     if (messages) return reply(req, app, messages[1]!);
   }
@@ -115,6 +144,8 @@ async function handle(req: Request, app: App): Promise<Response> {
       if (raw !== null && !/^\d+$/.test(raw)) return fail(400, "after must be a whole number");
       return json({ events: app.store.events(events[1]!, raw === null ? 0 : Number(raw)) } satisfies EventsResponse);
     }
+    if (path === "/api/clipboard") return json(app.clipboard.get() ?? {});
+    if (path === "/api/clipboard/image") return clipboardImage(app);
     if (path === "/health") return json({ ok: true, version: VERSION });
     if (path === "/") return page("chat.html");
     if (path === "/prompt") return page("prompt.html");
@@ -130,12 +161,15 @@ async function handle(req: Request, app: App): Promise<Response> {
 /** Every WebSocket client is subscribed to this one topic. */
 const TOPIC = "all";
 
-/** Starts the runner. `driver` replaces the agent the config asks for (tests). */
-export function startServer(config: Config, driver: AgentDriver = driverFor(config)): Runner {
+/**
+ * Starts the runner. `driver` replaces the agent the config asks for, and `mounts` the folder the
+ * Windows drives are mounted in (both for tests: CI has no /mnt/c).
+ */
+export function startServer(config: Config, driver: AgentDriver = driverFor(config), mounts = MOUNTS): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
   const sessions = new Sessions(store, driver, send);
-  const app: App = { config, store, sessions };
+  const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), mounts };
   const server = Bun.serve({
     hostname: HOST,
     port: config.port,
