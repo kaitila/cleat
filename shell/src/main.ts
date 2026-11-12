@@ -1,17 +1,20 @@
 // The Windows shell: Electron's main process. It lives in the tray, opens the pop-up on the global
 // hotkey with the clipboard captured, and shows the runner's pages in small windows.
 // Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
+import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, Menu, nativeImage, Notification, screen, session, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
 import { centred, iconBitmap } from "./geometry";
+import { APP_ID, loginItem, type LoginResult } from "./login";
 import type { Notification as RunnerNotification } from "../../src/shared/protocol";
 import { chatUrl, promptUrl, sameOrigin, sessionOf } from "./origin";
 import { parseResponse, POLL_MS, POLL_TIMEOUT_MS, pollUrl, START, step, toastOf } from "./poller";
 import type { SelfTestResult } from "./result";
 import { loadSettings, SETTINGS_FILE, type Settings } from "./settings";
+import { RUNNER_START_MS, runnerCommand } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
 const CHAT = { width: 1100, height: 720 };
@@ -47,10 +50,70 @@ async function runnerAnswers(): Promise<boolean> {
   }
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let starting: Promise<boolean> | null = null;
+
+/**
+ * True once the runner answers. When it does not, the shell starts it in WSL, if `shell install`
+ * wrote where it lives, and waits up to ten seconds. Callers at the same moment share one start.
+ */
+function ensureRunner(): Promise<boolean> {
+  starting ??= (async () => {
+    if (await runnerAnswers()) return true;
+    // The self-test never starts a runner: it has its stub, and checks what happens without one.
+    const wsl = settings.wsl;
+    if (args.selfTest || !wsl) return false;
+    const { file, args: wslArgs } = runnerCommand(wsl, process.env.SystemRoot);
+    // An array of arguments and no shell. windowsHide: wsl.exe is a console program, and no console window may flash.
+    const child = spawn(file, wslArgs, { stdio: "ignore", windowsHide: true, shell: false });
+    child.on("error", (e) => console.error("starting the runner in WSL failed", e));
+    const end = Date.now() + RUNNER_START_MS;
+    while (Date.now() < end) {
+      await sleep(300);
+      if (await runnerAnswers()) return true;
+    }
+    return false;
+  })().finally(() => {
+    starting = null;
+  });
+  return starting;
+}
+
 function runnerDown(): void {
   // The self-test checks that no window opens; it does not put a toast on the person's screen.
   if (args.selfTest) return;
-  notify("intuition: the runner is not running", `Nothing answers at ${settings.runnerUrl}. Start it in WSL: bun run start`);
+  const how = settings.wsl
+    ? "The shell tried to start it in WSL and it did not come up. In WSL: bun src/cli.ts start, and bun src/cli.ts logs"
+    : "Start it in WSL: bun src/cli.ts up";
+  notify("intuition: the runner is not running", `Nothing answers at ${settings.runnerUrl}. ${how}`);
+}
+
+// --- Start on login ---
+
+/** The same executable and arguments for setting and for reading: Electron compares them. */
+function startsOnLogin(): boolean {
+  return app.getLoginItemSettings(loginItem(process.execPath, app.getAppPath())).openAtLogin;
+}
+
+/** Only the tray's checkbox and `--login on|off` come here. */
+function setStartOnLogin(on: boolean): void {
+  app.setLoginItemSettings({ ...loginItem(process.execPath, app.getAppPath()), openAtLogin: on, name: APP_ID });
+}
+
+/** --login on|off|status: does it, writes the outcome, tells a running shell to redraw its menu, and quits. */
+function loginCommand(action: "on" | "off" | "status"): void {
+  let result: LoginResult;
+  try {
+    if (action !== "status") setStartOnLogin(action === "on");
+    result = { openAtLogin: startsOnLogin(), error: null };
+  } catch (e) {
+    result = { openAtLogin: null, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (args.loginResult) writeFileSync(args.loginResult, JSON.stringify(result));
+  // Asking for the lock hands this command line to a running shell: its checkbox follows.
+  app.requestSingleInstanceLock();
+  app.exit(0);
 }
 
 // --- Clipboard ---
@@ -82,6 +145,8 @@ async function captureClipboard(): Promise<{ capture: Capture; posted: boolean }
   const clip = await readClipboard();
   const capture: Capture = clip.kind === "image" ? { kind: "image", path: saveClip(join(app.getPath("temp"), "intuition"), clip.png) } : clip;
   let posted = false;
+  // Read first, posted once the runner is there: the shell may be starting it.
+  if (!(await ensureRunner())) return { capture, posted };
   try {
     const res = await fetch(new URL("/api/clipboard", settings.runnerUrl), {
       method: "POST",
@@ -128,7 +193,7 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
   if (popupOpening) return null;
   popupOpening = true;
   try {
-    if (!(await runnerAnswers())) {
+    if (!(await ensureRunner())) {
       runnerDown();
       return null;
     }
@@ -191,7 +256,7 @@ function newTask(): void {
 
 /** Opens the chat view, on one session when given its id. `inactive`: without taking the focus (the self-test). */
 async function openChat(sessionId?: string, inactive = false): Promise<void> {
-  if (!(await runnerAnswers())) return runnerDown();
+  if (!(await ensureRunner())) return runnerDown();
   const url = chatUrl(settings.runnerUrl, sessionId);
   try {
     if (chat) {
@@ -223,10 +288,31 @@ async function openChat(sessionId?: string, inactive = false): Promise<void> {
 /** The tray's menu. "Open last session" is greyed out until a session has notified. */
 function trayMenu(): Menu {
   const last = pollState.lastSession;
+  let onLogin = false;
+  try {
+    onLogin = startsOnLogin();
+  } catch (e) {
+    console.error("reading start on login failed", e);
+  }
   return Menu.buildFromTemplate([
     { label: "New task", click: newTask },
     { label: "Open chat", click: () => void openChat() },
     { label: "Open last session", enabled: last !== null, click: () => void openChat(last ?? undefined) },
+    { type: "separator" },
+    {
+      label: "Start on login",
+      type: "checkbox",
+      checked: onLogin,
+      click: (item) => {
+        try {
+          setStartOnLogin(item.checked);
+        } catch (e) {
+          notify("intuition: start on login was not changed", e instanceof Error ? e.message : String(e));
+        }
+        // Drawn again from what Windows now says.
+        tray?.setContextMenu(trayMenu());
+      },
+    },
     { type: "separator" },
     { label: "Quit", click: () => app.quit() },
   ]);
@@ -286,15 +372,13 @@ function startPolling(): void {
 
 // --- Self-test ---
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 async function selfTest(): Promise<SelfTestResult> {
   const r: SelfTestResult = {
     hotkeyRegistered: false, trayCreated: false, textCaptured: false, textPosted: false, imageCaptured: false, imagePosted: false,
     imagePath: null, notificationsSupported: false, popupCreated: false, popupWidth: 0, popupHeight: 0, popupUrl: null,
     popupVisible: false, popupCentred: false, foreignNavigationRefused: false, foreignWindowRefused: false, pageClosedPopup: false,
     noWindowWithoutRunner: false, clipboardRestored: false, toastsOnFirstPoll: -1, toastsCreated: -1, toastTitle: null, toastBody: null,
-    toastShown: false, toastError: null, toastOpenedUrl: null, lastSession: null, errors: [],
+    toastShown: false, toastError: null, toastOpenedUrl: null, lastSession: null, loginItemRead: false, openAtLogin: null, errors: [],
   };
   const step = async (name: string, run: () => Promise<void>) => {
     try {
@@ -334,6 +418,11 @@ async function selfTest(): Promise<SelfTestResult> {
     r.clipboardRestored = after.kind === before.kind && (after.kind !== "text" || after.text === (before as { text: string }).text);
   });
   r.notificationsSupported = Notification.isSupported();
+  await step("start on login", async () => {
+    // Read only: nothing in the self-test changes it.
+    r.openAtLogin = startsOnLogin();
+    r.loginItemRead = typeof r.openAtLogin === "boolean";
+  });
 
   await step("popup", async () => {
     const win = await openPopup(true);
@@ -423,7 +512,9 @@ function start(): void {
   if (!globalShortcut.register(settings.hotkey, newTask)) {
     notify("intuition: the hotkey is taken", `${settings.hotkey} could not be registered. Change "hotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
   }
+  // The runner is started here when it is not up: after a login, nobody has started it yet.
   if (args.session) void openChat(args.session);
+  else void ensureRunner().then((up) => (up ? undefined : runnerDown()));
   startPolling();
 }
 
@@ -437,11 +528,16 @@ function shouldRun(): boolean {
   return app.requestSingleInstanceLock() && !args.quit;
 }
 
-if (!shouldRun()) {
+if (args.login) {
+  // Before the single-instance lock: this works beside a running shell. The app id names the login item.
+  const action = args.login;
+  app.setAppUserModelId(APP_ID);
+  void app.whenReady().then(() => loginCommand(action));
+} else if (!shouldRun()) {
   app.exit(0);
 } else {
-  // Windows toasts need an app id.
-  app.setAppUserModelId("intuition");
+  // Windows toasts need an app id, and the login item is named after it.
+  app.setAppUserModelId(APP_ID);
   // The shell stays in the tray when its windows close.
   app.on("window-all-closed", () => {});
   app.on("will-quit", () => globalShortcut.unregisterAll());
@@ -449,6 +545,8 @@ if (!shouldRun()) {
   app.on("second-instance", (_event, argv) => {
     const second = parseArgs(argv);
     if (second.quit) app.quit();
+    // `--login on|off` from the command line: the checkbox is drawn again.
+    else if (second.login) tray?.setContextMenu(trayMenu());
     else void openChat(second.session);
   });
   void app.whenReady().then(start);
