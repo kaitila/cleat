@@ -28,6 +28,20 @@ export interface SelfTestResult {
   /** With no runner answering /health, no pop-up was opened. */
   noWindowWithoutRunner: boolean;
   clipboardRestored: boolean;
+  /** Toasts created by the first poll of /api/notifications (the stub runner had two older ones): 0. */
+  toastsOnFirstPoll: number;
+  /** Toasts created after the second poll, by which the stub runner had recorded one more: 1. */
+  toastsCreated: number;
+  toastTitle: string | null;
+  toastBody: string | null;
+  /** Windows answered show() with the toast's `show` event. Nobody saw it. */
+  toastShown: boolean;
+  /** What came instead of `show`: `failed: <error>`, or `nothing` within three seconds. */
+  toastError: string | null;
+  /** The chat window's URL after the toast's click handler ran. */
+  toastOpenedUrl: string | null;
+  /** The session "Open last session" opens. */
+  lastSession: string | null;
   /** Anything that threw on the way. Empty on a clean run. */
   errors: string[];
 }

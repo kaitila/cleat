@@ -6,11 +6,13 @@ import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
 import { centred, iconBitmap } from "../../shell/src/geometry";
 import { chatUrl, promptUrl, sameOrigin, sessionOf } from "../../shell/src/origin";
+import { MAX_TOASTS, parseResponse, POLL_MS, POLL_TIMEOUT_MS, pollUrl, START, step, toastOf, type PollState } from "../../shell/src/poller";
+import type { Notification } from "../../src/shared/protocol";
 import type { SelfTestResult } from "../../shell/src/result";
 import { DEFAULT_SETTINGS, loadSettings, parseSettings } from "../../shell/src/settings";
 import { buildShell, BUNDLE, wantedElectron } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
-import { problems, selfTestRun, stubRunner } from "../../src/shell/selftest-run";
+import { problems, selfTestRun, STUB_BODY, STUB_SESSION, STUB_TITLE, stubRunner } from "../../src/shell/selftest-run";
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
@@ -167,17 +169,102 @@ describe("geometry and arguments", () => {
   });
 });
 
+describe("the toast poller", () => {
+  const note = (seq: number, sessionId = `s${seq}`): Notification => ({ seq, ts: "2026-11-13T10:00:00.000Z", kind: "finished", sessionId, title: `title ${seq}`, body: `body ${seq}` });
+  const answer = (latest: number, ...seqs: number[]) => ({ latest, notifications: seqs.map((s) => note(s)) });
+
+  test("the first poll sends no `after`, shows nothing and only takes `latest`", () => {
+    expect(pollUrl(RUNNER, START)).toBe("http://127.0.0.1:4777/api/notifications");
+    // The runner answers a poll without `after` with everything it has kept.
+    const first = step(START, answer(7, 5, 6, 7));
+    expect(first.show).toEqual([]);
+    expect(first.state).toEqual({ after: 7, lastSession: null });
+    expect(pollUrl(RUNNER, first.state)).toBe("http://127.0.0.1:4777/api/notifications?after=7");
+    // The same notifications again are still not shown.
+    expect(step(first.state, answer(7, 5, 6, 7)).show).toEqual([]);
+    // A runner with none yet: the next poll asks after 0 and its first notification is shown.
+    const empty = step(START, answer(0));
+    expect(empty).toEqual({ state: { after: 0, lastSession: null }, show: [] });
+    expect(pollUrl(RUNNER, empty.state)).toBe("http://127.0.0.1:4777/api/notifications?after=0");
+    expect(step(empty.state, answer(1, 1)).show.map((n) => n.seq)).toEqual([1]);
+  });
+
+  test("later polls show what is new, oldest first, and ask after the newest", () => {
+    const state: PollState = { after: 7, lastSession: null };
+    expect(step(state, answer(7))).toEqual({ state, show: [] });
+    const next = step(state, answer(9, 9, 8));
+    expect(next.show.map((n) => n.seq)).toEqual([8, 9]);
+    expect(next.state).toEqual({ after: 9, lastSession: "s9" });
+    // Nothing new: the last session stays.
+    expect(step(next.state, answer(9)).state).toEqual({ after: 9, lastSession: "s9" });
+    // One the runner should not have sent is not shown twice.
+    expect(step(next.state, answer(10, 9, 10)).show.map((n) => n.seq)).toEqual([10]);
+  });
+
+  test("a failed poll is silent and the same `after` is asked again", () => {
+    const state: PollState = { after: 4, lastSession: "s4" };
+    expect(step(state, null)).toEqual({ state, show: [] });
+    expect(step(START, null)).toEqual({ state: START, show: [] });
+    // Still the first poll afterwards: nothing replays once the runner answers.
+    expect(step(step(START, null).state, answer(3, 1, 2, 3)).show).toEqual([]);
+  });
+
+  test("a runner that restarted counts from 1 again: what it recorded since is shown", () => {
+    const state: PollState = { after: 50, lastSession: "s50" };
+    const reset = step(state, answer(2));
+    expect(reset).toEqual({ state: { after: 0, lastSession: "s50" }, show: [] });
+    const next = step(reset.state, answer(2, 1, 2));
+    expect(next.show.map((n) => n.seq)).toEqual([1, 2]);
+    expect(next.state).toEqual({ after: 2, lastSession: "s2" });
+  });
+
+  test("a backlog shows only its newest five", () => {
+    const next = step({ after: 0, lastSession: null }, answer(30, ...Array.from({ length: 30 }, (_, i) => i + 1)));
+    expect(MAX_TOASTS).toBe(5);
+    expect(next.show.map((n) => n.seq)).toEqual([26, 27, 28, 29, 30]);
+    expect(next.state).toEqual({ after: 30, lastSession: "s30" });
+  });
+
+  test("the toast: 'intuition: <session title>' and the body", () => {
+    expect(toastOf(note(3))).toEqual({ title: "intuition: title 3", body: "body 3" });
+    expect(toastOf({ title: "  ", body: "b" })).toEqual({ title: "intuition", body: "b" });
+  });
+
+  test("an answer that is not the runner's is no answer, and malformed notifications are left out", () => {
+    for (const bad of [null, "x", [], {}, { latest: "3", notifications: [] }, { latest: 3 }, { latest: -1, notifications: [] }, { latest: 1.5, notifications: [] }, { error: "not found" }]) {
+      expect(`${JSON.stringify(bad)} ${parseResponse(bad)}`).toBe(`${JSON.stringify(bad)} null`);
+    }
+    const parsed = parseResponse({ latest: 4, notifications: [note(3), null, { ...note(4), seq: "4" }, { ...note(4), sessionId: "" }, { ...note(4), kind: "other" }, { ...note(4), title: 7 }, note(4)] });
+    expect(parsed).toEqual({ latest: 4, notifications: [note(3), note(4)] });
+  });
+
+  test("every two seconds, with a timeout shorter than that", () => {
+    expect(POLL_MS).toBe(2000);
+    expect(POLL_TIMEOUT_MS).toBeLessThan(POLL_MS);
+  });
+
+  test("main.ts shows toasts through the poller, sets an app id and has 'Open last session'", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main).toContain("app.setAppUserModelId(");
+    expect(main).toContain('label: "Open last session"');
+    expect(main).toContain("new Notification({ ...toastOf(n)");
+    expect(main).toContain("openChat(n.sessionId");
+  });
+});
+
 describe("self-test runner", () => {
   const imagePath = "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-20261112-090507-042.png";
   const good: SelfTestResult = {
     hotkeyRegistered: true, trayCreated: true, textCaptured: true, textPosted: true, imageCaptured: true, imagePosted: true, imagePath,
     notificationsSupported: true, popupCreated: true, popupWidth: 560, popupHeight: 380, popupUrl: "http://127.0.0.1:5000/prompt",
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
-    noWindowWithoutRunner: true, clipboardRestored: true, errors: [],
+    noWindowWithoutRunner: true, clipboardRestored: true, toastsOnFirstPoll: 0, toastsCreated: 1, toastTitle: `intuition: ${STUB_TITLE}`,
+    toastBody: STUB_BODY, toastShown: true, toastError: null, toastOpenedUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, lastSession: STUB_SESSION, errors: [],
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
   const png = () => Buffer.concat([PNG_SIGNATURE, Buffer.alloc(8)]);
-  const check = (r: Partial<SelfTestResult>, p = posts, read: () => Uint8Array | null = png) => problems(r, p, "http://127.0.0.1:5000", read);
+  const polls: (string | null)[] = [null, "2"];
+  const check = (r: Partial<SelfTestResult>, p = posts, read: () => Uint8Array | null = png, asked = polls) => problems(r, { posts: p, polls: asked }, "http://127.0.0.1:5000", read);
 
   test("a clean result has no problems", () => {
     expect(check(good)).toEqual([]);
@@ -185,7 +272,7 @@ describe("self-test runner", () => {
 
   test("every field is asserted", () => {
     for (const key of Object.keys(good) as (keyof SelfTestResult)[]) {
-      const broken = { ...good, [key]: key === "errors" ? ["boom"] : typeof good[key] === "number" ? 381 : typeof good[key] === "string" ? "C:\\elsewhere" : false };
+      const broken = { ...good, [key]: key === "errors" ? ["boom"] : typeof good[key] === "number" ? 381 : typeof good[key] === "string" || key === "toastError" ? "C:\\elsewhere" : false };
       expect(`${key}: ${check(broken).length > 0}`).toBe(`${key}: true`);
     }
     expect(check({}).length).toBeGreaterThan(10);
@@ -196,6 +283,28 @@ describe("self-test runner", () => {
     expect(check(good, [{ text: "intuition self-test 1" }])).toHaveLength(1);
     expect(check(good, posts, () => null)).toHaveLength(2);
     expect(check(good, posts, () => Buffer.from("BM not a png at all"))).toHaveLength(1);
+    // The polls: the first without `after`, the second after the first's `latest`.
+    for (const asked of [[], [null], ["0", "2"], [null, "0"], [null, "2", "3"]]) expect(`${JSON.stringify(asked)} ${check(good, posts, png, asked).length}`).toBe(`${JSON.stringify(asked)} 1`);
+  });
+
+  test("the stub runner has two old notifications and records one more after its first poll", async () => {
+    const runner = stubRunner();
+    try {
+      const poll = async (query = "") => parseResponse(await (await fetch(`${runner.url}/api/notifications${query}`)).json())!;
+      const first = await poll();
+      expect(first.latest).toBe(2);
+      expect(first.notifications.map((n) => n.seq)).toEqual([1, 2]);
+      const second = await poll("?after=2");
+      expect(second).toMatchObject({ latest: 3, notifications: [{ seq: 3, sessionId: STUB_SESSION, title: STUB_TITLE, body: STUB_BODY }] });
+      expect(await poll("?after=3")).toEqual({ notifications: [], latest: 3 });
+      expect(runner.polls).toEqual([null, "2", "3"]);
+      // The shell's own logic over the same answers: nothing on the first, one toast on the second.
+      const a = step(START, first);
+      expect(a.show).toEqual([]);
+      expect(step(a.state, second).show.map(toastOf)).toEqual([{ title: `intuition: ${STUB_TITLE}`, body: STUB_BODY }]);
+    } finally {
+      await runner.stop();
+    }
   });
 
   test("the stub runner answers what the shell asks and records the clipboard posts", async () => {
