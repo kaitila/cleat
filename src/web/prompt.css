@@ -1,0 +1,81 @@
+/* The pop-up prompt: a 560x380 window with a row of workspaces, the task box and one quiet line.
+   Layout only. Colours and font sizes are the tokens of base.css. */
+body { overflow: hidden; }
+.prompt {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-3);
+  padding: var(--gap-4);
+}
+
+/* Workspaces: real radio buttons (Tab and the arrow keys work), drawn as chips. */
+.workspaces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-2);
+  min-height: calc(var(--gap-4) + var(--gap-2));
+}
+.workspace { position: relative; display: inline-flex; }
+.workspace input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.workspace span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--gap-2);
+  padding: var(--gap-1) var(--gap-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--muted);
+}
+.workspace kbd { color: var(--muted); }
+.workspace input:hover:not(:disabled) + span { border-color: var(--line); }
+.workspace input:checked + span {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}
+.workspace input:checked + span kbd { color: var(--accent); }
+.workspace input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workspace input:disabled { cursor: default; }
+.workspace input:disabled + span { opacity: 0.45; text-decoration: line-through; }
+
+/* The task box takes the room that is left. Its focus is the border, not a ring: it is always focused. */
+.task {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: var(--gap-3);
+  font-size: var(--text-l);
+  line-height: 1.45;
+}
+.task::placeholder { color: var(--muted); }
+.task:focus-visible { outline: none; border-color: var(--accent); }
+
+.clipboard[hidden] { display: none; }
+
+.foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-3);
+  min-height: calc(var(--gap-4) - var(--gap-1) / 2);
+}
+.status {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.status[data-kind="error"] { color: var(--danger); }
+.status a { color: var(--accent); }
+.keys { flex: none; white-space: nowrap; }
+kbd { font-family: var(--mono); font-size: var(--text-s); }
+.keys kbd { margin-left: var(--gap-2); color: var(--text); }
+.keys kbd:first-child { margin-left: 0; }
