@@ -1,12 +1,21 @@
 // The agent driver: what runs one turn of a session. Two implementations: Claude Code through the
 // Agent SDK (agent-claude.ts) and a scripted fake for tests and CI (agent-fake.ts).
-import type { SessionEvent } from "../shared/protocol";
+import type { ApprovalDecision, SessionEvent } from "../shared/protocol";
 import type { Config } from "./config";
 import { claudeDriver } from "./agent-claude";
 import { fakeDriver } from "./agent-fake";
 
 /** A SessionEvent before the store gives it its seq and time. */
 export type NewEvent = SessionEvent extends infer E ? (E extends unknown ? Omit<E, "seq" | "ts"> : never) : never;
+
+/** A tool call the person has to allow or deny. */
+export interface ApprovalAsk {
+  toolUseId?: string;
+  toolName: string;
+  input: unknown;
+  /** Why the call needs approval, when the agent says. */
+  reason?: string;
+}
 
 export interface TurnInput {
   prompt: string;
@@ -16,6 +25,13 @@ export interface TurnInput {
   resume: string | null;
   /** Aborted when the runner stops: the driver ends the turn without more output. */
   signal: AbortSignal;
+  /**
+   * Asks the person to allow or deny a tool call, and waits for the answer: it is shown in the chat
+   * view and resolves from POST /api/sessions/:id/approvals/:approvalId. Nothing else allows a call.
+   * It resolves as "deny" when `signal` (the agent's own, for this call) aborts, when the turn ends
+   * and when the runner stops.
+   */
+  approve(ask: ApprovalAsk, signal?: AbortSignal): Promise<ApprovalDecision>;
 }
 
 export type AgentOutput =

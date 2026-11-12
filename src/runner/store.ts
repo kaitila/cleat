@@ -43,12 +43,22 @@ export class Store {
     this.recover();
   }
 
-  /** A turn that was running when the runner stopped can't continue: it is recorded as failed. */
+  /**
+   * A turn that was running when the runner stopped can't continue: it is recorded as failed.
+   * An approval it left open can't be answered any more: it is recorded as denied.
+   */
   private recover(): void {
     for (const s of this.sessions.values()) {
       if (s.status !== "running" && s.status !== "waiting_approval") continue;
       // The runner may have stopped between storing an event and storing the metadata.
-      s.lastSeq = this.events(s.id).at(-1)?.seq ?? 0;
+      const events = this.events(s.id);
+      s.lastSeq = events.at(-1)?.seq ?? 0;
+      const open = new Set<string>();
+      for (const e of events) {
+        if (e.kind === "approval_request") open.add(e.approvalId);
+        else if (e.kind === "approval_resolved") open.delete(e.approvalId);
+      }
+      for (const approvalId of open) this.append(s.id, { kind: "approval_resolved", approvalId, decision: "deny" });
       this.append(s.id, { kind: "error", message: RESTARTED });
       this.update(s.id, { status: "error" });
     }

@@ -14,7 +14,7 @@ import {
 import { driverFor, type AgentDriver } from "./agent";
 import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
 import type { Config } from "./config";
-import { Sessions, busy } from "./sessions";
+import { NO_APPROVAL, Sessions, busy } from "./sessions";
 import { Store } from "./store";
 
 export const VERSION = "0.1.0";
@@ -106,6 +106,15 @@ async function reply(req: Request, app: App, id: string): Promise<Response> {
   return json({ session: app.sessions.reply(id, b.prompt, imagePath) } satisfies SessionResponse, 202);
 }
 
+async function answerApproval(req: Request, app: App, id: string, approvalId: string): Promise<Response> {
+  if (!app.store.get(id)) return fail(404, "no such session");
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  if (b.decision !== "allow" && b.decision !== "deny") return fail(400, 'decision must be "allow" or "deny"');
+  const session = app.sessions.answer(id, approvalId, b.decision);
+  return session ? json({ session } satisfies SessionResponse) : fail(404, NO_APPROVAL);
+}
+
 async function postClipboard(req: Request, app: App): Promise<Response> {
   const b = await body(req);
   if (!b) return fail(400, "the body must be a JSON object");
@@ -128,6 +137,8 @@ async function handle(req: Request, app: App): Promise<Response> {
     if (path === "/api/clipboard") return postClipboard(req, app);
     const messages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path);
     if (messages) return reply(req, app, messages[1]!);
+    const approval = /^\/api\/sessions\/([^/]+)\/approvals\/([^/]+)$/.exec(path);
+    if (approval) return answerApproval(req, app, approval[1]!, approval[2]!);
   }
   if (req.method === "GET") {
     if (path === "/api/workspaces") {

@@ -5,10 +5,14 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  APPROVAL_MAX_CHARS,
+  APPROVAL_MAX_LINES,
   RESULT_MAX_CHARS,
+  approvalView,
   backoffMs,
   byActivity,
   cutResult,
+  decidedLabel,
   inputText,
   pickSession,
   relativeTime,
@@ -80,6 +84,38 @@ describe("toolSummary", () => {
     expect(inputText("as is")).toBe("as is");
     expect(inputText({ a: 1 }, 2)).toBe('{\n  "a": 1\n}');
     expect(inputText(undefined)).toBe("");
+  });
+});
+
+describe("approvalView", () => {
+  test("Bash: the whole command as it is, however long", () => {
+    const command = `cd /tmp &&\n  rm -rf ${"x".repeat(5000)}`;
+    expect(approvalView("Bash", { command, description: "tidy" })).toEqual({ path: "", text: command, full: command });
+  });
+  test("file tools: the path and a cut preview of the text to be written", () => {
+    expect(approvalView("Write", { file_path: "/w/proof.txt", content: "hi" })).toEqual({ path: "/w/proof.txt", text: "hi", full: "hi" });
+    expect(approvalView("Edit", { file_path: "/w/a.ts", old_string: "x", new_string: "y" })).toEqual({ path: "/w/a.ts", text: "y", full: "y" });
+    expect(approvalView("Read", { file_path: "/etc/hosts" })).toEqual({ path: "/etc/hosts", text: "", full: "" });
+    const long = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
+    const byLines = approvalView("Write", { file_path: "/w/b", content: long });
+    expect(byLines.text.split("\n")).toHaveLength(APPROVAL_MAX_LINES);
+    expect(byLines.full).toBe(long);
+    const wide = approvalView("Write", { file_path: "/w/c", content: "x".repeat(APPROVAL_MAX_CHARS + 50) });
+    expect(wide.text).toHaveLength(APPROVAL_MAX_CHARS);
+  });
+  test("anything else: the input as JSON, cut", () => {
+    expect(approvalView("WebFetch", { url: "https://example.com" })).toEqual({ path: "", text: '{\n  "url": "https://example.com"\n}', full: '{\n  "url": "https://example.com"\n}' });
+    expect(approvalView("Bash", { command: 5 }).text).toBe('{\n  "command": 5\n}');
+    expect(approvalView("Odd", undefined)).toEqual({ path: "", text: "", full: "" });
+    expect(approvalView("Odd", "plain")).toEqual({ path: "", text: "plain", full: "plain" });
+    const big = approvalView("Task", { prompt: "p".repeat(3000) });
+    expect(big.text.length).toBeLessThan(big.full.length);
+  });
+  test("what a decided card says", () => {
+    expect(decidedLabel("allow")).toBe("Allowed");
+    expect(decidedLabel("deny")).toBe("Denied");
+    expect(decidedLabel(undefined)).toBe("Not answered");
+    expect(decidedLabel("constructor")).toBe("Not answered");
   });
 });
 
@@ -158,7 +194,7 @@ describe("the rest of the helpers", () => {
     expect(replyState(undefined).enabled).toBe(false);
     expect(replyState(s("a", "", "running"))).toMatchObject({ enabled: false });
     expect(replyState(s("a", "", "running")).hint).not.toBe("");
-    expect(replyState(s("a", "", "waiting_approval"))).toMatchObject({ enabled: false, hint: "Waiting for approval." });
+    expect(replyState(s("a", "", "waiting_approval"))).toMatchObject({ enabled: false, hint: "Waiting for your Allow or Deny above." });
     expect(replyState(s("a", "", "idle")).enabled).toBe(true);
     expect(replyState(s("a", "", "error")).enabled).toBe(true);
   });

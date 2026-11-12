@@ -1,9 +1,10 @@
 // The real driver's options and its reduction of SDK messages, checked without starting Claude Code.
 import { describe, expect, test } from "bun:test";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { MAX_TOOL_RESULT, NO_APPROVALS, claudeOptions, reduce } from "../../src/runner/agent-claude";
+import type { ApprovalAsk } from "../../src/runner/agent";
+import { DENIED, MAX_TOOL_RESULT, claudeOptions, reduce } from "../../src/runner/agent-claude";
 
-const input = { prompt: "hi", cwd: "/tmp/work", resume: null, signal: new AbortController().signal };
+const input = { prompt: "hi", cwd: "/tmp/work", resume: null, signal: new AbortController().signal, approve: async () => "deny" as const };
 /** Only the fields reduce() reads: the SDK's message types carry many more. */
 const msg = (m: Record<string, unknown>) => ({ parent_tool_use_id: null, session_id: "s1", ...m }) as unknown as SDKMessage;
 
@@ -21,13 +22,23 @@ describe("claudeOptions", () => {
     expect(claudeOptions({ ...input, resume: "abc" }, new AbortController(), () => {}).resume).toBe("abc");
   });
 
-  test("canUseTool denies every call and says approvals are not available yet", async () => {
-    const { canUseTool } = claudeOptions(input, new AbortController(), () => {});
-    for (const tool of ["Bash", "Write", "Read", "mcp__x__y"]) {
-      const answer = await canUseTool!(tool, { command: "rm -rf /" }, { signal: new AbortController().signal, toolUseID: "t1", requestId: "r1" } as Parameters<NonNullable<typeof canUseTool>>[2]);
-      expect(answer).toEqual({ behavior: "deny", message: NO_APPROVALS });
-    }
-    expect(NO_APPROVALS).toContain("not available yet");
+  test("canUseTool asks the person and answers only what they decided", async () => {
+    const asked: { ask: ApprovalAsk; signal?: AbortSignal }[] = [];
+    let decision: "allow" | "deny" = "allow";
+    const { canUseTool } = claudeOptions({ ...input, approve: async (ask, signal) => (asked.push({ ask, signal }), decision) }, new AbortController(), () => {});
+    type CallOptions = Parameters<NonNullable<typeof canUseTool>>[2];
+    const signal = new AbortController().signal;
+    const toolInput = { command: "rm -rf /" };
+    const allowed = await canUseTool!("Bash", toolInput, { signal, toolUseID: "t1", requestId: "r1", decisionReason: "not in the allow list", suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }] } as CallOptions);
+    // The input goes back unchanged, and nothing is ever allowed for later calls.
+    expect(allowed).toEqual({ behavior: "allow", updatedInput: toolInput });
+    expect("updatedPermissions" in allowed!).toBe(false);
+    expect(asked).toEqual([{ ask: { toolUseId: "t1", toolName: "Bash", input: toolInput, reason: "not in the allow list" }, signal }]);
+    decision = "deny";
+    const denied = await canUseTool!("Write", { file_path: "/x" }, { signal, toolUseID: "t2", requestId: "r2" } as CallOptions);
+    expect(denied).toEqual({ behavior: "deny", message: DENIED });
+    expect(DENIED).toBe("The user denied this tool call.");
+    expect(asked[1]!.ask).toEqual({ toolUseId: "t2", toolName: "Write", input: { file_path: "/x" } });
   });
 });
 

@@ -9,7 +9,7 @@
 // contains "red". After 180 seconds it exits 1 and says what it saw. It deletes its files either way.
 //
 // The session's workspace is the image's own new folder, not one under /tmp: a Read of a file
-// outside the workspace needs approval, and until approvals exist the runner denies it. Inside the
+// outside the workspace needs approval, and nobody is here to give it. Inside the
 // workspace Claude Code reads without asking, so this checks the handoff, not the approval.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
