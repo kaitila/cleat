@@ -101,6 +101,8 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   need(r.toastShown && (r.toastError ?? null) === null, `Windows did not answer the toast with its show event: ${r.toastError}`);
   need(r.toastOpenedUrl === `${runnerUrl}/?session=${STUB_SESSION}`, `a click on the toast opened ${r.toastOpenedUrl}, not ${runnerUrl}/?session=${STUB_SESSION}`);
   need(r.lastSession === STUB_SESSION, `"Open last session" would open ${r.lastSession}, not ${STUB_SESSION}`);
+  // Start on login is read and reported, whichever it is. Nothing here sets it.
+  need(r.loginItemRead && typeof r.openAtLogin === "boolean", `start on login could not be read: ${JSON.stringify(r.openAtLogin)}`);
   return bad;
 }
 
@@ -136,6 +138,7 @@ export async function selfTestRun(): Promise<number> {
       for (const b of bad) console.error(`FAILED: ${b}`);
       return 1;
     }
+    console.log(`start on login is ${result.openAtLogin ? "on" : "off"} on this machine (read, not changed)`);
     console.log("the shell's self-test passed");
     return 0;
   } finally {

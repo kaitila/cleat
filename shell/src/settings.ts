@@ -1,12 +1,15 @@
 // The shell's settings: one JSON file in the app's user data folder. No Electron imports here.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { parseWsl, type WslSettings } from "./wsl";
 
 export interface Settings {
   /** Where the runner listens. The shell's windows load only this origin. */
   runnerUrl: string;
   /** An Electron accelerator: opens the pop-up with the clipboard attached. */
   hotkey: string;
+  /** Where the runner lives in WSL, so the shell can start it. Absent until `shell install` has written it. */
+  wsl?: WslSettings;
 }
 
 export const DEFAULT_SETTINGS: Settings = { runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space" };
@@ -34,7 +37,20 @@ export function parseSettings(text: string): Settings {
   return {
     runnerUrl: httpUrl(o.runnerUrl) ?? DEFAULT_SETTINGS.runnerUrl,
     hotkey: typeof o.hotkey === "string" && o.hotkey.trim() ? o.hotkey.trim() : DEFAULT_SETTINGS.hotkey,
+    ...(parseWsl(o.wsl) ? { wsl: parseWsl(o.wsl) } : {}),
   };
+}
+
+/** The settings file's text with `wsl` set and everything else in it kept. Text that is not a JSON object starts from the defaults. */
+export function withWsl(text: string | null, wsl: WslSettings): string {
+  let raw: unknown = null;
+  try {
+    raw = JSON.parse(text ?? "");
+  } catch {
+    // Missing or broken: the defaults.
+  }
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : DEFAULT_SETTINGS;
+  return JSON.stringify({ ...o, wsl }, null, 2) + "\n";
 }
 
 /** Reads the settings file, writing it with the defaults when it does not exist yet. */

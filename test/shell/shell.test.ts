@@ -5,12 +5,14 @@ import { join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
 import { centred, iconBitmap } from "../../shell/src/geometry";
+import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
 import { chatUrl, promptUrl, sameOrigin, sessionOf } from "../../shell/src/origin";
 import { MAX_TOASTS, parseResponse, POLL_MS, POLL_TIMEOUT_MS, pollUrl, START, step, toastOf, type PollState } from "../../shell/src/poller";
 import type { Notification } from "../../src/shared/protocol";
 import type { SelfTestResult } from "../../shell/src/result";
-import { DEFAULT_SETTINGS, loadSettings, parseSettings } from "../../shell/src/settings";
-import { buildShell, BUNDLE, wantedElectron } from "../../src/shell/install";
+import { DEFAULT_SETTINGS, loadSettings, parseSettings, withWsl } from "../../shell/src/settings";
+import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
+import { buildShell, BUNDLE, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
 import { problems, selfTestRun, STUB_BODY, STUB_SESSION, STUB_TITLE, stubRunner } from "../../src/shell/selftest-run";
 
@@ -259,7 +261,7 @@ describe("self-test runner", () => {
     notificationsSupported: true, popupCreated: true, popupWidth: 560, popupHeight: 380, popupUrl: "http://127.0.0.1:5000/prompt",
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
     noWindowWithoutRunner: true, clipboardRestored: true, toastsOnFirstPoll: 0, toastsCreated: 1, toastTitle: `intuition: ${STUB_TITLE}`,
-    toastBody: STUB_BODY, toastShown: true, toastError: null, toastOpenedUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, lastSession: STUB_SESSION, errors: [],
+    toastBody: STUB_BODY, toastShown: true, toastError: null, toastOpenedUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, lastSession: STUB_SESSION, loginItemRead: true, openAtLogin: false, errors: [],
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
   const png = () => Buffer.concat([PNG_SIGNATURE, Buffer.alloc(8)]);
@@ -272,10 +274,16 @@ describe("self-test runner", () => {
 
   test("every field is asserted", () => {
     for (const key of Object.keys(good) as (keyof SelfTestResult)[]) {
-      const broken = { ...good, [key]: key === "errors" ? ["boom"] : typeof good[key] === "number" ? 381 : typeof good[key] === "string" || key === "toastError" ? "C:\\elsewhere" : false };
+      const broken = { ...good, [key]: key === "errors" ? ["boom"] : typeof good[key] === "number" ? 381 : typeof good[key] === "string" || key === "toastError" || key === "openAtLogin" ? "C:\\elsewhere" : false };
       expect(`${key}: ${check(broken).length > 0}`).toBe(`${key}: true`);
     }
     expect(check({}).length).toBeGreaterThan(10);
+  });
+
+  test("start on login is reported, on or off: either passes, and only an unread one fails", () => {
+    expect(check({ ...good, openAtLogin: true })).toEqual([]);
+    expect(check({ ...good, openAtLogin: false })).toEqual([]);
+    expect(check({ ...good, openAtLogin: null })).toHaveLength(1);
   });
 
   test("what the stub runner received and the saved file are asserted too", () => {
@@ -330,6 +338,127 @@ describe("self-test runner", () => {
       if (before === undefined) delete process.env.CI;
       else process.env.CI = before;
     }
+  });
+});
+
+describe("starting the runner from Windows", () => {
+  const wsl = { distro: "Ubuntu", repo: "/root/projects/intuition", bun: "/root/.bun/bin/bun" };
+
+  test("wsl.exe -d <distro> --exec <bun> <repo>/src/cli.ts start --login-env, as an array", () => {
+    expect(runnerCommand(wsl)).toEqual({
+      file: "C:\\Windows\\System32\\wsl.exe",
+      args: ["-d", "Ubuntu", "--exec", "/root/.bun/bin/bun", "/root/projects/intuition/src/cli.ts", "start", "--login-env"],
+    });
+    expect(runnerCommand(wsl, "D:\\WINNT\\").file).toBe("D:\\WINNT\\System32\\wsl.exe");
+    expect(runnerCommand({ ...wsl, repo: "/repo/" }).args[4]).toBe("/repo/src/cli.ts");
+  });
+
+  test("paths with spaces stay one argument each", () => {
+    const { args } = runnerCommand({ distro: "Ubuntu-24.04", repo: "/home/a b/my repo", bun: "/home/a b/.bun/bin/bun" });
+    expect(args).toEqual(["-d", "Ubuntu-24.04", "--exec", "/home/a b/.bun/bin/bun", "/home/a b/my repo/src/cli.ts", "start", "--login-env"]);
+  });
+
+  test("shell characters in a path are data: they stay inside their one argument, and --exec runs no shell", () => {
+    const repo = "/tmp/x; rm -rf ~ && $(id) `id` | \"q\" 'q' > /dev/null #";
+    const { args } = runnerCommand({ ...wsl, repo });
+    expect(args).toHaveLength(7);
+    expect(args[4]).toBe(`${repo}/src/cli.ts`);
+    expect(args.slice(0, 4)).toEqual(["-d", "Ubuntu", "--exec", "/root/.bun/bin/bun"]);
+    expect(args.slice(5)).toEqual(["start", "--login-env"]);
+    // Never the default shell (no --exec, or `--`, `-c`, `bash`), which would read the line as a script.
+    expect(args.filter((a) => a.startsWith("-"))).toEqual(["-d", "--exec", "--login-env"]);
+  });
+
+  test("settings that could be read as options, or are not what they should be, give no command at all", () => {
+    expect(parseWsl(wsl)).toEqual(wsl);
+    expect(parseWsl({ ...wsl, extra: 1 })).toEqual(wsl);
+    for (const bad of [
+      null, "x", [], {},
+      { ...wsl, distro: "--exec" }, { ...wsl, distro: "-u root" }, { ...wsl, distro: "Ubuntu; calc" }, { ...wsl, distro: "a b" }, { ...wsl, distro: "" }, { ...wsl, distro: 7 },
+      { ...wsl, bun: "bun" }, { ...wsl, bun: "--version" }, { ...wsl, bun: "C:\\bun.exe" }, { ...wsl, bun: "/bin/b\nun" }, { ...wsl, bun: undefined },
+      { ...wsl, repo: "~/intuition" }, { ...wsl, repo: "-e" }, { ...wsl, repo: "" }, { ...wsl, repo: "/r\u0000" }, { ...wsl, repo: ["/r"] },
+    ]) {
+      expect(`${JSON.stringify(bad)} ${parseWsl(bad)}`).toBe(`${JSON.stringify(bad)} undefined`);
+    }
+  });
+
+  test("the settings carry it only when it is whole", () => {
+    expect(parseSettings(JSON.stringify({ wsl }))).toEqual({ ...DEFAULT_SETTINGS, wsl });
+    expect(parseSettings(JSON.stringify({ wsl: { ...wsl, distro: "--exec" } }))).toEqual(DEFAULT_SETTINGS);
+    expect("wsl" in parseSettings("{}")).toBe(false);
+  });
+
+  test("`shell install` writes the distribution, the repo and bun into the settings, keeping the rest", () => {
+    expect(runnerLocation({ WSL_DISTRO_NAME: "Ubuntu" }, "/home/a b/repo", "/home/a b/bun")).toEqual({ distro: "Ubuntu", repo: "/home/a b/repo", bun: "/home/a b/bun" });
+    expect(runnerLocation({ WSL_DISTRO_NAME: "Ubuntu" })).toEqual({ distro: "Ubuntu", repo: REPO, bun: process.execPath });
+    expect(runnerLocation({})).toBeUndefined();
+
+    const file = join(dir, "roaming", "intuition-shell", "settings.json");
+    const lines: string[] = [];
+    expect(writeRunnerLocation(file, wsl, (l) => lines.push(l))).toBe(true);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...DEFAULT_SETTINGS, wsl });
+    expect(loadSettings(file)).toEqual({ ...DEFAULT_SETTINGS, wsl });
+    expect(lines).toHaveLength(1);
+
+    writeFileSync(file, JSON.stringify({ hotkey: "Alt+F9", mine: true, wsl: { distro: "Old", repo: "/old", bun: "/old/bun" } }));
+    expect(writeRunnerLocation(file, wsl, () => {})).toBe(true);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ hotkey: "Alt+F9", mine: true, wsl });
+    // Nothing to change: nothing is written or said.
+    expect(writeRunnerLocation(file, wsl, (l) => lines.push(l))).toBe(true);
+    expect(lines).toHaveLength(1);
+
+    // No distribution name: the file is left alone.
+    const before = readFileSync(file, "utf8");
+    expect(writeRunnerLocation(file, null, () => {})).toBe(false);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(JSON.parse(withWsl("not json", wsl))).toEqual({ ...DEFAULT_SETTINGS, wsl });
+    expect(JSON.parse(withWsl("[1]", wsl))).toEqual({ ...DEFAULT_SETTINGS, wsl });
+  });
+
+  test("main.ts spawns that command without a shell or a window, and waits ten seconds", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(RUNNER_START_MS).toBe(10_000);
+    expect(main).toContain("spawn(file, wslArgs, { stdio: \"ignore\", windowsHide: true, shell: false })");
+    expect(main.match(/\bspawn\(/g)).toHaveLength(1);
+    expect(main).not.toMatch(/\bexec(Sync|File|FileSync)?\(/);
+    // The self-test never starts a runner.
+    expect(main).toContain("if (args.selfTest || !wsl) return false;");
+  });
+});
+
+describe("start on login", () => {
+  test("the login item: electron.exe on the quoted app folder", () => {
+    const exe = "C:\\Users\\A B\\AppData\\Local\\intuition\\shell\\node_modules\\electron\\dist\\electron.exe";
+    const appFolder = "C:\\Users\\A B\\AppData\\Local\\intuition\\shell";
+    expect(loginItem(exe, appFolder)).toEqual({ path: exe, args: [`"${appFolder}"`] });
+    expect(APP_ID).toBe("intuition");
+  });
+
+  test("--login takes on, off or status, and nothing else", () => {
+    expect(parseArgs(["e", "app", "--login", "on", "--login-result", "C:\\r.json"])).toMatchObject({ login: "on", loginResult: "C:\\r.json" });
+    expect(parseArgs(["e", "app", "--login", "off"]).login).toBe("off");
+    expect(parseArgs(["e", "app", "--login", "status"]).login).toBe("status");
+    for (const bad of ["yes", "ON", "", undefined]) expect(parseLogin(bad)).toBeUndefined();
+    expect(parseArgs(["e", "app", "--login"]).login).toBeUndefined();
+    expect(parseArgs(["e", "app"]).login).toBeUndefined();
+  });
+
+  test("only the tray's checkbox and --login set it; the self-test and the scripts only read", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main.match(/setLoginItemSettings\(/g)).toHaveLength(1);
+    // The function itself, the checkbox's click, and --login on|off.
+    expect(main.match(/setStartOnLogin\(/g)).toHaveLength(3);
+    expect(main).toContain("setStartOnLogin(item.checked)");
+    expect(main).toContain('if (action !== "status") setStartOnLogin(action === "on");');
+    const selfTest = main.slice(main.indexOf("async function selfTest()"), main.indexOf("// --- Start ---"));
+    expect(selfTest).toContain("startsOnLogin()");
+    expect(selfTest).not.toMatch(/setStartOnLogin|setLoginItemSettings/);
+    expect(main).toContain('label: "Start on login"');
+    // Outside the shell, only `shell login` in the command line passes --login, with the word the person typed.
+    const sources = Bun.spawnSync(["git", "grep", "-l", "-e", "--login\"", "--", "src", "scripts", "test"], { cwd: REPO }).stdout.toString().trim().split("\n");
+    expect(sources.sort()).toEqual(["src/shell/install.ts", "test/shell/shell.test.ts"]);
+    const selfTestRun = readFileSync(join(REPO, "src", "shell", "selftest-run.ts"), "utf8");
+    expect(selfTestRun).not.toMatch(/--login|login\(/);
   });
 });
 

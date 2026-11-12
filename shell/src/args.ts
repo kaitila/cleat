@@ -1,4 +1,5 @@
 // The shell's command line. No Electron imports here.
+import { parseLogin } from "./login";
 
 export interface Args {
   /** --self-test <result file>: run the self-test, write its JSON there, quit. */
@@ -9,6 +10,10 @@ export interface Args {
   session?: string;
   /** --quit: ask the running shell to quit. */
   quit: boolean;
+  /** --login on|off|status: set or read start on login, write the outcome to --login-result, quit. */
+  login?: "on" | "off" | "status";
+  /** --login-result <file>: where --login writes its JSON (a LoginResult). */
+  loginResult?: string;
 }
 
 export function parseArgs(argv: string[]): Args {
@@ -16,5 +21,5 @@ export function parseArgs(argv: string[]): Args {
     const v = argv[argv.indexOf(flag) + 1];
     return argv.includes(flag) && v !== undefined && !v.startsWith("--") ? v : undefined;
   };
-  return { selfTest: value("--self-test"), runnerUrl: value("--runner-url"), session: value("--session"), quit: argv.includes("--quit") };
+  return { selfTest: value("--self-test"), runnerUrl: value("--runner-url"), session: value("--session"), quit: argv.includes("--quit"), login: parseLogin(value("--login")), loginResult: value("--login-result") };
 }

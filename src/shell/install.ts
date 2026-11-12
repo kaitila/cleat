@@ -1,7 +1,10 @@
 // Installing, starting and stopping the Windows shell from WSL.
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { hasWindows, SHELL_SRC, type ShellPaths, shellPaths, toWindows } from "./paths";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import type { LoginResult } from "../../shell/src/login";
+import { withWsl } from "../../shell/src/settings";
+import { parseWsl, type WslSettings } from "../../shell/src/wsl";
+import { hasWindows, REPO, settingsFile, SHELL_SRC, type ShellPaths, shellPaths, toWindows } from "./paths";
 
 export const BUNDLE = "main.cjs";
 /** Electron is fetched for Windows although npm and node run in WSL. */
@@ -64,11 +67,35 @@ export async function install(paths = shellPaths(), log: (line: string) => void 
   log(`Electron ${wanted}: ${paths.electronExe}`);
 }
 
+/** True when Electron and the bundle are in the app folder. */
+export function isInstalled(paths: ShellPaths): boolean {
+  return existsSync(paths.electronExe) && existsSync(join(paths.app, BUNDLE));
+}
+
 function needInstalled(paths: ShellPaths): void {
   needWindows();
-  if (!existsSync(paths.electronExe) || !existsSync(join(paths.app, BUNDLE))) {
-    throw new Error("the shell is not installed: run `bun src/cli.ts shell install`");
+  if (!isInstalled(paths)) throw new Error("the shell is not installed: run `bun src/cli.ts shell install`");
+}
+
+/** Where the runner lives, for the shell to start it: this distribution, this repo and the bun running this command. */
+export function runnerLocation(env: Record<string, string | undefined> = process.env, repo = REPO, bun = process.execPath): WslSettings | undefined {
+  return parseWsl({ distro: env.WSL_DISTRO_NAME, repo, bun });
+}
+
+/** Writes `wsl` into the shell's settings file, keeping what else is there. Returns false when there is nothing usable to write. */
+export function writeRunnerLocation(file = settingsFile(), wsl: WslSettings | null = runnerLocation() ?? null, log: (line: string) => void = console.log): boolean {
+  if (!wsl) {
+    log("WSL_DISTRO_NAME is not set, or the repo's or bun's path is unusable: the shell will not be able to start the runner itself");
+    return false;
   }
+  const before = existsSync(file) ? readFileSync(file, "utf8") : null;
+  const after = withWsl(before, wsl);
+  if (after !== before) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, after);
+    log(`settings: ${file} (the shell starts the runner with ${wsl.bun} ${join(wsl.repo, "src", "cli.ts")} start, in ${wsl.distro})`);
+  }
+  return true;
 }
 
 /** electron.exe on the app folder with extra arguments, run from a Windows folder. */
@@ -85,4 +112,25 @@ export function start(paths = shellPaths()): void {
 /** Asks the running shell to quit: a second copy hands it --quit and exits. Does nothing when none runs. */
 export async function stop(paths = shellPaths()): Promise<void> {
   await electron(paths, ["--quit"]).exited;
+}
+
+/**
+ * Start on login: runs the shell's exe with --login on|off|status and returns what it wrote.
+ * `on` and `off` change this Windows user's login items; `status` only reads.
+ */
+export async function login(action: "on" | "off" | "status", paths = shellPaths()): Promise<LoginResult> {
+  const resultFile = join(paths.home, "login-result.json");
+  rmSync(resultFile, { force: true });
+  const shell = electron(paths, ["--login", action, "--login-result", toWindows(resultFile)]);
+  const timer = setTimeout(() => shell.kill(), 30_000);
+  await shell.exited;
+  clearTimeout(timer);
+  try {
+    if (!existsSync(resultFile)) throw new Error("the shell wrote no answer: an older bundle may be installed (run `bun src/cli.ts shell install`)");
+    const result = JSON.parse(readFileSync(resultFile, "utf8")) as LoginResult;
+    if (result.error || typeof result.openAtLogin !== "boolean") throw new Error(`the shell could not ${action === "status" ? "read" : "set"} start on login: ${result.error}`);
+    return result;
+  } finally {
+    rmSync(resultFile, { force: true });
+  }
 }

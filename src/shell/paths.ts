@@ -1,6 +1,7 @@
 // Where the Windows shell lives, seen from WSL. Windows is asked through cmd.exe; wslpath converts.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { SETTINGS_FILE } from "../../shell/src/settings";
 
 export const REPO = join(import.meta.dir, "..", "..");
 export const SHELL_SRC = join(REPO, "shell");
@@ -24,13 +25,24 @@ export function toWindows(wslPath: string): string {
   return run(["wslpath", "-w", wslPath]);
 }
 
-/** The Windows user's LocalAppData folder, as a WSL path. */
-export function localAppData(): string {
+/** A folder the Windows user's environment names, as a WSL path. */
+function windowsFolder(variable: "LOCALAPPDATA" | "APPDATA"): string {
   const cmd = Bun.which("cmd.exe") ?? "/mnt/c/Windows/System32/cmd.exe";
   // Started from a Windows folder: cmd.exe complains about a \\wsl.localhost working directory.
-  const answer = run([cmd, "/d", "/c", "echo %LOCALAPPDATA%"], "/mnt/c");
-  if (!/^[A-Za-z]:\\/.test(answer)) throw new Error(`cmd.exe did not give LocalAppData: ${answer}`);
+  const answer = run([cmd, "/d", "/c", `echo %${variable}%`], "/mnt/c");
+  if (!/^[A-Za-z]:\\/.test(answer)) throw new Error(`cmd.exe did not give ${variable}: ${answer}`);
   return toWsl(answer);
+}
+
+/** The Windows user's LocalAppData folder, as a WSL path. */
+export function localAppData(): string {
+  return windowsFolder("LOCALAPPDATA");
+}
+
+/** The shell's settings file, as a WSL path: Electron's user data folder is <AppData>\\<the name in shell/package.json>. */
+export function settingsFile(): string {
+  const name = JSON.parse(readFileSync(join(SHELL_SRC, "package.json"), "utf8")).name as string;
+  return join(windowsFolder("APPDATA"), name, SETTINGS_FILE);
 }
 
 export interface ShellPaths {

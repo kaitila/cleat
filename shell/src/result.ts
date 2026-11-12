@@ -42,6 +42,10 @@ export interface SelfTestResult {
   toastOpenedUrl: string | null;
   /** The session "Open last session" opens. */
   lastSession: string | null;
+  /** app.getLoginItemSettings answered. The self-test only reads start on login; it never sets it. */
+  loginItemRead: boolean;
+  /** What it answered: whether the shell starts on login on this machine. Reported, not judged. */
+  openAtLogin: boolean | null;
   /** Anything that threw on the way. Empty on a clean run. */
   errors: string[];
 }
