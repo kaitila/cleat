@@ -21,7 +21,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 | `GET /api/sessions` | | `SessionsResponse`, newest first |
 | `POST /api/sessions` | `StartSessionRequest` | 201 `SessionResponse`. The turn runs in the background. Remembers the workspace as last used. |
 | `GET /api/sessions/:id/events?after=<seq>` | | `EventsResponse`: stored events with a higher seq (all without `after`) |
-| `POST /api/sessions/:id/messages` | `ReplyRequest` | 202 `SessionResponse`. Resumes the Claude Code session. 409 while a turn runs. |
+| `POST /api/sessions/:id/messages` | `ReplyRequest` | 202 `SessionResponse`, the session `running`. Stores the reply as a `user` event and runs a turn in the background that resumes the Claude Code session. 404 for an unknown session, 400 for an empty prompt, 409 while a turn runs or an approval is open. A session in `error` takes a reply too: it resumes its conversation, or starts a new one in the same workspace when it never got a Claude Code session id. |
 | `POST /api/sessions/:id/approvals/:approvalId` | `ApprovalRequest` | 200 `SessionResponse`. 404 for an unknown or already answered approval. |
 | `GET /api/clipboard` | | The latest `ClipboardCapture`, or `{}` |
 | `POST /api/clipboard` | `ClipboardPostRequest` | 200 the stored `ClipboardCapture`. Sent by the Windows shell on the hotkey. |

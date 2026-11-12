@@ -4,6 +4,10 @@
 //   1. It reports a made-up Claude Code session id, `fake-<uuid>` (or the id it was asked to resume).
 //   2. A prompt containing "use tool" gets a `tool_use` (Bash, `echo fake`) and its `tool_result` ("fake").
 //   3. It answers `You said: <prompt>`, streamed as three deltas, then stored as one `assistant_text`.
+//      It remembers each conversation's prompts by that session id, so a prompt containing
+//      "what did I say first" is answered with `You said first: <the conversation's first prompt>`:
+//      a reply that resumes the conversation gets the first turn's prompt, a new conversation gets
+//      its own. The memory is the process's, as Claude Code's transcripts outlive the runner.
 //   4. A prompt containing "fail" then ends in an `error` event ("the fake agent failed");
 //      any other prompt ends in a `result` with ok true.
 //
@@ -16,11 +20,24 @@ export function fakeReply(prompt: string): string {
   return `You said: ${prompt}`;
 }
 
+export const ASK_FIRST = "what did I say first";
+
+export function fakeFirst(firstPrompt: string): string {
+  return `You said first: ${firstPrompt}`;
+}
+
+/** Each fake conversation's prompts, by its fake Claude Code session id. */
+const conversations = new Map<string, string[]>();
+
 export function fakeDriver(stepMs = 5): AgentDriver {
   return {
     async *run(input: TurnInput): AsyncIterable<AgentOutput> {
       const started = Date.now();
-      const steps: AgentOutput[] = [{ type: "session_id", id: input.resume ?? `fake-${crypto.randomUUID()}` }];
+      const id = input.resume ?? `fake-${crypto.randomUUID()}`;
+      const prompts = conversations.get(id) ?? [];
+      conversations.set(id, prompts);
+      prompts.push(input.prompt);
+      const steps: AgentOutput[] = [{ type: "session_id", id }];
       if (input.prompt.includes("use tool")) {
         const toolUseId = `fake-tool-${crypto.randomUUID()}`;
         steps.push(
@@ -28,7 +45,7 @@ export function fakeDriver(stepMs = 5): AgentDriver {
           { type: "event", event: { kind: "tool_result", toolUseId, content: "fake", isError: false } },
         );
       }
-      const text = fakeReply(input.prompt);
+      const text = input.prompt.toLowerCase().includes(ASK_FIRST.toLowerCase()) ? fakeFirst(prompts[0]!) : fakeReply(input.prompt);
       const size = Math.ceil(text.length / 3);
       for (let i = 0; i < text.length; i += size) steps.push({ type: "delta", text: text.slice(i, i + size) });
       steps.push({ type: "event", event: { kind: "assistant_text", text } });

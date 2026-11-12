@@ -1,10 +1,19 @@
-// Starts sessions and runs their turns in the background: every output of the agent driver is
-// stored (events) or passed on (deltas), and sent to the WebSocket clients.
+// Starts sessions, continues them with replies, and runs their turns in the background: every
+// output of the agent driver is stored (events) or passed on (deltas), and sent to the WebSocket clients.
 import type { ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
 import type { AgentDriver, NewEvent } from "./agent";
 import type { Store } from "./store";
 
 export const NO_RESULT = "the turn ended without a result";
+export const BUSY = "a turn is running: wait for it to finish";
+export const APPROVAL_OPEN = "an approval is open: answer it first";
+
+/** Why a session can't take a reply now, or null. Only an idle or failed session can. */
+export function busy(session: SessionMeta): string | null {
+  if (session.status === "running") return BUSY;
+  if (session.status === "waiting_approval") return APPROVAL_OPEN;
+  return null;
+}
 
 export function titleOf(prompt: string): string {
   return (prompt.trim().split("\n")[0] ?? "").trim().slice(0, 80);
@@ -34,11 +43,35 @@ export class Sessions {
       lastSeq: 0,
     });
     this.store.lastWorkspace = workspace.name;
-    this.record(session.id, { kind: "user", text: prompt });
-    const abort = new AbortController();
-    const done = this.turn(session.id, prompt, abort.signal).finally(() => this.turns.delete(session.id));
-    this.turns.set(session.id, { abort, done });
+    this.begin(session.id, prompt);
     return session;
+  }
+
+  /**
+   * Continues a session that is idle or in error (the caller checks with busy()): stores the reply
+   * as a user event, sets the session running and starts a turn in the background. The turn resumes
+   * Claude Code's conversation when the session has a claudeSessionId, also after a restart of the
+   * runner, since that id is on disk. A session that failed before Claude Code reported an id has
+   * no conversation to resume: its turn starts a new one in the same workspace.
+   */
+  reply(id: string, prompt: string): SessionMeta {
+    this.begin(id, prompt);
+    return this.store.get(id)!;
+  }
+
+  /** Stores the prompt as a user event, with the session running, and starts its turn. */
+  private begin(id: string, prompt: string): void {
+    this.record(id, { kind: "user", text: prompt }, "running");
+    const abort = new AbortController();
+    const entry = {
+      abort,
+      // A turn's last event sets the status before this runs, so a quick reply may already have
+      // put the next turn in the map: only the turn's own entry is removed.
+      done: this.turn(id, prompt, abort.signal).finally(() => {
+        if (this.turns.get(id) === entry) this.turns.delete(id);
+      }),
+    };
+    this.turns.set(id, entry);
   }
 
   /** Stores an event and tells the clients: the event, then the session with its new lastSeq. */
