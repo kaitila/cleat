@@ -1,0 +1,372 @@
+// The Windows shell: Electron's main process. It lives in the tray, opens the pop-up on the global
+// hotkey with the clipboard captured, and shows the runner's pages in small windows.
+// Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, Menu, nativeImage, Notification, screen, session, Tray } from "electron";
+import { parseArgs } from "./args";
+import { type Capture, captureBody, isPng, saveClip } from "./clip";
+import { centred, iconBitmap } from "./geometry";
+import { chatUrl, promptUrl, sameOrigin, sessionOf } from "./origin";
+import type { SelfTestResult } from "./result";
+import { loadSettings, SETTINGS_FILE, type Settings } from "./settings";
+
+const POPUP = { width: 560, height: 380 };
+const CHAT = { width: 1100, height: 720 };
+const ICON_SIZE = 32;
+/** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
+const SELF_TEST_HOTKEY = "Control+Alt+Shift+F11";
+/** Pages get no Node, no preload, and their own sandboxed process. */
+const WEB_PREFERENCES = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } as const;
+
+const args = parseArgs(process.argv);
+let settings: Settings;
+let tray: Tray | null = null;
+let popup: BrowserWindow | null = null;
+let popupOpening = false;
+let chat: BrowserWindow | null = null;
+
+type Clip = { kind: "image"; png: Buffer } | { kind: "text"; text: string } | { kind: "empty" };
+
+function icon() {
+  return nativeImage.createFromBitmap(iconBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE });
+}
+
+function notify(title: string, body: string): void {
+  if (Notification.isSupported()) new Notification({ title, body, icon: icon() }).show();
+  else console.error(`${title}: ${body}`);
+}
+
+async function runnerAnswers(): Promise<boolean> {
+  try {
+    return (await fetch(new URL("/health", settings.runnerUrl), { signal: AbortSignal.timeout(1500) })).ok;
+  } catch {
+    return false;
+  }
+}
+
+function runnerDown(): void {
+  // The self-test checks that no window opens; it does not put a toast on the person's screen.
+  if (args.selfTest) return;
+  notify("intuition: the runner is not running", `Nothing answers at ${settings.runnerUrl}. Start it in WSL: bun run start`);
+}
+
+// --- Clipboard ---
+
+async function readClipboard(): Promise<Clip> {
+  try {
+    for (const item of await clipboard.read()) {
+      const type = item.types.includes("image/png") ? "image/png" : item.types.find((t) => t.startsWith("image/"));
+      if (!type) continue;
+      const data = Buffer.from(await ((await item.getType(type)) as Blob).arrayBuffer());
+      const png = isPng(data) ? data : nativeImage.createFromBuffer(data).toPNG();
+      if (isPng(png)) return { kind: "image", png };
+    }
+  } catch (e) {
+    console.error("reading the clipboard's image failed", e);
+  }
+  const text = await clipboard.readText().catch(() => "");
+  return text ? { kind: "text", text } : { kind: "empty" };
+}
+
+async function writeClipboard(clip: Clip): Promise<void> {
+  if (clip.kind === "image") await clipboard.write([new ClipboardItem({ "image/png": new Blob([new Uint8Array(clip.png)], { type: "image/png" }) })]);
+  else if (clip.kind === "text") await clipboard.writeText(clip.text);
+  else clipboard.clear();
+}
+
+/** Reads the clipboard, saves an image as a PNG in the temp folder, and posts the capture to the runner. */
+async function captureClipboard(): Promise<{ capture: Capture; posted: boolean }> {
+  const clip = await readClipboard();
+  const capture: Capture = clip.kind === "image" ? { kind: "image", path: saveClip(join(app.getPath("temp"), "intuition"), clip.png) } : clip;
+  let posted = false;
+  try {
+    const res = await fetch(new URL("/api/clipboard", settings.runnerUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(captureBody(capture)),
+      signal: AbortSignal.timeout(3000),
+    });
+    posted = res.ok;
+  } catch (e) {
+    console.error("posting the clipboard failed", e);
+  }
+  return { capture, posted };
+}
+
+// --- Windows ---
+
+/** Every page stays on the runner's origin: other navigations and all new windows are refused. */
+function guard(): void {
+  app.on("web-contents-created", (_event, contents) => {
+    const stay = (event: { preventDefault(): void; url: string }) => {
+      if (!sameOrigin(event.url, settings.runnerUrl)) event.preventDefault();
+    };
+    contents.on("will-navigate", stay);
+    contents.on("will-redirect", stay);
+    contents.on("will-attach-webview", (event) => event.preventDefault());
+    contents.setWindowOpenHandler(({ url }) => {
+      // A link to the runner's own chat view opens in the chat window; nothing else opens.
+      if (sameOrigin(url, settings.runnerUrl) && new URL(url).pathname === "/") void openChat(sessionOf(url));
+      return { action: "deny" };
+    });
+  });
+  // Pages may copy to the clipboard; every other permission (camera, location, notifications...) is refused.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
+    callback(permission === "clipboard-sanitized-write" && sameOrigin(contents.getURL(), settings.runnerUrl));
+  });
+}
+
+/** Opens the pop-up on the display under the cursor, or focuses it when it is already up. */
+async function openPopup(inactive = false): Promise<BrowserWindow | null> {
+  if (popup && popup.isVisible()) {
+    popup.focus();
+    return popup;
+  }
+  if (popupOpening) return null;
+  popupOpening = true;
+  try {
+    if (!(await runnerAnswers())) {
+      runnerDown();
+      return null;
+    }
+    if (!popup) {
+      const win = new BrowserWindow({
+        ...POPUP,
+        show: false,
+        frame: false,
+        maximizable: false,
+        minimizable: false,
+        fullscreenable: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        title: "intuition",
+        webPreferences: WEB_PREFERENCES,
+      });
+      win.on("closed", () => {
+        if (popup === win) popup = null;
+      });
+      // Fixed in size by refusing the drag, not with resizable: false: on this machine (Electron 45, a display
+      // scaled to 200%) a frameless window made that way grew a pixel taller every time it was moved.
+      win.on("will-resize", (event) => event.preventDefault());
+      // The self-test shows the pop-up without focus, so a blur there means nothing.
+      if (!args.selfTest) win.on("blur", () => win.hide());
+      win.webContents.on("before-input-event", (event, input) => {
+        if (input.type === "keyDown" && input.key === "Escape") {
+          event.preventDefault();
+          win.hide();
+        }
+      });
+      popup = win;
+    }
+    const win = popup;
+    const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    win.setBounds({ ...centred(area, POPUP.width, POPUP.height), ...POPUP });
+    // Loaded afresh each time, so the page starts empty and reads the new capture.
+    await win.loadURL(promptUrl(settings.runnerUrl));
+    if (win.isDestroyed()) return null;
+    if (inactive) win.showInactive();
+    else {
+      win.show();
+      win.focus();
+    }
+    return win;
+  } catch (e) {
+    console.error("opening the pop-up failed", e);
+    popup?.destroy();
+    runnerDown();
+    return null;
+  } finally {
+    popupOpening = false;
+  }
+}
+
+/** The hotkey and "New task": the capture and the pop-up start together, neither waiting for the other. */
+function newTask(): void {
+  void captureClipboard().catch((e) => console.error("capturing the clipboard failed", e));
+  void openPopup();
+}
+
+async function openChat(sessionId?: string): Promise<void> {
+  if (!(await runnerAnswers())) return runnerDown();
+  const url = chatUrl(settings.runnerUrl, sessionId);
+  try {
+    if (chat) {
+      if (sessionId) await chat.loadURL(url);
+      if (chat.isMinimized()) chat.restore();
+      chat.show();
+      chat.focus();
+      return;
+    }
+    const win = new BrowserWindow({ ...CHAT, show: false, title: "intuition", icon: icon(), autoHideMenuBar: true, webPreferences: WEB_PREFERENCES });
+    win.on("closed", () => {
+      if (chat === win) chat = null;
+    });
+    chat = win;
+    await win.loadURL(url);
+    if (win.isDestroyed()) return;
+    win.show();
+    win.focus();
+  } catch (e) {
+    console.error("opening the chat failed", e);
+    chat?.destroy();
+    runnerDown();
+  }
+}
+
+function createTray(): Tray {
+  const t = new Tray(icon());
+  t.setToolTip("intuition");
+  t.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "New task", click: newTask },
+      { label: "Open chat", click: () => void openChat() },
+      { type: "separator" },
+      { label: "Quit", click: () => app.quit() },
+    ]),
+  );
+  t.on("double-click", () => void openChat());
+  return t;
+}
+
+// --- Self-test ---
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function selfTest(): Promise<SelfTestResult> {
+  const r: SelfTestResult = {
+    hotkeyRegistered: false, trayCreated: false, textCaptured: false, textPosted: false, imageCaptured: false, imagePosted: false,
+    imagePath: null, notificationsSupported: false, popupCreated: false, popupWidth: 0, popupHeight: 0, popupUrl: null,
+    popupVisible: false, popupCentred: false, foreignNavigationRefused: false, foreignWindowRefused: false, pageClosedPopup: false,
+    noWindowWithoutRunner: false, clipboardRestored: false, errors: [],
+  };
+  const step = async (name: string, run: () => Promise<void>) => {
+    try {
+      await run();
+    } catch (e) {
+      r.errors.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  const before = await readClipboard();
+
+  await step("hotkey", async () => {
+    r.hotkeyRegistered = globalShortcut.register(SELF_TEST_HOTKEY, () => {}) && globalShortcut.isRegistered(SELF_TEST_HOTKEY);
+    globalShortcut.unregister(SELF_TEST_HOTKEY);
+  });
+  await step("tray", async () => {
+    const t = createTray();
+    r.trayCreated = !t.isDestroyed();
+    t.destroy();
+  });
+  await step("text", async () => {
+    const marker = `intuition self-test ${Date.now()}`;
+    await clipboard.writeText(marker);
+    const { capture, posted } = await captureClipboard();
+    r.textCaptured = capture.kind === "text" && capture.text === marker;
+    r.textPosted = posted;
+  });
+  await step("image", async () => {
+    await writeClipboard({ kind: "image", png: icon().toPNG() });
+    const { capture, posted } = await captureClipboard();
+    r.imageCaptured = capture.kind === "image";
+    r.imagePath = capture.kind === "image" ? capture.path : null;
+    r.imagePosted = posted;
+  });
+  await step("restore", async () => {
+    await writeClipboard(before);
+    const after = await readClipboard();
+    r.clipboardRestored = after.kind === before.kind && (after.kind !== "text" || after.text === (before as { text: string }).text);
+  });
+  r.notificationsSupported = Notification.isSupported();
+
+  await step("popup", async () => {
+    const win = await openPopup(true);
+    if (!win) throw new Error("the pop-up did not open");
+    r.popupCreated = true;
+    const bounds = win.getBounds();
+    r.popupWidth = bounds.width;
+    r.popupHeight = bounds.height;
+    r.popupUrl = win.webContents.getURL();
+    r.popupVisible = win.isVisible();
+    const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+    const middle = centred(area, bounds.width, bounds.height);
+    r.popupCentred = Math.abs(bounds.x - middle.x) <= 1 && Math.abs(bounds.y - middle.y) <= 1;
+
+    // localhost is the same stub runner under another origin: it would load if the guard let it.
+    const foreign = promptUrl(settings.runnerUrl.replace("127.0.0.1", "localhost"));
+    const windows = BrowserWindow.getAllWindows().length;
+    await win.webContents.executeJavaScript(`window.open(${JSON.stringify(foreign)}); location.href = ${JSON.stringify(foreign)}; 0`, true);
+    await sleep(700);
+    r.foreignNavigationRefused = win.webContents.getURL() === r.popupUrl;
+    r.foreignWindowRefused = BrowserWindow.getAllWindows().length === windows;
+
+    const closed = new Promise<boolean>((resolve) => win.once("closed", () => resolve(true)));
+    void win.webContents.executeJavaScript("window.close(); 0", true).catch(() => {});
+    r.pageClosedPopup = await Promise.race([closed, sleep(3000).then(() => false)]);
+    if (!win.isDestroyed()) win.destroy();
+  });
+  await step("no runner", async () => {
+    const real = settings.runnerUrl;
+    // Port 9 (discard): nothing answers /health there.
+    settings = { ...settings, runnerUrl: "http://127.0.0.1:9" };
+    try {
+      r.noWindowWithoutRunner = (await openPopup(true)) === null && BrowserWindow.getAllWindows().length === 0;
+    } finally {
+      settings = { ...settings, runnerUrl: real };
+    }
+  });
+  return r;
+}
+
+// --- Start ---
+
+function start(): void {
+  settings = loadSettings(join(app.getPath("userData"), SETTINGS_FILE));
+  if (args.runnerUrl) settings = { ...settings, runnerUrl: new URL(args.runnerUrl).origin };
+  Menu.setApplicationMenu(null);
+  guard();
+
+  if (args.selfTest) {
+    const file = args.selfTest;
+    const done = (result: Partial<SelfTestResult>) => {
+      writeFileSync(file, JSON.stringify(result, null, 2));
+      app.exit(0);
+    };
+    setTimeout(() => done({ errors: ["the self-test did not finish in 40 seconds"] }), 40_000);
+    void selfTest().then(done, (e) => done({ errors: [String(e)] }));
+    return;
+  }
+
+  tray = createTray();
+  if (!globalShortcut.register(settings.hotkey, newTask)) {
+    notify("intuition: the hotkey is taken", `${settings.hotkey} could not be registered. Change "hotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
+  }
+  if (args.session) void openChat(args.session);
+}
+
+/** False for a second copy (the running shell has been handed this command line) and for --quit with no shell running. */
+function shouldRun(): boolean {
+  if (args.selfTest) {
+    // Its own user data, and no single-instance lock: it runs beside a running shell without touching it.
+    app.setPath("userData", join(app.getPath("temp"), "intuition", "self-test-data"));
+    return true;
+  }
+  return app.requestSingleInstanceLock() && !args.quit;
+}
+
+if (!shouldRun()) {
+  app.exit(0);
+} else {
+  // Windows toasts need an app id.
+  app.setAppUserModelId("intuition");
+  // The shell stays in the tray when its windows close.
+  app.on("window-all-closed", () => {});
+  app.on("will-quit", () => globalShortcut.unregisterAll());
+  app.on("before-quit", () => tray?.destroy());
+  app.on("second-instance", (_event, argv) => {
+    const second = parseArgs(argv);
+    if (second.quit) app.quit();
+    else void openChat(second.session);
+  });
+  void app.whenReady().then(start);
+}
