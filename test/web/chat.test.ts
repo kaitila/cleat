@@ -1,0 +1,209 @@
+// The chat view: its files are served by the runner, its pure helpers do what the page relies on,
+// and its sources keep the two rules a reader can't see on the page: untrusted text never becomes
+// markup, and the stylesheet has no colours or font sizes of its own.
+import { afterAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  RESULT_MAX_CHARS,
+  backoffMs,
+  byActivity,
+  cutResult,
+  inputText,
+  pickSession,
+  relativeTime,
+  replyState,
+  resultLine,
+  splitInline,
+  splitMarkdown,
+  toolSummary,
+  unknownNote,
+} from "../../src/web/chat-format.js";
+import { testRunner } from "../runner/helpers";
+
+const WEB = join(import.meta.dir, "..", "..", "src", "web");
+const source = (file: string) => readFileSync(join(WEB, file), "utf8");
+
+describe("served by the runner", () => {
+  const runner = testRunner();
+  afterAll(() => runner.stop());
+
+  test("/ is the chat page and loads its stylesheets and module from /assets", async () => {
+    const res = await runner.get("/");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    for (const asset of ["/assets/base.css", "/assets/chat.css", "/assets/chat.js"]) expect(html).toContain(asset);
+    expect(html).toContain('href="/prompt"');
+  });
+
+  test("the modules and the stylesheet are served with their types", async () => {
+    for (const file of ["chat.js", "chat-format.js"]) {
+      const res = await runner.get(`/assets/${file}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toContain("javascript");
+    }
+    const css = await runner.get("/assets/chat.css");
+    expect(css.status).toBe(200);
+    expect(css.headers.get("content-type")).toContain("text/css");
+  });
+
+  test("every module chat.js imports is one the runner serves", async () => {
+    const imports = [...source("chat.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
+    expect(imports).toEqual(["chat-format.js"]);
+    for (const file of imports) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
+  });
+});
+
+describe("toolSummary", () => {
+  test("Bash: the command, on one line", () => {
+    expect(toolSummary("Bash", { command: "echo fake" })).toBe("echo fake");
+    expect(toolSummary("Bash", { command: "cd /tmp &&\n  ls -la", description: "x" })).toBe("cd /tmp && ls -la");
+  });
+  test("file tools: the path", () => {
+    expect(toolSummary("Read", { file_path: "/src/a.ts", limit: 10 })).toBe("/src/a.ts");
+    expect(toolSummary("Edit", { file_path: "/src/b.ts", old_string: "x", new_string: "y" })).toBe("/src/b.ts");
+    expect(toolSummary("Grep", { pattern: "x", path: "src" })).toBe("src");
+    expect(toolSummary("NotebookEdit", { notebook_path: "/n.ipynb" })).toBe("/n.ipynb");
+  });
+  test("anything else: the first 80 characters of the input", () => {
+    expect(toolSummary("WebSearch", { query: "bun" })).toBe('{"query":"bun"}');
+    const long = toolSummary("Task", { prompt: "p".repeat(300) });
+    expect(long).toHaveLength(80);
+    expect(long.startsWith('{"prompt":"ppp')).toBe(true);
+    expect(toolSummary("Odd", "plain\ntext")).toBe("plain text");
+    expect(toolSummary("Odd", undefined)).toBe("");
+    expect(toolSummary("Odd", null)).toBe("null");
+    expect(toolSummary("Bash", { command: 5 })).toBe('{"command":5}');
+  });
+  test("inputText keeps a string and prints the rest as JSON", () => {
+    expect(inputText("as is")).toBe("as is");
+    expect(inputText({ a: 1 }, 2)).toBe('{\n  "a": 1\n}');
+    expect(inputText(undefined)).toBe("");
+  });
+});
+
+describe("relativeTime", () => {
+  const now = Date.parse("2026-11-12T12:00:00.000Z");
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  test("now, minutes, hours, days, then the date", () => {
+    expect(relativeTime(ago(5_000), now)).toBe("now");
+    expect(relativeTime(ago(50_000), now)).toBe("1m");
+    expect(relativeTime(ago(5 * 60_000), now)).toBe("5m");
+    expect(relativeTime(ago(59 * 60_000 + 59_000), now)).toBe("60m");
+    expect(relativeTime(ago(3 * 3_600_000 + 60_000), now)).toBe("3h");
+    expect(relativeTime(ago(2 * 86_400_000), now)).toBe("2d");
+    expect(relativeTime(ago(30 * 86_400_000), now)).toMatch(/13/);
+  });
+  test("a clock that is behind, and a time that isn't one", () => {
+    expect(relativeTime(ago(-60_000), now)).toBe("now");
+    expect(relativeTime("nonsense", now)).toBe("");
+  });
+});
+
+describe("splitMarkdown", () => {
+  test("paragraphs split at blank lines, single line breaks kept", () => {
+    expect(splitMarkdown("one\ntwo\n\n\nthree")).toEqual([
+      { type: "text", spans: [{ text: "one\ntwo", code: false }] },
+      { type: "text", spans: [{ text: "three", code: false }] },
+    ]);
+    expect(splitMarkdown("")).toEqual([]);
+  });
+  test("inline code", () => {
+    expect(splitInline("run `bun test` now")).toEqual([
+      { text: "run ", code: false },
+      { text: "bun test", code: true },
+      { text: " now", code: false },
+    ]);
+    expect(splitInline("a lone ` stays")).toEqual([{ text: "a lone ` stays", code: false }]);
+  });
+  test("a fenced block keeps its text as it is, with its language", () => {
+    expect(splitMarkdown("Before:\n```ts\nconst a = `x`;\n\n  indented\n```\nafter")).toEqual([
+      { type: "text", spans: [{ text: "Before:", code: false }] },
+      { type: "code", lang: "ts", text: "const a = `x`;\n\n  indented" },
+      { type: "text", spans: [{ text: "after", code: false }] },
+    ]);
+  });
+  test("a fence still open while streaming runs to the end", () => {
+    expect(splitMarkdown("```\nhalf")).toEqual([{ type: "code", lang: "", text: "half" }]);
+  });
+  test("markup is only ever text", () => {
+    const blocks = splitMarkdown('<img src=x onerror="alert(1)"> and `<b>`');
+    expect(blocks).toEqual([
+      { type: "text", spans: [{ text: '<img src=x onerror="alert(1)"> and ', code: false }, { text: "<b>", code: true }] },
+    ]);
+  });
+});
+
+describe("the rest of the helpers", () => {
+  test("cutResult cuts by lines and by characters, and says so", () => {
+    expect(cutResult("short")).toEqual({ text: "short", cut: false });
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`).join("\n");
+    const byLines = cutResult(lines);
+    expect(byLines.cut).toBe(true);
+    expect(byLines.text.split("\n")).toHaveLength(30);
+    const byChars = cutResult("x".repeat(RESULT_MAX_CHARS + 1));
+    expect(byChars).toEqual({ text: "x".repeat(RESULT_MAX_CHARS), cut: true });
+  });
+  const s = (id: string, updatedAt: string, status = "idle") => ({ id, updatedAt, status });
+  test("sessions are ordered by newest activity, and the newest is picked unless the URL names one", () => {
+    const list = [s("a", "2026-11-12T10:00:00.000Z"), s("b", "2026-11-12T12:00:00.000Z"), s("c", "2026-11-12T11:00:00.000Z")];
+    expect(byActivity(list).map((x) => x.id)).toEqual(["b", "c", "a"]);
+    expect(pickSession(list, null)).toBe("b");
+    expect(pickSession(list, "a")).toBe("a");
+    expect(pickSession(list, "gone")).toBe("b");
+    expect(pickSession([], "gone")).toBeNull();
+  });
+  test("the reply box is off while a turn runs or waits for approval", () => {
+    expect(replyState(undefined).enabled).toBe(false);
+    expect(replyState(s("a", "", "running"))).toMatchObject({ enabled: false });
+    expect(replyState(s("a", "", "running")).hint).not.toBe("");
+    expect(replyState(s("a", "", "waiting_approval"))).toMatchObject({ enabled: false, hint: "Waiting for approval." });
+    expect(replyState(s("a", "", "idle")).enabled).toBe(true);
+    expect(replyState(s("a", "", "error")).enabled).toBe(true);
+  });
+  test("resultLine", () => {
+    expect(resultLine({ ok: true })).toBe("Done");
+    expect(resultLine({ ok: true, durationMs: 4210, costUsd: 0.0312 })).toBe("Done · 4.2 s · $0.031");
+    expect(resultLine({ ok: true, durationMs: 75_000, costUsd: 0 })).toBe("Done · 1 min 15 s");
+    expect(resultLine({ ok: false, durationMs: 12_400, costUsd: 1.234 })).toBe("Ended with an error · 12 s · $1.23");
+  });
+  test("an unknown event kind is one quiet line", () => {
+    expect(unknownNote({ kind: "approval_request", toolName: "Write", input: { file_path: "/x" } })).toBe("approval request: Write");
+    expect(unknownNote({ kind: "approval_resolved", decision: "deny" })).toBe("approval resolved: deny");
+    expect(unknownNote({ kind: "something_new\nwith a break" })).toBe("something new with a break");
+    expect(unknownNote({})).toBe("event");
+  });
+  test("reconnecting backs off from half a second to five", () => {
+    expect([0, 1, 2, 3, 4, 9].map(backoffMs)).toEqual([500, 1000, 2000, 4000, 5000, 5000]);
+  });
+});
+
+describe("the sources", () => {
+  test("chat-format.js has no DOM access", () => {
+    const code = source("chat-format.js").replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, "");
+    expect(code).not.toMatch(/\b(document|window|navigator|location|fetch|WebSocket)\b/);
+  });
+  test("no script of the page builds markup from text", () => {
+    for (const file of ["chat.js", "chat-format.js"]) {
+      expect(source(file)).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|DOMParser|createContextualFragment|setHTML/);
+    }
+    expect(source("chat.html")).not.toMatch(/\son[a-z]+\s*=/i);
+  });
+  test("chat.css has no colours or font sizes of its own, and every token it uses is in base.css", () => {
+    const css = source("chat.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(css).not.toMatch(/\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\(/i);
+    const allowed = ["px", "solid", "none", "transparent", "inherit", "currentColor", "auto"];
+    for (const [, property, value] of css.matchAll(/(?:^|[;{\s])(color|background(?:-color)?|border(?:-[a-z]+)*|outline(?:-color)?|fill|stroke)\s*:\s*([^;}]+)/g)) {
+      const words = value!.replace(/var\(--[a-z0-9-]+\)/g, "").match(/[a-z]+/gi) ?? [];
+      expect({ property, value, extra: words.filter((w) => !allowed.includes(w)) }).toEqual({ property, value, extra: [] });
+    }
+    for (const [, value] of css.matchAll(/font-size\s*:\s*([^;}]+)/g)) expect(value!.trim()).toMatch(/^var\(--text-[sml]\)$/);
+    expect(css).not.toMatch(/(?:^|[;{\s])font\s*:/);
+    const defined = new Set([...source("base.css").matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+    const used = [...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]);
+    expect(used.length).toBeGreaterThan(0);
+    expect(used.filter((token) => !defined.has(token))).toEqual([]);
+  });
+});

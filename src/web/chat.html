@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>intuition</title>
+  <link rel="stylesheet" href="/assets/base.css">
+  <link rel="stylesheet" href="/assets/chat.css">
+  <script type="module" src="/assets/chat.js"></script>
+</head>
+<body>
+  <div class="app">
+    <nav class="sidebar" aria-label="Sessions">
+      <div class="sidebar-head">
+        <span class="brand">intuition</span>
+        <a class="new-task small" href="/prompt">New task</a>
+      </div>
+      <p id="sessions-empty" class="sessions-empty muted small" hidden>No sessions yet.</p>
+      <ul id="sessions" class="sessions"></ul>
+      <p id="connection" class="connection muted small" role="status" hidden></p>
+    </nav>
+    <main class="main">
+      <header id="head" class="head" hidden>
+        <h1 id="title" class="title"></h1>
+        <p class="meta muted small">
+          <span id="dot" class="dot"></span>
+          <span id="workspace"></span>
+          <span id="status"></span>
+        </p>
+      </header>
+      <div id="scroller" class="scroller">
+        <div id="stream" class="stream" role="log" aria-label="Session"></div>
+        <div id="empty" class="empty muted" hidden>
+          <p>Nothing here yet.</p>
+          <p class="small">Start a session with <a href="/prompt">New task</a>.</p>
+        </div>
+      </div>
+      <form id="reply" class="reply" hidden>
+        <textarea id="reply-text" rows="1" placeholder="Reply" aria-label="Reply" aria-describedby="reply-hint" disabled></textarea>
+        <p id="reply-hint" class="reply-hint muted small" role="status"></p>
+      </form>
+    </main>
+  </div>
+</body>
+</html>
