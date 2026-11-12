@@ -5,14 +5,15 @@ A Windows background app that fires tasks at Claude Code agents running in WSL2:
 Three parts:
 - **Runner** (`src/runner/`, bun + TypeScript, runs in WSL): a daemon on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, streams their events over a WebSocket and stores session metadata.
 - **Web UI** (`src/web/`, served by the runner): the pop-up prompt (`/prompt`) and the chat view (`/`). Plain HTML, CSS and JavaScript modules, no build step.
-- **Windows shell** (`shell/`): tray icon, global hotkey, clipboard capture, toasts, and a small window on the runner's pages. An AutoHotkey v2 script for now; Tauri 2 later.
+- **Windows shell** (`shell/`, Electron + TypeScript): tray icon, global hotkey, clipboard capture, toasts, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun; Electron itself is installed into a Windows folder from WSL.
 
 ## Commands
 - `bun run check`: typecheck and tests. Run it before every commit; CI runs the same.
 - `bun test test/base.test.ts`: one test file.
 - `bun run typecheck`.
 - `bun run dev`: the runner with reload on change. `bun run start`: without.
-- Windows programs run from WSL: `powershell.exe -NoProfile -File <script>` (start from a `/mnt/c` folder, and pass Windows paths; `wslpath -w` converts).
+- `bun src/cli.ts <command>`: the app's own commands (start, stop, status, and the shell's install and start), once their tasks have built them.
+- Windows programs run from WSL directly: `/mnt/c/.../electron.exe <args>` (start from a `/mnt/c` folder and pass Windows paths; `wslpath -w` converts).
 
 ## Tasks
 Work here is tracked in foreman: the MCP server `foreman` in `.mcp.json`, or its CLI, `fm help` (install it with `bun add -g @foreman-kit/foreman`). Its board is in `.foreman/`, which git ignores.
@@ -24,6 +25,9 @@ Work here is tracked in foreman: the MCP server `foreman` in `.mcp.json`, or its
 - Never verify your own task, and never approve: a fresh session runs the `verify` skill, and a person signs off changes to the paths listed in `foreman.json`.
 
 ## Rules
+- **TypeScript only.** Runner, scripts, command line and the Windows shell are TypeScript run by bun or Electron; pages are plain JavaScript modules. No AutoHotkey, PowerShell, batch, bash or Rust files, and no Tauri. A step that seems to need one is done from TypeScript (spawn the Windows program, or use Electron's API).
+- Electron's API changes between versions (the clipboard API in 45 is not the old one). Before writing against it, read `node_modules/electron/electron.d.ts`; don't rely on memory.
+- Electron is installed for Windows from WSL (`npm_config_platform=win32`, then its `install.js`), into a folder under the Windows user's `AppData\Local\intuition`, never into the repo or a WSL path. The Windows side has Node 20, too old for Electron's installer: don't use it.
 - `src/shared/protocol.ts` and [protocol](docs/protocol.md) are the contract between runner, pages and shell. Follow them; a task that needs to change the contract changes both files and says so in its PR.
 - The Claude Agent SDK changes often. Before writing against it, read its types in `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts` (and its README there); don't rely on memory for its API.
 - Sessions run with `permissionMode: "default"` and the workspace's own settings. A tool call that needs approval waits for the person's Allow or Deny in the chat view. Never auto-approve, never pass `bypassPermissions`, `acceptEdits` or `auto`, and never answer `canUseTool` without the person.

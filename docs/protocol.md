@@ -44,7 +44,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 Sessions run with `permissionMode: "default"` and the workspace's own Claude Code settings (user, project and local), so its allow and deny rules apply. Any call that would prompt goes through the SDK's `canUseTool` and becomes an `approval_request`; the call waits until the person answers in the chat view. The runner never answers one itself. Denying sends the model a message that the person declined.
 
 ## Clipboard images
-The shell saves a clipboard image as a PNG under the Windows user's temp folder and posts its Windows path. The runner turns `C:\Users\x\...` into `/mnt/c/Users/x/...`, and a session started with `imagePath` gets the path in its prompt, so Claude reads the file.
+The shell saves a clipboard image as a PNG under the Windows user's temp folder (`%TEMP%\\intuition\\clip-<time>.png`, the newest 20 kept) and posts its Windows path. The runner turns `C:\Users\x\...` into `/mnt/c/Users/x/...`, and a session started with `imagePath` gets the path in its prompt, so Claude reads the file.
 
 ## Notifications
 The runner records a `Notification` when a session finishes a turn (`finished`), opens an approval (`needs_approval`) or fails (`error`). The shell polls `GET /api/notifications?after=<seq>` every two seconds and shows each one as a Windows toast. Its first poll only reads `latest`, so old notifications don't replay.

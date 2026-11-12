@@ -5,7 +5,7 @@ Fire tasks at Claude Code agents in WSL2 from anywhere in Windows. Press a hotke
 ## Parts
 - **Runner** (`src/runner/`): a bun daemon in WSL on `127.0.0.1:4777`. Starts and resumes Claude Code sessions through the Claude Agent SDK, streams events over a WebSocket, stores session metadata.
 - **Web UI** (`src/web/`): the pop-up (`/prompt`) and the chat view (`/`), served by the runner.
-- **Windows shell** (`shell/`): hotkey, tray icon, clipboard capture, toasts.
+- **Windows shell** (`shell/`): an Electron app in TypeScript: hotkey, tray icon, clipboard capture, toasts, start on login.
 
 How they talk: [protocol](docs/protocol.md). Why it is built this way: [decisions](docs/decisions/README.md).
 

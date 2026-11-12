@@ -19,5 +19,13 @@ The project was started with foreman's `bun-ts-postgres` preset, the only one th
 
 The guardrails, skills, agents, `foreman.json` and `.mcp.json` are the kit's, unchanged.
 
-## The Windows shell is AutoHotkey for now
-Tauri 2 is the target. On 2026-11-12 the Windows side had Rust 1.84.1 but `rustc` could not link: Build Tools 2019 is installed without a working C++ workload or Windows SDK (`link.exe` not found). The MVP shell is an AutoHotkey v2 script; the Tauri shell is a later task.
+## The Windows shell is Electron, in TypeScript
+The whole app is TypeScript, by the owner's decision on 2026-11-12: no AutoHotkey, no PowerShell or batch helpers, no Tauri or Rust.
+
+Electron gives the shell everything it needs from TypeScript: tray, global shortcut, clipboard text and images, notifications, windows on the runner's pages, start on login. It needs no compiler on Windows. Tauri was the first target, but it is Rust, and on this machine `rustc` could not link (`link.exe` not found).
+
+How it is installed, tried on 2026-11-12:
+- Electron 45.3.1's installer needs Node 22.12 or newer. Windows has Node 20.11, WSL has Node 22. So Electron is installed from WSL with npm for the Windows platform (`npm_config_platform=win32 npm install`, then `node node_modules/electron/install.js`), into a folder on the Windows disk, and `electron.exe` is started from WSL or from Windows.
+- Started that way it registered a global shortcut. Its clipboard API in 45 differs from older versions, so the shell is written against `electron.d.ts`.
+- The shell's code is bundled from `shell/src` with `bun build` into one CommonJS file and copied next to `shell/package.json` in that Windows folder. Electron does not load an app from a `\\wsl.localhost` path reliably, hence the copy.
+- `electron` is also a devDependency of the root package, for its types only: bun does not run its postinstall, so no binary is downloaded in WSL or CI.
