@@ -1,15 +1,18 @@
 # intuition
 
-A Bun HTTP API on Postgres, with one server-rendered web page. Setup and layout: [README](README.md). Settings: [configuration](docs/configuration.md). Design rules: [design](docs/design.md). Decisions: [decisions](docs/decisions/README.md).
+A Windows background app that fires tasks at Claude Code agents running in WSL2: a global hotkey opens a small pop-up with the clipboard attached, you pick a workspace and type a task, and a chat window shows every session streaming. Setup and layout: [README](README.md). The contract between the parts: [protocol](docs/protocol.md). Decisions: [decisions](docs/decisions/README.md).
+
+Three parts:
+- **Runner** (`src/runner/`, bun + TypeScript, runs in WSL): a daemon on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, streams their events over a WebSocket and stores session metadata.
+- **Web UI** (`src/web/`, served by the runner): the pop-up prompt (`/prompt`) and the chat view (`/`). Plain HTML, CSS and JavaScript modules, no build step.
+- **Windows shell** (`shell/`): tray icon, global hotkey, clipboard capture, toasts, and a small window on the runner's pages. An AutoHotkey v2 script for now; Tauri 2 later.
 
 ## Commands
-- `bun run check`: typecheck, docs check, design check and tests. Run it before every commit; CI runs the same.
-- `bun test test/routes.test.ts`: one test file.
-- `bun run typecheck`, `bun run docs:check`, `bun run design:check` (the design lint, and `src/ui/tokens.ts` up to date).
-- `bun run tokens` after changing `src/ui/tokens.css`: regenerates `src/ui/tokens.ts`.
-- `bun run screenshot -- http://127.0.0.1:$PORT/ --out <dir>`: PNGs of the page at phone and desktop width, light and dark. Needs `playwright-core` and a browser; without them it exits 3 and says how to add them.
-- `bun run db:generate` after changing `src/db/schema.ts`; commit the migration it writes. Never edit a committed migration.
-- Tests use `TEST_DATABASE_URL` (each worktree gets its own database). Locally they skip without Postgres; CI fails without it.
+- `bun run check`: typecheck and tests. Run it before every commit; CI runs the same.
+- `bun test test/base.test.ts`: one test file.
+- `bun run typecheck`.
+- `bun run dev`: the runner with reload on change. `bun run start`: without.
+- Windows programs run from WSL: `powershell.exe -NoProfile -File <script>` (start from a `/mnt/c` folder, and pass Windows paths; `wslpath -w` converts).
 
 ## Tasks
 Work here is tracked in foreman: the MCP server `foreman` in `.mcp.json`, or its CLI, `fm help` (install it with `bun add -g @foreman-kit/foreman`). Its board is in `.foreman/`, which git ignores.
@@ -21,9 +24,13 @@ Work here is tracked in foreman: the MCP server `foreman` in `.mcp.json`, or its
 - Never verify your own task, and never approve: a fresh session runs the `verify` skill, and a person signs off changes to the paths listed in `foreman.json`.
 
 ## Rules
-- Every route in `src/server/routes/` declares `mcp`: the tool that exposes it to agents, or `skip` with a reason. The parity test enforces it.
-- Validate every input with zod via `parse()`. Throw `ApiFailure` for errors the client may see; anything else becomes "internal error" and its text is never logged.
-- Read configuration only through `src/config.ts`, and list every new variable in the configuration doc and `.env.example`.
-- State-changing routes keep the CSRF check (`x-app: 1` header, same Origin as `APP_URL`).
-- Pages use only tokens from `src/ui/tokens.css`: no hex, `rgb()`, `hsl()` or `px` anywhere else in `src/` (the design check fails). Follow [design rules](docs/design.md).
-- Every non-obvious choice gets a decision file in the decisions folder, in the format the docs check enforces.
+- `src/shared/protocol.ts` and [protocol](docs/protocol.md) are the contract between runner, pages and shell. Follow them; a task that needs to change the contract changes both files and says so in its PR.
+- The Claude Agent SDK changes often. Before writing against it, read its types in `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts` (and its README there); don't rely on memory for its API.
+- Sessions run with `permissionMode: "default"` and the workspace's own settings. A tool call that needs approval waits for the person's Allow or Deny in the chat view. Never auto-approve, never pass `bypassPermissions`, `acceptEdits` or `auto`, and never answer `canUseTool` without the person.
+- The runner binds `127.0.0.1` only, and every request passes `refusal()` in `src/runner/server.ts` (Host, Origin, JSON content type). New routes go through the same check.
+- Read configuration only through `src/runner/config.ts`. Tests set `INTUITION_CONFIG`, `INTUITION_DATA_DIR` and `INTUITION_PORT=0`, and never touch the real `~/.config/intuition` or `~/.local/share/intuition`.
+- Tests that run in CI use the fake agent (`INTUITION_FAKE_AGENT=1`): CI has no Claude Code login. A check that needs real Claude Code or Windows is a script under `scripts/` that a person or verifier runs on this machine, and the test suite skips it when `CI` is set.
+- Never start a real Claude Code session in a real workspace from a test or a script. Use a throwaway folder made with `mkdtemp`.
+- Pages use only the tokens in `src/web/base.css`: no colours or font sizes anywhere else. The feel is small, clean and calm.
+- Don't add dependencies: `package.json` and `bun.lock` need a person's approval. Use bun's built-ins and what is installed.
+- Every non-obvious choice gets a decision file in `docs/decisions/` (number from foreman's `reserve_number`), and a line in its README.

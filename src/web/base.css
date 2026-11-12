@@ -1,0 +1,81 @@
+/* Shared look for the chat view and the pop-up: small, quiet, calm. Pages use these tokens
+   and add their own layout in their own stylesheet. No colours or font sizes outside this file. */
+:root {
+  color-scheme: light dark;
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --sunken: #eeece7;
+  --line: #dedbd3;
+  --text: #22211e;
+  --muted: #76736b;
+  --accent: #3d6b5c;
+  --accent-text: #ffffff;
+  --warn: #a8641a;
+  --danger: #a33b32;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --text-s: 12px;
+  --text-m: 13.5px;
+  --text-l: 16px;
+  --gap-1: 4px;
+  --gap-2: 8px;
+  --gap-3: 12px;
+  --gap-4: 20px;
+  --radius: 8px;
+  --shadow: 0 8px 30px rgb(0 0 0 / 0.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #191a19;
+    --surface: #212321;
+    --sunken: #151615;
+    --line: #313431;
+    --text: #e6e4de;
+    --muted: #8f8d85;
+    --accent: #7fb5a2;
+    --accent-text: #10201a;
+    --warn: #d9a25c;
+    --danger: #e0766c;
+    --shadow: 0 8px 30px rgb(0 0 0 / 0.5);
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--text-m)/1.5 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--gap-1) var(--gap-3);
+  cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button:disabled { opacity: 0.5; cursor: default; }
+textarea, input[type="text"] {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: var(--gap-2) var(--gap-3);
+  outline: none;
+  resize: none;
+}
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+code, pre, .mono { font-family: var(--mono); font-size: var(--text-s); }
+pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.muted { color: var(--muted); }
+.small { font-size: var(--text-s); }
+/* A session's state, as a dot: running pulses, waiting_approval is amber, error is red. */
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line); flex: none; }
+.dot[data-status="running"] { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+.dot[data-status="waiting_approval"] { background: var(--warn); }
+.dot[data-status="error"] { background: var(--danger); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
