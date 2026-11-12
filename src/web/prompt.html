@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>intuition</title>
+  <link rel="stylesheet" href="/assets/base.css">
+  <link rel="stylesheet" href="/assets/prompt.css">
+  <script type="module" src="/assets/prompt.js"></script>
+</head>
+<body>
+  <form id="prompt" class="prompt" autocomplete="off">
+    <div id="workspaces" class="workspaces" role="radiogroup" aria-label="Workspace"></div>
+    <textarea id="task" class="task" aria-label="Task" placeholder="What should Claude do?" spellcheck="false" autofocus></textarea>
+    <!-- The clipboard attachment. Empty and hidden until the clipboard task fills it. -->
+    <div id="clipboard" class="clipboard" hidden></div>
+    <footer class="foot small">
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+      <span class="keys muted" aria-hidden="true"><kbd>Enter</kbd> start <kbd>Shift+Enter</kbd> new line <kbd>Esc</kbd> close</span>
+    </footer>
+  </form>
+</body>
+</html>

@@ -12,7 +12,7 @@ import {
 } from "../shared/protocol";
 import { driverFor, type AgentDriver } from "./agent";
 import type { Config } from "./config";
-import { Sessions } from "./sessions";
+import { Sessions, busy } from "./sessions";
 import { Store } from "./store";
 
 export const VERSION = "0.1.0";
@@ -80,10 +80,26 @@ async function startSession(req: Request, app: App): Promise<Response> {
   return json({ session: app.sessions.start(workspace, b.prompt) } satisfies SessionResponse, 201);
 }
 
+async function reply(req: Request, app: App, id: string): Promise<Response> {
+  if (!app.store.get(id)) return fail(404, "no such session");
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  if (typeof b.prompt !== "string" || !b.prompt.trim()) return fail(400, "prompt is empty");
+  // Nothing awaits between this check and the turn starting, so two replies sent at once
+  // can't both start one.
+  const why = busy(app.store.get(id)!);
+  if (why) return fail(409, why);
+  return json({ session: app.sessions.reply(id, b.prompt) } satisfies SessionResponse, 202);
+}
+
 async function handle(req: Request, app: App): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
-  if (req.method === "POST" && path === "/api/sessions") return startSession(req, app);
+  if (req.method === "POST") {
+    if (path === "/api/sessions") return startSession(req, app);
+    const messages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path);
+    if (messages) return reply(req, app, messages[1]!);
+  }
   if (req.method === "GET") {
     if (path === "/api/workspaces") {
       const workspaces = app.config.workspaces.map((w) => ({ ...w, exists: existsSync(w.path) }));
