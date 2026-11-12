@@ -1,0 +1,12 @@
+# D0003: How the Windows shell is stopped, tested and kept on the runner's origin
+
+Date: 2026-11-12. Status: active. Task: T-0011. The shell itself: [windows-shell](../windows-shell.md).
+
+## Decisions
+- **`shell stop` is a second copy of the shell with `--quit`.** The shell holds Electron's single-instance lock; a second copy hands its command line to the first and exits, and the first quits when it sees `--quit`. The other ways to end it from WSL were `taskkill` on `electron.exe`, which would also end any other Electron app started the same way, or keeping a process id in a file, which goes stale. The same hand-over carries `--session <id>` to open the chat on a session.
+- **The self-test runs inside the real app, beside a running shell.** `--self-test` skips the single-instance lock, uses its own user data folder under `%TEMP%\intuition` and its own hotkey, so it neither stops nor disturbs the shell the person is using. It shows the pop-up without focus for about a second: that is the only way to know the window really appears at the right size and place, and it does not take the keyboard from the person.
+- **The self-test checks more than the task listed**: that a navigation and a new window to another origin are refused (it uses `localhost` for the stub runner's `127.0.0.1`: another origin that would load if the guard let it), that `window.close()` from the page closes the pop-up, and that no window opens with no runner. These are the claims nobody can check by looking.
+- **The pop-up's size is fixed by refusing `will-resize`, not with `resizable: false`.** On this machine (Electron 45.3.1, a display scaled to 200%) a frameless window made with `resizable: false` came out 382 pixels high instead of 380 and grew by one each time it was moved. `thickFrame: false` also fixed it but takes away the window's shadow.
+- **All new windows are refused, not only those to other origins.** A page that opens the runner's own chat view (`/` or `/?session=<id>`) gets it in the shell's one chat window instead. Pages get no permissions except writing to the clipboard, and there is no application menu, so no reload or developer-tools shortcuts.
+- **A clipboard with both an image and text is captured as the image.** The task says "an image..., otherwise text"; a spreadsheet's cells copy as both, and will arrive as a picture.
+- **Electron is reinstalled only when its version differs** from the one `shell/package.json` pins (read from `node_modules/electron/dist/version` in the Windows folder), so installing again is a copy of the bundle.
