@@ -4,16 +4,39 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { SelfTestResult } from "../../shell/src/result";
-import { HOST, type ClipboardPostRequest } from "../shared/protocol";
+import { HOST, type ClipboardPostRequest, type Notification, type NotificationsResponse } from "../shared/protocol";
 import { electron, install } from "./install";
 import { hasWindows, shellPaths, toWindows, toWsl } from "./paths";
 
 const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const PAGE = "<!doctype html><meta charset=utf-8><title>intuition self-test</title><p>self-test</p>";
 
-/** Just enough of the runner for the shell: /health, the two pages, and POST /api/clipboard, which it records. */
+
+/** The session of the one notification the stub runner records after the shell's first poll. */
+export const STUB_SESSION = "self-test-session";
+export const STUB_TITLE = "self-test, please ignore";
+export const STUB_BODY = "This toast is the shell's self-test.";
+
+function stubNotification(seq: number, sessionId: string, title: string, body: string): Notification {
+  return { seq, ts: new Date().toISOString(), kind: "finished", sessionId, title, body };
+}
+
+/** What the stub runner received from the shell. */
+export interface Seen {
+  posts: ClipboardPostRequest[];
+  /** The `after` of each GET /api/notifications, null when it had none. */
+  polls: (string | null)[];
+}
+
+/**
+ * Just enough of the runner for the shell: /health, the two pages, POST /api/clipboard, which it
+ * records, and GET /api/notifications. It starts with two notifications, as a runner that has been
+ * up for a while has, and records a third once it has been polled: the only one the shell may show.
+ */
 export function stubRunner() {
   const posts: ClipboardPostRequest[] = [];
+  const polls: (string | null)[] = [];
+  const notifications = [stubNotification(1, "old-1", "old one", "before the shell started"), stubNotification(2, "old-2", "old two", "before the shell started")];
   const server = Bun.serve({
     hostname: HOST,
     port: 0,
@@ -21,6 +44,14 @@ export function stubRunner() {
       const path = new URL(req.url).pathname;
       if (req.method === "GET" && path === "/health") return Response.json({ ok: true, version: "self-test" });
       if (req.method === "GET" && (path === "/" || path === "/prompt")) return new Response(PAGE, { headers: { "content-type": "text/html" } });
+      if (req.method === "GET" && path === "/api/notifications") {
+        const raw = new URL(req.url).searchParams.get("after");
+        polls.push(raw);
+        const after = Number(raw ?? 0);
+        const answer: NotificationsResponse = { notifications: notifications.filter((n) => n.seq > after), latest: notifications.length };
+        if (polls.length === 1) notifications.push(stubNotification(3, STUB_SESSION, STUB_TITLE, STUB_BODY));
+        return Response.json(answer);
+      }
       if (req.method === "POST" && path === "/api/clipboard") {
         const body = (await req.json()) as ClipboardPostRequest;
         posts.push(body);
@@ -29,12 +60,13 @@ export function stubRunner() {
       return Response.json({ error: "not found" }, { status: 404 });
     },
   });
-  return { url: `http://${HOST}:${server.port}`, posts, stop: () => server.stop(true) };
+  return { url: `http://${HOST}:${server.port}`, posts, polls, stop: () => server.stop(true) };
 }
 
 /** What is wrong with a self-test result, given what the stub runner received. Empty when all is well. */
-export function problems(r: Partial<SelfTestResult>, posts: ClipboardPostRequest[], runnerUrl: string, readImage: (windowsPath: string) => Uint8Array | null): string[] {
+export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: string, readImage: (windowsPath: string) => Uint8Array | null): string[] {
   const bad: string[] = [...(r.errors ?? []).map((e) => `the shell reported: ${e}`)];
+  const { posts, polls } = seen;
   const need = (ok: unknown, what: string) => {
     if (!ok) bad.push(what);
   };
@@ -61,6 +93,14 @@ export function problems(r: Partial<SelfTestResult>, posts: ClipboardPostRequest
   need(r.pageClosedPopup, "window.close() from the page did not close the pop-up");
   need(r.noWindowWithoutRunner, "a window opened although no runner answered");
   need(r.clipboardRestored, "the clipboard was not put back");
+  need(polls.length === 2 && polls[0] === null && polls[1] === "2", `the shell's polls sent after=${JSON.stringify(polls)}, not none and then 2`);
+  need(r.toastsOnFirstPoll === 0, `the first poll created ${r.toastsOnFirstPoll} toasts, not 0: old notifications replayed`);
+  need(r.toastsCreated === 1, `${r.toastsCreated} toasts were created for the one new notification, not 1`);
+  need(r.toastTitle === `intuition: ${STUB_TITLE}`, `the toast's title is ${JSON.stringify(r.toastTitle)}`);
+  need(r.toastBody === STUB_BODY, `the toast's body is ${JSON.stringify(r.toastBody)}`);
+  need(r.toastShown && (r.toastError ?? null) === null, `Windows did not answer the toast with its show event: ${r.toastError}`);
+  need(r.toastOpenedUrl === `${runnerUrl}/?session=${STUB_SESSION}`, `a click on the toast opened ${r.toastOpenedUrl}, not ${runnerUrl}/?session=${STUB_SESSION}`);
+  need(r.lastSession === STUB_SESSION, `"Open last session" would open ${r.lastSession}, not ${STUB_SESSION}`);
   return bad;
 }
 
@@ -87,7 +127,7 @@ export async function selfTestRun(): Promise<number> {
       return 1;
     }
     result = JSON.parse(readFileSync(resultFile, "utf8"));
-    const bad = problems(result, runner.posts, runner.url, (windowsPath) => {
+    const bad = problems(result, runner, runner.url, (windowsPath) => {
       imageFile = toWsl(windowsPath);
       return imageFile.startsWith("/mnt/c/") && existsSync(imageFile) ? readFileSync(imageFile) : null;
     });

@@ -1,10 +1,13 @@
 // Starts sessions, continues them with replies, and runs their turns in the background: every
 // output of the agent driver is stored (events) or passed on (deltas), and sent to the WebSocket clients.
-import type { ApprovalDecision, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
+import type { ApprovalDecision, Notification, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
 import type { AgentDriver, ApprovalAsk, NewEvent } from "./agent";
+import { approvalBody, bodyOf, NO_TEXT, type Notifications } from "./notifications";
 import type { Store } from "./store";
 
 export const NO_RESULT = "the turn ended without a result";
+/** The body of an `error` notification whose turn gave no message. */
+export const FAILED = "The turn failed.";
 export const BUSY = "a turn is running: wait for it to finish";
 export const APPROVAL_OPEN = "an approval is open: answer it first";
 export const NO_APPROVAL = "no such open approval";
@@ -34,7 +37,14 @@ export class Sessions {
     private readonly store: Store,
     private readonly driver: AgentDriver,
     private readonly send: (message: ServerMessage) => void,
+    /** Where the turns' notifications go (the shell's toasts). Without it none are recorded. */
+    private readonly notifications?: Notifications,
   ) {}
+
+  /** Records a notification for the shell, titled as the session is. */
+  private notify(id: string, kind: Notification["kind"], body: string): void {
+    this.notifications?.add({ kind, sessionId: id, title: this.store.get(id)?.title ?? "", body });
+  }
 
   /** Creates the session, stores the prompt as its first event and starts the turn in the background. */
   start(workspace: Workspace, prompt: string, imagePath?: string): SessionMeta {
@@ -121,6 +131,8 @@ export class Sessions {
     /** This turn's open approvals. */
     const mine = new Set<string>();
     let ended = false;
+    /** The turn's newest assistant text: the body of its notification when the result carries none. */
+    let lastText = "";
     const approve = (ask: ApprovalAsk, callSignal?: AbortSignal): Promise<ApprovalDecision> => {
       // Nobody can be asked any more: the call is denied, never allowed.
       if (ended || signal.aborted || callSignal?.aborted) return Promise.resolve("deny");
@@ -140,6 +152,7 @@ export class Sessions {
         callSignal?.addEventListener("abort", onAbort, { once: true });
         const { toolUseId, toolName, input, reason } = ask;
         this.record(id, { kind: "approval_request", approvalId, ...(toolUseId ? { toolUseId } : {}), toolName, input, ...(reason ? { reason } : {}) }, "waiting_approval");
+        this.notify(id, "needs_approval", approvalBody(toolName, input));
       });
     };
     /** The turn's last event. An approval still open then is denied first: its call will never run. */
@@ -147,6 +160,8 @@ export class Sessions {
       ended = true;
       for (const approvalId of [...mine]) this.close(approvalId, "deny");
       this.record(id, event, status);
+      if (event.kind === "result" && event.ok) this.notify(id, "finished", bodyOf(event.text || lastText) || NO_TEXT);
+      else this.notify(id, "error", bodyOf(event.kind === "error" ? event.message : (event.kind === "result" && event.text) || lastText) || FAILED);
     };
     try {
       for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, signal, approve })) {
@@ -163,6 +178,7 @@ export class Sessions {
           end(out.event, "error");
           return;
         } else {
+          if (out.event.kind === "assistant_text") lastText = out.event.text;
           this.record(id, out.event);
         }
       }

@@ -7,7 +7,9 @@ import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, Menu, nat
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
 import { centred, iconBitmap } from "./geometry";
+import type { Notification as RunnerNotification } from "../../src/shared/protocol";
 import { chatUrl, promptUrl, sameOrigin, sessionOf } from "./origin";
+import { parseResponse, POLL_MS, POLL_TIMEOUT_MS, pollUrl, START, step, toastOf } from "./poller";
 import type { SelfTestResult } from "./result";
 import { loadSettings, SETTINGS_FILE, type Settings } from "./settings";
 
@@ -187,7 +189,8 @@ function newTask(): void {
   void openPopup();
 }
 
-async function openChat(sessionId?: string): Promise<void> {
+/** Opens the chat view, on one session when given its id. `inactive`: without taking the focus (the self-test). */
+async function openChat(sessionId?: string, inactive = false): Promise<void> {
   if (!(await runnerAnswers())) return runnerDown();
   const url = chatUrl(settings.runnerUrl, sessionId);
   try {
@@ -205,8 +208,11 @@ async function openChat(sessionId?: string): Promise<void> {
     chat = win;
     await win.loadURL(url);
     if (win.isDestroyed()) return;
-    win.show();
-    win.focus();
+    if (inactive) win.showInactive();
+    else {
+      win.show();
+      win.focus();
+    }
   } catch (e) {
     console.error("opening the chat failed", e);
     chat?.destroy();
@@ -214,19 +220,68 @@ async function openChat(sessionId?: string): Promise<void> {
   }
 }
 
+/** The tray's menu. "Open last session" is greyed out until a session has notified. */
+function trayMenu(): Menu {
+  const last = pollState.lastSession;
+  return Menu.buildFromTemplate([
+    { label: "New task", click: newTask },
+    { label: "Open chat", click: () => void openChat() },
+    { label: "Open last session", enabled: last !== null, click: () => void openChat(last ?? undefined) },
+    { type: "separator" },
+    { label: "Quit", click: () => app.quit() },
+  ]);
+}
+
 function createTray(): Tray {
   const t = new Tray(icon());
   t.setToolTip("intuition");
-  t.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: "New task", click: newTask },
-      { label: "Open chat", click: () => void openChat() },
-      { type: "separator" },
-      { label: "Quit", click: () => app.quit() },
-    ]),
-  );
+  t.setContextMenu(trayMenu());
   t.on("double-click", () => void openChat());
   return t;
+}
+
+// --- Toasts ---
+
+let pollState = START;
+/** The newest toasts. Kept so their click handlers outlive the garbage collector. */
+const toasts: Notification[] = [];
+const KEEP_TOASTS = 20;
+/** How many session toasts were created: the self-test counts them, since nobody can see one from WSL. */
+let toastsCreated = 0;
+
+/** Shows one of the runner's notifications as a toast. A click opens the chat on its session. */
+function toast(n: RunnerNotification): Notification {
+  const t = new Notification({ ...toastOf(n), icon: icon() });
+  toastsCreated++;
+  t.on("click", () => void openChat(n.sessionId, Boolean(args.selfTest)));
+  t.on("failed", (_event, error) => console.error("showing a toast failed", error));
+  toasts.push(t);
+  if (toasts.length > KEEP_TOASTS) toasts.shift();
+  t.show();
+  return t;
+}
+
+/** One poll of the runner's notifications. A failed one is silent: the next asks for the same again. */
+async function pollOnce(): Promise<Notification[]> {
+  let response = null;
+  try {
+    const res = await fetch(pollUrl(settings.runnerUrl, pollState), { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
+    if (res.ok) response = parseResponse(await res.json());
+  } catch {
+    // The runner is down or slow.
+  }
+  const next = step(pollState, response);
+  const changed = next.state.lastSession !== pollState.lastSession;
+  pollState = next.state;
+  if (changed) tray?.setContextMenu(trayMenu());
+  if (!Notification.isSupported()) return [];
+  return next.show.map(toast);
+}
+
+/** Polls every two seconds, each poll starting after the one before has ended. */
+function startPolling(): void {
+  const tick = () => void pollOnce().catch((e) => console.error("polling failed", e)).finally(() => setTimeout(tick, POLL_MS));
+  tick();
 }
 
 // --- Self-test ---
@@ -238,7 +293,8 @@ async function selfTest(): Promise<SelfTestResult> {
     hotkeyRegistered: false, trayCreated: false, textCaptured: false, textPosted: false, imageCaptured: false, imagePosted: false,
     imagePath: null, notificationsSupported: false, popupCreated: false, popupWidth: 0, popupHeight: 0, popupUrl: null,
     popupVisible: false, popupCentred: false, foreignNavigationRefused: false, foreignWindowRefused: false, pageClosedPopup: false,
-    noWindowWithoutRunner: false, clipboardRestored: false, errors: [],
+    noWindowWithoutRunner: false, clipboardRestored: false, toastsOnFirstPoll: -1, toastsCreated: -1, toastTitle: null, toastBody: null,
+    toastShown: false, toastError: null, toastOpenedUrl: null, lastSession: null, errors: [],
   };
   const step = async (name: string, run: () => Promise<void>) => {
     try {
@@ -305,6 +361,32 @@ async function selfTest(): Promise<SelfTestResult> {
     r.pageClosedPopup = await Promise.race([closed, sleep(3000).then(() => false)]);
     if (!win.isDestroyed()) win.destroy();
   });
+  await step("toasts", async () => {
+    // The stub runner has two notifications from before this first poll, and records one more after it.
+    await pollOnce();
+    r.toastsOnFirstPoll = toastsCreated;
+    const shown = await pollOnce();
+    r.toastsCreated = toastsCreated;
+    r.lastSession = pollState.lastSession;
+    const t = shown[0];
+    if (!t) throw new Error("the second poll showed no toast");
+    r.toastTitle = t.title;
+    r.toastBody = t.body;
+    // Windows answers show() with one of the two events; neither says the person saw it.
+    const outcome = await Promise.race([
+      new Promise<string>((resolve) => t.once("show", () => resolve("show"))),
+      new Promise<string>((resolve) => t.once("failed", (_event, error) => resolve(`failed: ${error}`))),
+      sleep(3000).then(() => "nothing"),
+    ]);
+    r.toastShown = outcome === "show";
+    r.toastError = outcome === "show" ? null : outcome;
+    // Nobody can click it from WSL: the click is sent to the toast's own handler.
+    t.emit("click");
+    for (let i = 0; i < 40 && !chat?.isVisible(); i++) await sleep(100);
+    r.toastOpenedUrl = chat?.webContents.getURL() ?? null;
+    chat?.destroy();
+    t.close();
+  });
   await step("no runner", async () => {
     const real = settings.runnerUrl;
     // Port 9 (discard): nothing answers /health there.
@@ -342,6 +424,7 @@ function start(): void {
     notify("intuition: the hotkey is taken", `${settings.hotkey} could not be registered. Change "hotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
   }
   if (args.session) void openChat(args.session);
+  startPolling();
 }
 
 /** False for a second copy (the running shell has been handed this command line) and for --quit with no shell running. */

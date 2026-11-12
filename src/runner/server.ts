@@ -6,6 +6,7 @@ import {
   type ClipboardCapture,
   type ErrorResponse,
   type EventsResponse,
+  type NotificationsResponse,
   type ServerMessage,
   type SessionResponse,
   type SessionsResponse,
@@ -14,6 +15,7 @@ import {
 import { driverFor, type AgentDriver } from "./agent";
 import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
 import type { Config } from "./config";
+import { Notifications } from "./notifications";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
 import { Store } from "./store";
 
@@ -60,6 +62,7 @@ interface App {
   store: Store;
   sessions: Sessions;
   clipboard: Clipboard;
+  notifications: Notifications;
   /** Where the Windows drives are mounted (/mnt). */
   mounts: string;
 }
@@ -155,6 +158,11 @@ async function handle(req: Request, app: App): Promise<Response> {
       if (raw !== null && !/^\d+$/.test(raw)) return fail(400, "after must be a whole number");
       return json({ events: app.store.events(events[1]!, raw === null ? 0 : Number(raw)) } satisfies EventsResponse);
     }
+    if (path === "/api/notifications") {
+      const raw = url.searchParams.get("after");
+      if (raw !== null && !/^\d+$/.test(raw)) return fail(400, "after must be a whole number");
+      return json(app.notifications.after(raw === null ? 0 : Number(raw)) satisfies NotificationsResponse);
+    }
     if (path === "/api/clipboard") return json(app.clipboard.get() ?? {});
     if (path === "/api/clipboard/image") return clipboardImage(app);
     if (path === "/health") return json({ ok: true, version: VERSION });
@@ -179,8 +187,9 @@ const TOPIC = "all";
 export function startServer(config: Config, driver: AgentDriver = driverFor(config), mounts = MOUNTS): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
-  const sessions = new Sessions(store, driver, send);
-  const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), mounts };
+  const notifications = new Notifications();
+  const sessions = new Sessions(store, driver, send, notifications);
+  const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), notifications, mounts };
   const server = Bun.serve({
     hostname: HOST,
     port: config.port,
