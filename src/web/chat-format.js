@@ -36,6 +36,38 @@ export function toolSummary(name, input) {
   return oneLine(inputText(input)).slice(0, SUMMARY_MAX);
 }
 
+/** The text a file tool is about to put into its file, by the input field that carries it. */
+const TEXT_KEYS = ["content", "new_string", "new_source"];
+/** An approval card shows this much of a file's new text, or of a JSON input, before "show all". */
+export const APPROVAL_MAX_CHARS = 600;
+export const APPROVAL_MAX_LINES = 12;
+
+/**
+ * What an approval card shows of a tool call: { path, text, full }.
+ * Bash: the whole command, as it is: the person decides on all of it. File tools: the path, and a
+ * cut preview of the text to be written. Anything else: the input as JSON, cut.
+ * `full` is the uncut text; it is longer than `text` when there is more to show.
+ */
+export function approvalView(toolName, input) {
+  const fields = typeof input === "object" && input !== null && !Array.isArray(input) ? input : {};
+  if (toolName === "Bash" && typeof fields.command === "string") return { path: "", text: fields.command, full: fields.command };
+  for (const key of PATH_KEYS) {
+    if (typeof fields[key] !== "string" || !fields[key]) continue;
+    const textKey = TEXT_KEYS.find((k) => typeof fields[k] === "string");
+    const full = textKey ? fields[textKey] : "";
+    return { path: fields[key], text: cutResult(full, APPROVAL_MAX_CHARS, APPROVAL_MAX_LINES).text, full };
+  }
+  const full = inputText(input, 2);
+  return { path: "", text: cutResult(full, APPROVAL_MAX_CHARS, APPROVAL_MAX_LINES).text, full };
+}
+
+const DECIDED = { allow: "Allowed", deny: "Denied" };
+
+/** What a decided approval card says. An approval nobody answered (its turn is over) is "Not answered". */
+export function decidedLabel(decision) {
+  return Object.hasOwn(DECIDED, decision) ? DECIDED[decision] : "Not answered";
+}
+
 /** How long ago, short enough for the sidebar: now, 5m, 3h, 2d, then the date. */
 export function relativeTime(iso, now = Date.now()) {
   const then = Date.parse(iso);
@@ -130,7 +162,7 @@ export function statusLabel(status) {
 export function replyState(session) {
   if (!session) return { enabled: false, hint: "" };
   if (session.status === "running") return { enabled: false, hint: "Working. You can reply when this turn ends." };
-  if (session.status === "waiting_approval") return { enabled: false, hint: "Waiting for approval." };
+  if (session.status === "waiting_approval") return { enabled: false, hint: "Waiting for your Allow or Deny above." };
   if (session.status === "error") return { enabled: true, hint: "The last turn failed. A reply tries again." };
   return { enabled: true, hint: "Enter to send, Shift+Enter for a new line" };
 }

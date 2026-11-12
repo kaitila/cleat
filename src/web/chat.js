@@ -2,9 +2,11 @@
 // The contract is docs/protocol.md. Text from the model, from tools and from the person is untrusted:
 // it reaches the page only as text nodes (textContent), never as markup.
 import {
+  approvalView,
   backoffMs,
   byActivity,
   cutResult,
+  decidedLabel,
   inputText,
   pickSession,
   relativeTime,
@@ -55,6 +57,8 @@ let loading = false;
 let loadAgain = false;
 /** toolUseId -> the parts of its <details>, to put the result into. */
 const tools = new Map();
+/** approvalId -> its card in the stream: { el, actions, error, buttons, decided }. */
+const approvals = new Map();
 /** sessionId -> assistant text streamed so far and not yet replaced by its assistant_text event. */
 const streamed = new Map();
 let streamedEl = null;
@@ -144,13 +148,7 @@ function toolResult(event) {
   tool.result.textContent = content === "" ? "No output." : text;
   tool.body.querySelector(".show-all")?.remove();
   if (cut) {
-    const all = h("button", "show-all small", "show all");
-    all.type = "button";
-    all.addEventListener("click", () => {
-      tool.result.textContent = content;
-      all.remove();
-    });
-    tool.body.append(all);
+    showAll(tool.result, content, tool.body);
   }
   if (event.isError) {
     tool.details.dataset.error = "true";
@@ -165,6 +163,86 @@ function endOpenTools() {
     if (!tool.done) tool.result.textContent = "No result.";
     tool.done = true;
   }
+}
+
+/** A cut text with a "show all" button after it, as a tool result has. */
+function showAll(pre, full, parent) {
+  const all = h("button", "show-all small", "show all");
+  all.type = "button";
+  all.addEventListener("click", () => {
+    pre.textContent = full;
+    all.remove();
+  });
+  parent.append(all);
+}
+
+/**
+ * A tool call that waits for the person: what it is about to do, and Allow and Deny. The answer is
+ * sent to the runner; the card changes when the runner's approval_resolved event arrives.
+ */
+function approvalCard(event) {
+  const sessionId = selected;
+  const el = h("section", "approval");
+  el.dataset.approvalId = event.approvalId;
+  el.dataset.state = "open";
+  el.setAttribute("aria-label", "Approval needed");
+  const head = h("div", "approval-head");
+  const state = h("span", "approval-state small", "Needs your approval");
+  head.append(h("span", "approval-tool", String(event.toolName ?? "Tool")), state);
+  el.append(head);
+  const view = approvalView(event.toolName, event.input);
+  if (view.path) el.append(h("div", "approval-path mono", view.path));
+  if (view.text) {
+    const pre = h("pre", "approval-input", view.text);
+    el.append(pre);
+    if (view.text.length < view.full.length) showAll(pre, view.full, el);
+  }
+  if (typeof event.reason === "string" && event.reason) el.append(h("div", "approval-reason muted small", event.reason));
+  const actions = h("div", "approval-actions");
+  const allow = h("button", "primary", "Allow");
+  const deny = h("button", "", "Deny");
+  const error = h("span", "approval-error muted small");
+  error.setAttribute("role", "status");
+  const buttons = [allow, deny];
+  const answer = async (decision) => {
+    for (const b of buttons) b.disabled = true;
+    error.textContent = "";
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(event.approvalId)}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision }),
+      });
+      if (res.status === 404) throw new Error("this approval is no longer open");
+      if (!res.ok) throw new Error(await errorText(res));
+      // The buttons stay off: approval_resolved follows on the WebSocket and replaces them.
+    } catch (e) {
+      error.textContent = `Couldn't send: ${e instanceof TypeError ? "the runner is not reachable" : e.message}`;
+      for (const b of buttons) b.disabled = false;
+    }
+  };
+  allow.type = deny.type = "button";
+  allow.addEventListener("click", () => void answer("allow"));
+  deny.addEventListener("click", () => void answer("deny"));
+  actions.append(allow, deny, error);
+  el.append(actions);
+  approvals.set(event.approvalId, { el, actions, state });
+  add(el);
+}
+
+/** The card after its answer: what was decided, and no buttons. `decision` undefined: nobody answered. */
+function approvalDecided(card, decision) {
+  if (card.el.dataset.state !== "open") return;
+  card.el.dataset.state = decision === "allow" || decision === "deny" ? decision : "unanswered";
+  card.el.removeAttribute("aria-label");
+  card.state.textContent = decidedLabel(decision);
+  card.actions.remove();
+  follow();
+}
+
+/** A turn that ended leaves no approval to answer. */
+function endOpenApprovals() {
+  for (const card of approvals.values()) approvalDecided(card, undefined);
 }
 
 /** Draws one stored event. Events arrive in seq order; one already on the page is skipped. */
@@ -187,13 +265,23 @@ function apply(event) {
     case "tool_result":
       toolResult(event);
       break;
+    case "approval_request":
+      approvalCard(event);
+      break;
+    case "approval_resolved": {
+      const card = approvals.get(event.approvalId);
+      if (card) approvalDecided(card, event.decision);
+      break;
+    }
     case "result":
       endOpenTools();
+      endOpenApprovals();
       add(h("div", event.ok ? "note muted small" : "note error small", resultLine(event)));
       if (!event.ok && event.text) add(h("div", "error", event.text));
       break;
     case "error":
       endOpenTools();
+      endOpenApprovals();
       add(h("div", "error", event.message));
       break;
     default:
@@ -382,6 +470,7 @@ function select(id, push = false) {
   generation += 1;
   lastSeq = 0;
   tools.clear();
+  approvals.clear();
   streamedEl = null;
   loadErrorEl = null;
   els.stream.replaceChildren();

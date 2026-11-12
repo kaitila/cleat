@@ -116,6 +116,30 @@ a:hover { text-decoration: underline; }
 .show-all { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); }
 .show-all:hover { text-decoration: underline; }
 
+/* A tool call waiting for Allow or Deny. While it is open it is the one accented thing in the
+   stream, in the amber of its session's dot; decided, it is as quiet as a tool call. */
+.approval {
+  display: grid;
+  gap: var(--gap-2);
+  min-width: 0;
+  padding: var(--gap-2) var(--gap-3) var(--gap-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.approval[data-state="open"] { border-color: var(--warn); border-left-width: 3px; }
+.approval:not([data-state="open"]) { padding-bottom: var(--gap-2); }
+.approval-head { display: flex; align-items: baseline; gap: var(--gap-2); }
+.approval-tool { font-size: var(--text-s); font-weight: 600; }
+.approval-state { color: var(--muted); }
+.approval[data-state="open"] .approval-state { color: var(--warn); font-weight: 600; }
+.approval[data-state="deny"] .approval-state { color: var(--danger); }
+.approval-path { overflow-wrap: anywhere; }
+.approval-input { max-height: 40vh; overflow: auto; padding: var(--gap-2); background: var(--sunken); border-radius: var(--radius-s); }
+.approval-reason { overflow-wrap: anywhere; }
+.approval-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-2); }
+.approval-error { min-width: 0; overflow-wrap: anywhere; }
+
 .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .error { padding-left: var(--gap-3); border-left: 2px solid var(--danger); color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
 

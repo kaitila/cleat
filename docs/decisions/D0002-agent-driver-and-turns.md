@@ -7,7 +7,7 @@ Date: 2026-11-12. Status: active.
 - Only the main conversation is stored. A subagent's own messages (`parent_tool_use_id` set) are left out; what it did arrives as the Agent tool's `tool_result`.
 - Thinking blocks are not stored or streamed.
 - A `result` with `ok: false` (the SDK's error results, or a success result marked `is_error`) sets the session to `error`, as an `error` event does. A driver that throws, or ends without a result, is stored as an `error` event.
-- Until approvals exist (T-0007), the real driver's `canUseTool` denies every call that would prompt, with a message saying approvals are not available yet. Calls the workspace's own allow rules cover still run: `settingSources` is left out, so user, project and local settings load.
+- The real driver's `canUseTool` waits for the person's Allow or Deny for every call that would prompt ([D0004](D0004-approvals.md)). Calls the workspace's own allow rules cover still run: `settingSources` is left out, so user, project and local settings load.
 - Storage writes are synchronous: an event is appended to `events/<id>.jsonl`, then `sessions.json` is rewritten through a temporary file. Two events can't get the same seq, and no file is left half written.
 - A turn cut off by the runner stopping is left `running` on disk. The next start reads the last seq from the events file and records `the runner restarted`.
 

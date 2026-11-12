@@ -51,6 +51,12 @@ function seed(dataDir: string): string {
   store.append(id, { kind: "tool_use", toolUseId: "t1", name: "Read", input: { file_path: `/tmp/${HOSTILE}.txt` } });
   store.append(id, { kind: "tool_result", toolUseId: "t1", content: long, isError: true });
   store.append(id, { kind: "approval_request", approvalId: "a1", toolName: "Write", input: { file_path: "/tmp/x" } });
+  store.append(id, { kind: "approval_request", approvalId: "a2", toolUseId: "t2", toolName: "Bash", input: { command: `echo ${HOSTILE}` }, reason: `because ${HOSTILE}` });
+  store.append(id, { kind: "approval_resolved", approvalId: "a2", decision: "deny" });
+  store.append(id, { kind: "approval_request", approvalId: "a3", toolName: HOSTILE, input: { query: HOSTILE, lines: Array.from({ length: 40 }, (_, i) => `row ${i}`) } });
+  store.append(id, { kind: "approval_resolved", approvalId: "a3", decision: "allow" });
+  // A kind this page doesn't know (a newer runner's).
+  store.append(id, { kind: "compacted" } as never);
   store.append(id, { kind: "assistant_text", text: `Markup stays text: ${HOSTILE}\n\nRun \`bun test\` like this:\n\n\`\`\`ts\nconst html = '${HOSTILE}';\n\`\`\`\n\nThat is all.` });
   store.append(id, { kind: "result", ok: true, durationMs: 4200, costUsd: 0.031 });
   // Appending set the time to now: put it back three hours, so the session started below is the newest.
@@ -140,6 +146,65 @@ try {
   check(await page.evaluate(() => document.activeElement?.id === "reply-text"), "and has the focus back");
   check((await page.locator(".msg.user").count()) === 2 && (await page.locator(".msg.assistant").count()) === 2, "each message is on the page once");
 
+  // ---- a tool call that needs approval ----
+  const needs = "this one needs approval";
+  const waiting = await api.startSession(needs);
+  await page.goto(`${runner.url}/?session=${waiting.id}`);
+  const card = page.locator(".approval");
+  await card.locator("button", { hasText: "Allow" }).waitFor();
+  check((await card.count()) === 1 && (await card.getAttribute("data-state")) === "open", "a call that needs approval is a card in the stream");
+  check((await card.locator(".approval-tool").textContent()) === "Write", "it names the tool");
+  check((await card.locator(".approval-path").textContent()) === `${api.dir}/work/fake.txt`, "shows the file's path");
+  check((await card.locator(".approval-input").textContent()) === "fake", "and what would be written");
+  check((await card.locator(".approval-reason").textContent()) === "the fake agent asks before it writes", "and the reason");
+  check((await text(".approval-actions button")).join(",") === "Allow,Deny", "with Allow and Deny buttons");
+  const colour = (selector: string, property: string) => page.locator(selector).first().evaluate((el: Element, p: string) => getComputedStyle(el).getPropertyValue(p), property) as Promise<string>;
+  const warn = await page.evaluate(() => {
+    const probe = document.createElement("i");
+    probe.style.color = "var(--warn)";
+    document.body.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  });
+  await page.locator('.session[aria-current="true"] .dot[data-status="waiting_approval"]').waitFor();
+  check((await colour('.session[aria-current="true"] .dot', "background-color")) === warn, "the sidebar dot of a session waiting for approval is amber");
+  check((await colour(".approval", "border-left-color")) === warn, "and the open card is accented in the same amber");
+  check((await page.locator("#status").textContent()) === "waiting for approval" && (await page.locator("#reply-text").isDisabled()), "the head says it waits, and the reply box is off");
+  await shot("chat-approval-open-light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot("chat-approval-open-dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await card.locator("button", { hasText: "Allow" }).click();
+  await page.locator('.approval[data-state="allow"]').waitFor();
+  check((await card.locator(".approval-state").textContent()) === "Allowed", "clicking Allow resolves it: the card says Allowed");
+  check((await card.locator("button").count()) === 0, "and its buttons are gone");
+  await page.locator(".msg.assistant:not(.streaming)", { hasText: "The tool call was allowed." }).waitFor();
+  check(true, "the turn goes on with the call allowed");
+  await page.locator(".note", { hasText: "Done" }).waitFor();
+  check((await colour(".approval", "border-left-color")) !== warn, "decided, the card is no longer accented");
+  await shot("chat-approval-decided-light");
+  await page.reload();
+  await page.locator(".note", { hasText: "Done" }).waitFor();
+  check((await card.count()) === 1 && (await card.getAttribute("data-state")) === "allow" && (await card.locator(".approval-state").textContent()) === "Allowed", "after a reload the card is still there, as decided");
+  check((await card.locator("button").count()) === 0, "without buttons");
+  // Deny, and an answer the runner no longer takes.
+  const second = await api.startSession("this needs approval as well");
+  await page.goto(`${runner.url}/?session=${second.id}`);
+  await card.locator("button", { hasText: "Deny" }).waitFor();
+  const approvalRoute = `**/api/sessions/${second.id}/approvals/*`;
+  await page.route(approvalRoute, (route: Any) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "no such open approval" }) }));
+  await card.locator("button", { hasText: "Allow" }).click();
+  await card.locator(".approval-error", { hasText: "Couldn't send: this approval is no longer open" }).waitFor();
+  check((await card.getAttribute("data-state")) === "open" && (await card.locator("button:not([disabled])").count()) === 2, "an answer the runner refuses is said quietly on the card, which stays open");
+  await page.unroute(approvalRoute);
+  await card.locator("button", { hasText: "Deny" }).click();
+  await page.locator('.approval[data-state="deny"]').waitFor();
+  check((await card.locator(".approval-state").textContent()) === "Denied" && (await card.locator("button").count()) === 0, "clicking Deny resolves it as denied");
+  await page.locator(".msg.assistant:not(.streaming)", { hasText: "The tool call was denied." }).waitFor();
+  check(true, "and the turn goes on with the call denied");
+  await page.locator(".note", { hasText: "Done" }).waitFor();
+
   // ---- untrusted text, a failed tool call, a long result, an unknown event ----
   await page.locator(".session", { hasText: "<img" }).click();
   check(new URL(page.url()).searchParams.get("session") === hostileId, "clicking a session selects it and puts it in the URL");
@@ -163,7 +228,16 @@ try {
   await shot("chat-tool-open-light");
   await bad.locator("button.show-all").click();
   check((await bad.locator(".tool-result").textContent())?.endsWith("the last line"), "'show all' shows all of it");
-  check((await text(".note")).includes("approval request: Write"), "an unknown event kind is a quiet one-line note");
+  check((await text(".note")).includes("compacted"), "an unknown event kind is a quiet one-line note");
+  const cards = page.locator(".approval");
+  check((await cards.count()) === 3 && (await cards.locator("button:not(.show-all)").count()) === 0, "stored approvals are cards without buttons");
+  check((await text(".approval-state")).join(",") === "Not answered,Denied,Allowed", "each says what was decided, or that nobody answered before the turn ended");
+  check((await cards.nth(1).locator(".approval-input").textContent()) === `echo ${HOSTILE}` && (await cards.nth(1).locator(".approval-reason").textContent()) === `because ${HOSTILE}`, "a Bash approval shows its command, and markup in it and in the reason is text");
+  check((await cards.nth(2).locator(".approval-tool").textContent()) === HOSTILE, "so is markup in a tool's name");
+  const json = cards.nth(2).locator(".approval-input");
+  check((await json.textContent())?.startsWith(`{\n  "query": ${JSON.stringify(HOSTILE)}`) && !(await json.textContent())?.includes("row 39"), "another tool's input is shown as JSON, cut");
+  await cards.nth(2).locator("button.show-all").click();
+  check((await json.textContent())?.includes("row 39"), "'show all' shows the whole input");
   check((await page.locator(".error").count()) === 0, "and not an error");
   await page.emulateMedia({ colorScheme: "dark" });
   await shot("chat-tool-open-dark");
@@ -177,7 +251,7 @@ try {
   await page.goto(`${runner.url}/?session=${hostileId}`);
   await page.locator(".note", { hasText: "Done" }).waitFor();
   await page.locator("details.tool summary").click();
-  await page.locator("button.show-all").click();
+  await page.locator("details.tool button.show-all").click();
   const atBottom = () => page.evaluate(() => {
     const s = document.getElementById("scroller")!;
     return s.scrollHeight - s.scrollTop - s.clientHeight < 4;
