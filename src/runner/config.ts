@@ -15,6 +15,8 @@ export interface Config {
   workspaces: Workspace[];
   dataDir: string;
   configPath: string;
+  /** INTUITION_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
+  fakeAgent: boolean;
 }
 
 export const DEFAULT_CONFIG = {
@@ -64,5 +66,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }),
     dataDir,
     configPath: path,
+    fakeAgent: env.INTUITION_FAKE_AGENT === "1",
   };
 }
