@@ -116,30 +116,29 @@ try {
   await page.emulateMedia({ colorScheme: "light" });
 
   // ---- replying ----
-  // With a real session, 404 can only mean the runner has no reply route (its task wasn't merged).
-  const probe = await api.post(`/api/sessions/${session.id}/messages`, {});
   const reply = "and a second message";
-  await page.locator("#reply-text").fill("first line");
-  await page.locator("#reply-text").press("Shift+Enter");
-  check((await page.locator("#reply-text").inputValue()) === "first line\n", "Shift+Enter is a new line and sends nothing");
-  await page.locator("#reply-text").fill(reply);
-  await page.locator("#reply-text").press("Enter");
-  if (probe.status === 404) {
-    await page.locator("#reply-hint", { hasText: "Couldn't send: not found" }).waitFor();
-    check((await page.locator("#reply-text").inputValue()) === reply, "the runner has no reply route: the 404 is shown quietly and the typed reply is kept");
-    check((await page.locator(".error").count()) === 0, "and it is not drawn as an error in the stream");
-    console.log("  NOTE: POST /api/sessions/:id/messages is not in this runner, so 'the reply and a new answer' was NOT checked.");
-    failed = process.env.INTUITION_ALLOW_NO_REPLY !== "1";
-    if (failed) console.log("  That fails this check. Set INTUITION_ALLOW_NO_REPLY=1 to check the rest without it.");
-  } else {
-    await page.locator(".msg.user .user-text", { hasText: reply }).waitFor();
-    check(true, "typing a reply and pressing Enter shows the reply");
-    await page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${reply}` }).waitFor();
-    check(true, "and a new answer");
-    await page.locator("#reply-text:not([disabled])").waitFor();
-    check((await page.locator("#reply-text").inputValue()) === "", "the reply box is empty and enabled again");
-    check(await page.evaluate(() => document.activeElement?.id === "reply-text"), "and has the focus back");
-  }
+  const box = page.locator("#reply-text");
+  await box.fill("first line");
+  await box.press("Shift+Enter");
+  check((await box.inputValue()) === "first line\n", "Shift+Enter is a new line and sends nothing");
+  // A runner without the reply route answers 404: the page says so quietly and keeps what was typed.
+  const messages = `**/api/sessions/${session.id}/messages`;
+  await page.route(messages, (route: Any) => route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not found" }) }));
+  await box.fill(reply);
+  await box.press("Enter");
+  await page.locator("#reply-hint", { hasText: "Couldn't send: not found" }).waitFor();
+  check((await box.inputValue()) === reply, "a 404 from the reply route is shown quietly and the typed reply is kept");
+  check((await page.locator(".error").count()) === 0 && (await page.locator(".msg.user").count()) === 1, "and nothing is added to the stream");
+  await page.unroute(messages);
+  await box.press("Enter");
+  await page.locator(".msg.user .user-text", { hasText: reply }).waitFor();
+  check(true, "typing a reply and pressing Enter shows the reply");
+  await page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${reply}` }).waitFor();
+  check(true, "and a new answer");
+  await page.locator("#reply-text:not([disabled])").waitFor();
+  check((await box.inputValue()) === "", "the reply box is empty and enabled again");
+  check(await page.evaluate(() => document.activeElement?.id === "reply-text"), "and has the focus back");
+  check((await page.locator(".msg.user").count()) === 2 && (await page.locator(".msg.assistant").count()) === 2, "each message is on the page once");
 
   // ---- untrusted text, a failed tool call, a long result, an unknown event ----
   await page.locator(".session", { hasText: "<img" }).click();
@@ -215,7 +214,7 @@ try {
   }
 
   check(pageErrors.length === 0 || pageErrors.every((e) => /WebSocket|ERR_CONNECTION_REFUSED|404/.test(e)), `the page logged no errors of its own (${pageErrors.join(" | ") || "none"})`);
-  console.log(failed ? "chat-ui: FAILED (the reply route is missing)" : `chat-ui: passed (${passed.length} checks)`);
+  console.log(`chat-ui: passed (${passed.length} checks)`);
 } catch (e) {
   failed = true;
   console.error(`chat-ui: FAILED. ${(e as Error).message}`);
