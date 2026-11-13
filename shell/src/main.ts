@@ -1,19 +1,19 @@
 // The Windows shell: Electron's main process. It lives in the tray, opens the pop-up on the global
-// hotkey with the clipboard captured, and shows the runner's pages in small windows.
+// hotkey with the clipboard captured, shows the runner's pages in small windows, and keeps the dock
+// at the top of the screen.
 // Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, Menu, nativeImage, Notification, screen, session, Tray } from "electron";
+import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, session, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, type DockState, dockBounds, dockFocusable } from "./dock";
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, loginItem, type LoginResult } from "./login";
-import type { Notification as RunnerNotification } from "../../src/shared/protocol";
-import { chatUrl, promptUrl, sameOrigin, sessionOf } from "./origin";
-import { parseResponse, POLL_MS, POLL_TIMEOUT_MS, pollUrl, START, step, toastOf } from "./poller";
+import { chatUrl, dockUrl, promptUrl, sameOrigin, windowTarget } from "./origin";
 import type { SelfTestResult } from "./result";
-import { loadSettings, SETTINGS_FILE, type Settings } from "./settings";
+import { loadSettings, saveDock, SETTINGS_FILE, type Settings } from "./settings";
 import { RUNNER_START_MS, runnerCommand } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
@@ -21,7 +21,7 @@ const CHAT = { width: 1100, height: 720 };
 const ICON_SIZE = 32;
 /** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
 const SELF_TEST_HOTKEY = "Control+Alt+Shift+F11";
-/** Pages get no Node, no preload, and their own sandboxed process. */
+/** Pages get no Node and their own sandboxed process. Only the dock adds a preload, for its one-function bridge. */
 const WEB_PREFERENCES = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } as const;
 
 const args = parseArgs(process.argv);
@@ -30,6 +30,7 @@ let tray: Tray | null = null;
 let popup: BrowserWindow | null = null;
 let popupOpening = false;
 let chat: BrowserWindow | null = null;
+let dock: BrowserWindow | null = null;
 
 type Clip = { kind: "image"; png: Buffer } | { kind: "text"; text: string } | { kind: "empty" };
 
@@ -37,6 +38,7 @@ function icon() {
   return nativeImage.createFromBitmap(iconBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE });
 }
 
+/** The shell's own trouble only (the runner is not running, the hotkey is taken). Sessions show in the dock. */
 function notify(title: string, body: string): void {
   if (Notification.isSupported()) new Notification({ title, body, icon: icon() }).show();
   else console.error(`${title}: ${body}`);
@@ -74,9 +76,15 @@ function ensureRunner(): Promise<boolean> {
       if (await runnerAnswers()) return true;
     }
     return false;
-  })().finally(() => {
-    starting = null;
-  });
+  })()
+    .then((up) => {
+      // The runner is there, perhaps because the shell just started it: the dock comes with it.
+      if (up && !args.selfTest) void showDock();
+      return up;
+    })
+    .finally(() => {
+      starting = null;
+    });
   return starting;
 }
 
@@ -163,7 +171,7 @@ async function captureClipboard(): Promise<{ capture: Capture; posted: boolean }
 
 // --- Windows ---
 
-/** Every page stays on the runner's origin: other navigations and all new windows are refused. */
+/** Every page stays on the runner's origin: other navigations are refused, and so are new windows but the shell's own two. */
 function guard(): void {
   app.on("web-contents-created", (_event, contents) => {
     const stay = (event: { preventDefault(): void; url: string }) => {
@@ -173,8 +181,11 @@ function guard(): void {
     contents.on("will-redirect", stay);
     contents.on("will-attach-webview", (event) => event.preventDefault());
     contents.setWindowOpenHandler(({ url }) => {
-      // A link to the runner's own chat view opens in the chat window; nothing else opens.
-      if (sameOrigin(url, settings.runnerUrl) && new URL(url).pathname === "/") void openChat(sessionOf(url));
+      // A link to the runner's own chat view opens in the chat window, and the dock's link to /prompt opens
+      // the pop-up, as the hotkey does. Nothing else opens. The self-test opens them without taking the focus.
+      const target = windowTarget(url, settings.runnerUrl, dock !== null && !dock.isDestroyed() && contents === dock.webContents);
+      if (target?.kind === "chat") void openChat(target.session, Boolean(args.selfTest));
+      else if (target?.kind === "prompt") args.selfTest ? void openPopup(true) : newTask();
       return { action: "deny" };
     });
   });
@@ -285,9 +296,8 @@ async function openChat(sessionId?: string, inactive = false): Promise<void> {
   }
 }
 
-/** The tray's menu. "Open last session" is greyed out until a session has notified. */
+/** The tray's menu. */
 function trayMenu(): Menu {
-  const last = pollState.lastSession;
   let onLogin = false;
   try {
     onLogin = startsOnLogin();
@@ -297,8 +307,8 @@ function trayMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: "New task", click: newTask },
     { label: "Open chat", click: () => void openChat() },
-    { label: "Open last session", enabled: last !== null, click: () => void openChat(last ?? undefined) },
     { type: "separator" },
+    { label: "Show dock", type: "checkbox", checked: settings.dock, click: (item) => setDock(item.checked) },
     {
       label: "Start on login",
       type: "checkbox",
@@ -326,47 +336,166 @@ function createTray(): Tray {
   return t;
 }
 
-// --- Toasts ---
+// --- Dock ---
 
-let pollState = START;
-/** The newest toasts. Kept so their click handlers outlive the garbage collector. */
-const toasts: Notification[] = [];
-const KEEP_TOASTS = 20;
-/** How many session toasts were created: the self-test counts them, since nobody can see one from WSL. */
-let toastsCreated = 0;
+let dockState: DockState = "idle";
+/** True while the dock's page is loaded and its window shown. */
+let dockLoaded = false;
+let dockLoading: Promise<void> | null = null;
+/** The HTTP status of the dock window's last navigation. */
+let dockStatus = 0;
 
-/** Shows one of the runner's notifications as a toast. A click opens the chat on its session. */
-function toast(n: RunnerNotification): Notification {
-  const t = new Notification({ ...toastOf(n), icon: icon() });
-  toastsCreated++;
-  t.on("click", () => void openChat(n.sessionId, Boolean(args.selfTest)));
-  t.on("failed", (_event, error) => console.error("showing a toast failed", error));
-  toasts.push(t);
-  if (toasts.length > KEEP_TOASTS) toasts.shift();
-  t.show();
-  return t;
+/** Puts the dock's window where its state says, on the primary display as it is now. */
+function placeDock(): void {
+  if (!dock || dock.isDestroyed()) return;
+  // The display's bounds, not its work area: the dock touches the very top edge.
+  dock.setBounds(dockBounds(screen.getPrimaryDisplay().bounds, dockState));
 }
 
-/** One poll of the runner's notifications. A failed one is silent: the next asks for the same again. */
-async function pollOnce(): Promise<Notification[]> {
-  let response = null;
-  try {
-    const res = await fetch(pollUrl(settings.runnerUrl, pollState), { signal: AbortSignal.timeout(POLL_TIMEOUT_MS) });
-    if (res.ok) response = parseResponse(await res.json());
-  } catch {
-    // The runner is down or slow.
+/** Resizes the dock at once, keeps it centred, and lets it take the keyboard only in "open". */
+function setDockState(state: DockState): void {
+  const win = dock;
+  if (!win || win.isDestroyed()) return;
+  dockState = state;
+  const focusable = dockFocusable(state);
+  // Shrinking with the keyboard in it: the focus goes back to the window below.
+  if (!focusable && win.isFocused()) win.blur();
+  if (win.isFocusable() !== focusable) {
+    win.setFocusable(focusable);
+    // On Windows, making a window focusable puts it back in the taskbar.
+    win.setSkipTaskbar(true);
   }
-  const next = step(pollState, response);
-  const changed = next.state.lastSession !== pollState.lastSession;
-  pollState = next.state;
-  if (changed) tray?.setContextMenu(trayMenu());
-  if (!Notification.isSupported()) return [];
-  return next.show.map(toast);
+  placeDock();
 }
 
-/** Polls every two seconds, each poll starting after the one before has ended. */
-function startPolling(): void {
-  const tick = () => void pollOnce().catch((e) => console.error("polling failed", e)).finally(() => setTimeout(tick, POLL_MS));
+/** No dock on screen. Its window stays, hidden, for when the runner answers again. */
+function hideDock(): void {
+  dockLoaded = false;
+  if (dock && !dock.isDestroyed()) dock.hide();
+}
+
+function closeDock(): void {
+  dockLoaded = false;
+  if (dock && !dock.isDestroyed()) dock.destroy();
+  dock = null;
+}
+
+function createDock(): BrowserWindow {
+  const win = new BrowserWindow({
+    ...dockBounds(screen.getPrimaryDisplay().bounds, "idle"),
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    // No thick frame: no shadow, no edges to drag, no square outline around the island.
+    thickFrame: false,
+    roundedCorners: false,
+    movable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    // A tool window: not in the taskbar and not in Alt+Tab, also while it is focusable.
+    type: "toolbar",
+    focusable: false,
+    title: "intuition dock",
+    webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) },
+  });
+  // Fixed in size by refusing the drag, as the pop-up is (see there for why not resizable: false).
+  win.on("will-resize", (event) => event.preventDefault());
+  win.on("closed", () => {
+    if (dock === win) {
+      dock = null;
+      dockLoaded = false;
+    }
+  });
+  win.webContents.on("did-navigate", (_event, _url, code) => {
+    dockStatus = code;
+  });
+  // The page went away under a shown dock (the runner died, the page reloaded into nothing, its process
+  // crashed): an empty transparent window must not stay on screen. -3 is a navigation that was only aborted.
+  win.webContents.on("did-fail-load", (_event, code, _text, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) hideDock();
+  });
+  win.webContents.on("render-process-gone", () => hideDock());
+  dockState = "idle";
+  return win;
+}
+
+async function loadDock(): Promise<void> {
+  const win = (dock ??= createDock());
+  try {
+    // A page that loads starts over, so the window does too.
+    setDockState("idle");
+    dockStatus = 0;
+    await win.loadURL(dockUrl(settings.runnerUrl));
+    if (win.isDestroyed() || dock !== win) return;
+    // A runner without the page answers 404 with a body, which loads: that is not the dock.
+    if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl)} answered ${dockStatus}`);
+    dockLoaded = true;
+    // Never activated: showing the dock takes nothing from what the person is doing.
+    win.showInactive();
+  } catch (e) {
+    console.error("loading the dock failed", e);
+    hideDock();
+  }
+}
+
+/** Loads the dock's page and shows it, unless the setting is off or it is already up. Calls at the same moment share one load. */
+function showDock(): Promise<void> {
+  if (!settings.dock || dockLoaded) return Promise.resolve();
+  dockLoading ??= loadDock().finally(() => {
+    dockLoading = null;
+  });
+  return dockLoading;
+}
+
+/** The tray's "Show dock": at once, and written to the settings file so the next start remembers. */
+function setDock(on: boolean): void {
+  settings = { ...settings, dock: on };
+  try {
+    saveDock(join(app.getPath("userData"), SETTINGS_FILE), on);
+  } catch (e) {
+    console.error("writing the dock setting failed", e);
+  }
+  if (on) void showDock();
+  else closeDock();
+  tray?.setContextMenu(trayMenu());
+}
+
+/** The page's setState, through the preload's bridge. Taken only from the dock's own main frame on the runner's origin. */
+function onDockState(event: Electron.IpcMainEvent, value: unknown): void {
+  const frame = event.senderFrame;
+  const fromDock = dock !== null && !dock.isDestroyed() && event.sender === dock.webContents;
+  const state = acceptedState({ fromDock, mainFrame: frame !== null && frame.parent === null, url: frame?.url ?? null }, settings.runnerUrl, value);
+  if (state) setDockState(state);
+}
+
+/** Listens for the page's setState and for the displays changing. */
+function dockEvents(): void {
+  ipcMain.on(DOCK_CHANNEL, onDockState);
+  // A display added or removed, a new resolution or scale: centred again on the primary display.
+  screen.on("display-metrics-changed", placeDock);
+  screen.on("display-added", placeDock);
+  screen.on("display-removed", placeDock);
+}
+
+let dockMisses = 0;
+
+/** One check: is the runner there? Gone (two checks in a row), the dock hides; back, its page loads again and it shows. */
+async function checkDock(): Promise<void> {
+  if (!settings.dock) return;
+  if (await runnerAnswers()) {
+    dockMisses = 0;
+    await showDock();
+  } else if (++dockMisses >= DOCK_MISSES) hideDock();
+}
+
+/** Checks every few seconds. This never starts the runner: the shell's start, the hotkey and the tray do. */
+function watchDock(): void {
+  const tick = () => void checkDock().catch((e) => console.error("checking the dock failed", e)).finally(() => setTimeout(tick, DOCK_CHECK_MS));
   tick();
 }
 
@@ -377,8 +506,11 @@ async function selfTest(): Promise<SelfTestResult> {
     hotkeyRegistered: false, trayCreated: false, textCaptured: false, textPosted: false, imageCaptured: false, imagePosted: false,
     imagePath: null, notificationsSupported: false, popupCreated: false, popupWidth: 0, popupHeight: 0, popupUrl: null,
     popupVisible: false, popupCentred: false, foreignNavigationRefused: false, foreignWindowRefused: false, pageClosedPopup: false,
-    noWindowWithoutRunner: false, clipboardRestored: false, toastsOnFirstPoll: -1, toastsCreated: -1, toastTitle: null, toastBody: null,
-    toastShown: false, toastError: null, toastOpenedUrl: null, lastSession: null, loginItemRead: false, openAtLogin: null, errors: [],
+    noWindowWithoutRunner: false, clipboardRestored: false, loginItemRead: false, openAtLogin: null,
+    dockOffNoWindow: false, dockCreated: false, dockUrl: null, dockVisible: false, dockBridge: null, primaryDisplay: null,
+    dockIdleBounds: null, dockIdleFocusable: null, dockIdleFocused: null, dockOpenBounds: null, dockOpenFocusable: null, dockOtherValueIgnored: false,
+    dockBackBounds: null, dockBackFocusable: null, dockForeignOriginIgnored: false, dockOpenedChatUrl: null, dockOpenedPromptUrl: null,
+    dockOtherWindowRefused: false, dockHiddenWithoutRunner: false, dockShownAgain: false, errors: [],
   };
   const step = async (name: string, run: () => Promise<void>) => {
     try {
@@ -404,11 +536,14 @@ async function selfTest(): Promise<SelfTestResult> {
     const { capture, posted } = await captureClipboard();
     r.textCaptured = capture.kind === "text" && capture.text === marker;
     r.textPosted = posted;
+    // Said in full: on a locked desktop, or with another program holding the clipboard, the write does not land.
+    if (!r.textCaptured) r.errors.push(`text: the clipboard was given the marker and read back as ${capture.kind === "text" ? `other text (${capture.text.length} characters)` : capture.kind}`);
   });
   await step("image", async () => {
     await writeClipboard({ kind: "image", png: icon().toPNG() });
     const { capture, posted } = await captureClipboard();
     r.imageCaptured = capture.kind === "image";
+    if (!r.imageCaptured) r.errors.push(`image: the clipboard was given a PNG and read back as ${capture.kind}`);
     r.imagePath = capture.kind === "image" ? capture.path : null;
     r.imagePosted = posted;
   });
@@ -450,31 +585,87 @@ async function selfTest(): Promise<SelfTestResult> {
     r.pageClosedPopup = await Promise.race([closed, sleep(3000).then(() => false)]);
     if (!win.isDestroyed()) win.destroy();
   });
-  await step("toasts", async () => {
-    // The stub runner has two notifications from before this first poll, and records one more after it.
-    await pollOnce();
-    r.toastsOnFirstPoll = toastsCreated;
-    const shown = await pollOnce();
-    r.toastsCreated = toastsCreated;
-    r.lastSession = pollState.lastSession;
-    const t = shown[0];
-    if (!t) throw new Error("the second poll showed no toast");
-    r.toastTitle = t.title;
-    r.toastBody = t.body;
-    // Windows answers show() with one of the two events; neither says the person saw it.
-    const outcome = await Promise.race([
-      new Promise<string>((resolve) => t.once("show", () => resolve("show"))),
-      new Promise<string>((resolve) => t.once("failed", (_event, error) => resolve(`failed: ${error}`))),
-      sleep(3000).then(() => "nothing"),
-    ]);
-    r.toastShown = outcome === "show";
-    r.toastError = outcome === "show" ? null : outcome;
-    // Nobody can click it from WSL: the click is sent to the toast's own handler.
-    t.emit("click");
+  await step("dock off", async () => {
+    // "dock": false in the settings: no window at all.
+    settings = { ...settings, dock: false };
+    try {
+      await showDock();
+      r.dockOffNoWindow = dock === null && BrowserWindow.getAllWindows().length === 0;
+    } finally {
+      settings = { ...settings, dock: true };
+    }
+  });
+  await step("dock", async () => {
+    await showDock();
+    const win = dock;
+    if (!win || win.isDestroyed()) throw new Error("the dock was not created");
+    r.dockCreated = true;
+    r.dockUrl = win.webContents.getURL();
+    r.dockVisible = win.isVisible();
+    r.primaryDisplay = screen.getPrimaryDisplay().bounds;
+    const run = (code: string) => win.webContents.executeJavaScript(code, true);
+    r.dockBridge = String(await run("typeof window.intuitionDock + ':' + Object.keys(window.intuitionDock ?? {}).join(',') + ':' + typeof window.require + ':' + typeof window.process"));
+    const same = (a: Electron.Rectangle, b: Electron.Rectangle) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+    /** Asks through the page, as the page would, and waits for the window to get there (or not). */
+    const ask = async (state: string, expect: DockState | null) => {
+      const before = win.getBounds();
+      await run(`window.intuitionDock.setState(${JSON.stringify(state)}); 0`);
+      const want = expect ? dockBounds(screen.getPrimaryDisplay().bounds, expect) : null;
+      // A refused call changes nothing: there is nothing to wait for but time.
+      for (let i = 0; i < (want ? 30 : 6) && !(want && same(win.getBounds(), want)); i++) await sleep(100);
+      return { bounds: win.getBounds(), focusable: win.isFocusable(), unchanged: same(win.getBounds(), before) };
+    };
+    r.dockIdleBounds = win.getBounds();
+    r.dockIdleFocusable = win.isFocusable();
+    r.dockIdleFocused = win.isFocused();
+    const open = await ask("open", "open");
+    r.dockOpenBounds = open.bounds;
+    r.dockOpenFocusable = open.focusable;
+    // Another value: refused, still open.
+    const other = await ask("huge", null);
+    r.dockOtherValueIgnored = other.unchanged && other.focusable;
+    const back = await ask("idle", "idle");
+    r.dockBackBounds = back.bounds;
+    r.dockBackFocusable = back.focusable;
+    // The page is on an origin that is not the runner's: the shell is told its runner is elsewhere
+    // (localhost is another origin), so the same page's call now comes from a foreign one.
+    const real = settings.runnerUrl;
+    settings = { ...settings, runnerUrl: real.replace("127.0.0.1", "localhost") };
+    try {
+      const foreign = await ask("open", null);
+      r.dockForeignOriginIgnored = foreign.unchanged && !foreign.focusable;
+    } finally {
+      settings = { ...settings, runnerUrl: real };
+    }
+
+    // The dock's links: the chat on a session, the pop-up, and nothing else.
+    await run(`window.open(${JSON.stringify(chatUrl(real, "self-test-session"))}); 0`);
     for (let i = 0; i < 40 && !chat?.isVisible(); i++) await sleep(100);
-    r.toastOpenedUrl = chat?.webContents.getURL() ?? null;
+    r.dockOpenedChatUrl = chat?.webContents.getURL() ?? null;
     chat?.destroy();
-    t.close();
+    await run(`window.open(${JSON.stringify(promptUrl(real))}); 0`);
+    for (let i = 0; i < 40 && !popup?.isVisible(); i++) await sleep(100);
+    r.dockOpenedPromptUrl = popup?.webContents.getURL() ?? null;
+    popup?.destroy();
+    const windows = BrowserWindow.getAllWindows().length;
+    await run(`window.open(${JSON.stringify(new URL("/assets/base.css", real).href)}); window.open("https://example.invalid/"); 0`);
+    await sleep(500);
+    r.dockOtherWindowRefused = BrowserWindow.getAllWindows().length === windows;
+
+    // The runner goes away (port 9, discard: nothing answers): after two checks the dock is hidden, not left
+    // empty on screen. It answers again: the next check loads the page and shows the dock, idle.
+    settings = { ...settings, runnerUrl: "http://127.0.0.1:9" };
+    try {
+      await checkDock();
+      const afterOne = win.isVisible();
+      await checkDock();
+      r.dockHiddenWithoutRunner = afterOne && !win.isVisible();
+    } finally {
+      settings = { ...settings, runnerUrl: real };
+    }
+    await checkDock();
+    r.dockShownAgain = win.isVisible() && win.webContents.getURL() === r.dockUrl && !win.isFocusable();
+    closeDock();
   });
   await step("no runner", async () => {
     const real = settings.runnerUrl;
@@ -496,6 +687,7 @@ function start(): void {
   if (args.runnerUrl) settings = { ...settings, runnerUrl: new URL(args.runnerUrl).origin };
   Menu.setApplicationMenu(null);
   guard();
+  dockEvents();
 
   if (args.selfTest) {
     const file = args.selfTest;
@@ -515,7 +707,7 @@ function start(): void {
   // The runner is started here when it is not up: after a login, nobody has started it yet.
   if (args.session) void openChat(args.session);
   else void ensureRunner().then((up) => (up ? undefined : runnerDown()));
-  startPolling();
+  watchDock();
 }
 
 /** False for a second copy (the running shell has been handed this command line) and for --quit with no shell running. */
@@ -536,7 +728,7 @@ if (args.login) {
 } else if (!shouldRun()) {
   app.exit(0);
 } else {
-  // Windows toasts need an app id, and the login item is named after it.
+  // Windows notifications need an app id, and the login item is named after it.
   app.setAppUserModelId(APP_ID);
   // The shell stays in the tray when its windows close.
   app.on("window-all-closed", () => {});
