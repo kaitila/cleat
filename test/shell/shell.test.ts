@@ -383,7 +383,7 @@ describe("the dock", () => {
     for (const event of ["display-metrics-changed", "display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", placeDock);`);
   });
 
-  test("main.ts: one listener on the dock's channel, and it resizes only through the validation", () => {
+  test("main.ts: one listener on the dock's channel, and it takes a state only through the validation", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     expect(main.match(/ipcMain\.\w+\(/g)).toEqual(["ipcMain.on("]);
     expect(main).toContain("ipcMain.on(DOCK_CHANNEL, onDockState);");

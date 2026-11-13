@@ -16,7 +16,8 @@ Small, clean and calm: a tool that lives in the tray. Everything is in `src/web/
 | `--control`, `--control-s`, `--dot` | Heights: 28px for buttons, inputs and rows; 20px for small buttons and key hints; the 7px status dot |
 | `--hairline`, `--ring` | Border width (below); the 2px focus ring |
 | `--shadow` | Only for what floats above the page (a menu). Nothing in the page's flow has one, and neither has the dock (below) |
-| `--motion`, `--ease` | 150ms for colour changes; the dock changes size in two of them. `prefers-reduced-motion` turns all motion off |
+| `--motion`, `--ease` | 150ms for colour changes. `prefers-reduced-motion` turns all motion off |
+| `--island-open`, `--island-close`, `--settle`, `--island-quiet` | The dock's island: 320ms to grow, on a curve that leaves fast and settles long without passing its size; 220ms to shrink; how much of it shows (0.55) while nothing is going on |
 | `--sidebar`, `--measure` | Chat view: the sidebar's width; the widest the stream gets |
 
 Light and dark come from `prefers-color-scheme`, each with its own values: in both the page is the middle surface, the sidebar sits behind it and cards in front.
@@ -50,6 +51,10 @@ Every border is `var(--hairline) solid` a line colour: one device pixel, so 1px,
 - **Approval card**: `.approval` with `data-state` `open`, `allow`, `deny` or `unanswered`; `.approval-head`, `-tool`, `-state`, `-path`, `-input`, `-reason`, `-actions`. Open, it is the one amber thing on the page; decided, it is as quiet as a tool call.
 
 ## The dock
-One dark island hanging from the top edge of the screen, the same in both schemes (`.dark`), on the `--sunken` surface: the darkest, so it reads as one object on any desktop. Its top corners are square, since it hangs from the edge; the bottom ones have `--radius`. Its edge is a `--line-strong` hairline on the three free sides. It has no shadow: its window is exactly as big as the island ([protocol](protocol.md), "Dock"), so there is nowhere to draw one. The three sizes are the contract's and are set by `dock.js`, not by the stylesheet. Each state's content keeps its full size and fades in while the island changes size around it, so nothing reflows on the way. The open dock uses the components below at their usual sizes; a tool call there is one row (`.tool-name`, `.tool-line`, `.tool-mark`) with no body, which the chat view has.
+One dark island hanging from the top edge of the screen, the same in both schemes (`.dark`), on the `--sunken` surface: the darkest, so it reads as one object on any desktop. Its top corners are square, since it hangs from the edge; the bottom ones have `--radius`. Its edge is a hairline on the three free sides: `--line-strong`, and the quieter `--line` when nothing is going on. It has no shadow, filter or blur.
+
+It is subtle before anything else. Idle is a sliver at most 22px tall and as wide as its words: a dot alone, 16px tall and at `--island-quiet`, when nothing is going on; muted words when something runs; colour (`--warn`, `--danger`) only for "needs you" and "failed". A peek is one 40px line. Open is as tall as its content, at most 480px.
+
+The island's element is as large as the shell's window and never changes size ([protocol](protocol.md), "Dock"; [D0010](decisions/D0010-dock-fixed-window.md)). What is seen of it is its `clip-path`, whose size `dock.js` sets from the contract's numbers and the content; the edge is the island's colour showing around a surface clipped one hairline smaller. A change of state animates that clip, and the opacity and transform of the content, and nothing else: each state's content keeps its full size and place and fades in once the shape is most of the way there, so nothing reflows on the way. The shape never overshoots: it hangs from the screen's edge. With `prefers-reduced-motion` the shape changes at once and the content fades in plainly. The open dock uses the components above at their usual sizes; a tool call there is one row (`.tool-name`, `.tool-line`, `.tool-mark`) with no body, which the chat view has.
 
 Focus is always visible: a 2px accent ring (`:focus-visible`). The windows are desktop windows used with a keyboard and a pointer, so controls are 28px tall, not touch sized; below 700px the chat view stacks the sessions above the stream.
