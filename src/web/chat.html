@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>intuition</title>
+  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/base.css">
   <link rel="stylesheet" href="/assets/chat.css">
   <script type="module" src="/assets/chat.js"></script>
@@ -13,7 +14,7 @@
     <nav class="sidebar" aria-label="Sessions">
       <div class="sidebar-head">
         <span class="brand">intuition</span>
-        <a class="new-task small" href="/prompt">New task</a>
+        <a class="new-task button quiet" href="/prompt">New task</a>
       </div>
       <p id="sessions-empty" class="sessions-empty muted small" hidden>No sessions yet.</p>
       <ul id="sessions" class="sessions"></ul>
@@ -30,13 +31,13 @@
       </header>
       <div id="scroller" class="scroller">
         <div id="stream" class="stream" role="log" aria-label="Session"></div>
-        <div id="empty" class="empty muted" hidden>
-          <p>Nothing here yet.</p>
-          <p class="small">Start a session with <a href="/prompt">New task</a>.</p>
+        <div id="empty" class="empty" hidden>
+          <p class="strong">Nothing here yet.</p>
+          <p class="muted small">Start a session with <a href="/prompt">New task</a>.</p>
         </div>
       </div>
       <form id="reply" class="reply" hidden>
-        <textarea id="reply-text" rows="1" placeholder="Reply" aria-label="Reply" aria-describedby="reply-hint" disabled></textarea>
+        <textarea id="reply-text" class="input" rows="1" placeholder="Reply" aria-label="Reply" aria-describedby="reply-hint" disabled></textarea>
         <p id="reply-hint" class="reply-hint muted small" role="status"></p>
       </form>
     </main>

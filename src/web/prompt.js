@@ -151,15 +151,15 @@ function start() {
       what.src = `/api/clipboard/image?at=${encodeURIComponent(attachment.capturedAt)}`;
     } else {
       what = document.createElement("span");
-      what.className = "clip-text";
+      what.className = "clip-text mono";
       what.textContent = preview(attachment.text);
     }
     const label = document.createElement("span");
-    label.className = "clip-label muted";
+    label.className = "clip-label label";
     label.textContent = attachment.kind === "image" ? "Clipboard image" : "Clipboard";
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "clip-remove";
+    remove.className = "clip-remove quiet small";
     remove.textContent = "×";
     remove.title = "Remove (Alt+Backspace)";
     remove.setAttribute("aria-label", "Remove the clipboard attachment");

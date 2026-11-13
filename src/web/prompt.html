@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>intuition</title>
+  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/base.css">
   <link rel="stylesheet" href="/assets/prompt.css">
   <script type="module" src="/assets/prompt.js"></script>
@@ -13,10 +14,10 @@
     <div id="workspaces" class="workspaces" role="radiogroup" aria-label="Workspace"></div>
     <textarea id="task" class="task" aria-label="Task" placeholder="What should Claude do?" spellcheck="false" autofocus></textarea>
     <!-- The clipboard attachment. Empty and hidden until prompt.js finds a fresh capture. -->
-    <div id="clipboard" class="clipboard" hidden></div>
+    <div id="clipboard" class="clipboard card" hidden></div>
     <footer class="foot small">
       <span id="status" class="status" role="status" aria-live="polite"></span>
-      <span class="keys muted" aria-hidden="true"><kbd>Enter</kbd> start <kbd>Shift+Enter</kbd> new line <kbd>Esc</kbd> close</span>
+      <span class="keys muted" aria-hidden="true"><kbd>Enter</kbd><span>start</span><kbd>Shift</kbd><kbd>Enter</kbd><span>new line</span><kbd>Esc</kbd><span>close</span></span>
     </footer>
   </form>
 </body>

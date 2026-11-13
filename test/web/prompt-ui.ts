@@ -25,11 +25,14 @@ interface Page {
   keyboard: { type(text: string): Promise<void>; press(key: string): Promise<void> };
 }
 interface Browser {
-  newContext(options: { viewport: { width: number; height: number }; colorScheme: "light" | "dark" }): Promise<{ newPage(): Promise<Page> }>;
+  newContext(options: { viewport: { width: number; height: number }; colorScheme: "light" | "dark"; deviceScaleFactor?: number }): Promise<{
+    newPage(): Promise<Page>;
+    on(event: "request", listener: (request: { url(): string }) => void): void;
+  }>;
   close(): Promise<void>;
 }
 interface Playwright {
-  chromium: { launch(options: { headless: boolean }): Promise<Browser> };
+  chromium: { launch(options: { headless: boolean; args?: string[] }): Promise<Browser> };
 }
 
 function skip(why: string): never {
@@ -40,9 +43,13 @@ function skip(why: string): never {
 if (process.env.CI) skip("CI has no browser for this check");
 const playwrightPath = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
 let browser: Browser;
+/** A second Chromium at two device pixels per CSS pixel. The flag is needed: an emulated deviceScaleFactor alone still snaps borders to whole CSS pixels. */
+let dense: Browser;
 try {
   const mod = (await import(playwrightPath)) as Playwright & { default?: Playwright };
-  browser = await (mod.chromium ?? mod.default!.chromium).launch({ headless: true });
+  const chromium = mod.chromium ?? mod.default!.chromium;
+  browser = await chromium.launch({ headless: true });
+  dense = await chromium.launch({ headless: true, args: ["--force-device-scale-factor=2"] });
 } catch (e) {
   skip(`no browser is available (${playwrightPath}): ${(e as Error).message.split("\n")[0]}`);
 }
@@ -123,13 +130,21 @@ const ready = () => document.querySelectorAll("#workspaces input").length > 0;
 const sessions = async () => ((await (await fetch(`${runner.url}/api/sessions`)).json()) as SessionsResponse).sessions;
 const checkedOf = (s: ReturnType<typeof state>) => s.workspaces.find((w) => w.checked)?.name ?? null;
 
-async function open(colorScheme: "light" | "dark"): Promise<Page> {
-  const page = await (await browser.newContext({ viewport: SIZE, colorScheme })).newPage();
+/** Every URL the pages asked for: none may be on another host (the fonts are the runner's own files). */
+const requested: string[] = [];
+async function newPage(colorScheme: "light" | "dark", from = browser): Promise<Page> {
+  const context = await from.newContext({ viewport: SIZE, colorScheme, ...(from === dense ? { deviceScaleFactor: 2 } : {}) });
+  context.on("request", (r) => requested.push(r.url()));
+  return context.newPage();
+}
+async function open(colorScheme: "light" | "dark", from = browser): Promise<Page> {
+  const page = await newPage(colorScheme, from);
   await page.goto(`${runner.url}/prompt`);
   await page.waitForFunction(ready);
   return page;
 }
 async function shot(page: Page, name: string): Promise<void> {
+  await page.evaluate(() => document.fonts.ready);
   const path = join(shots, `${name}.png`);
   await page.screenshot({ path });
   console.log(`screenshot: ${path}`);
@@ -146,6 +161,10 @@ try {
   check("the clipboard element is there, empty and hidden", s.clipboardHidden);
   check("no scrollbars at 560x380", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
   await shot(page, "light-empty");
+  const fonts = await page.evaluate(() => document.fonts.check('13px "Inter Variable"'));
+  check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/inter-latin.woff2"), requested.join(" "));
+  const hairline = () => getComputedStyle(document.querySelector("#workspaces")!).borderBottomWidth;
+  check("a hairline is 1px where a CSS pixel is one device pixel", (await page.evaluate(hairline)) === "1px", await page.evaluate(hairline));
 
   await page.keyboard.press("Enter");
   await Bun.sleep(200);
@@ -250,6 +269,10 @@ try {
   check("the task box keeps the focus with an attachment", s.focus === "task", s.focus);
   check("no scrollbars with a text attachment", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
   await shot(withText, "light-clipboard-text");
+  check(
+    "the code font is loaded for the clipboard text, from the runner's /assets/fonts",
+    (await withText.evaluate(() => document.fonts.check('12px "JetBrains Mono Variable"'))) && requested.some((u) => new URL(u).pathname === "/assets/fonts/jetbrains-mono-latin.woff2"),
+  );
   const sent = await send(withText, "Explain this code");
   const sentUser = sent ? await userTexts(sent.id) : [];
   check("the session's user event has the task, then the clipboard text under 'Clipboard:'", sentUser[0]?.text === `Explain this code\n\nClipboard:\n${COPIED}`, JSON.stringify(sentUser));
@@ -294,7 +317,7 @@ try {
 
   // An older capture is not attached. The page's clock is moved on instead of waiting 31 seconds.
   await post({ text: "copied a while ago" });
-  const old = await (await browser.newContext({ viewport: SIZE, colorScheme: "light" })).newPage();
+  const old = await newPage("light");
   await old.addInitScript(() => {
     const real = Date.now.bind(Date);
     Date.now = () => real() + 31_000;
@@ -329,10 +352,27 @@ try {
       rmSync(join(imageFile, ".."), { recursive: true, force: true });
     }
   }
+
+  // Two device pixels per CSS pixel, light and dark: hairlines are half a CSS pixel, and still nothing scrolls.
+  await post({ text: COPIED });
+  for (const scheme of ["light", "dark"] as const) {
+    const twice = await open(scheme, dense);
+    await twice.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
+    await twice.keyboard.type("Rename the config loader and update its tests");
+    s = await twice.evaluate(state);
+    const width = await twice.evaluate(() => `${devicePixelRatio} ${getComputedStyle(document.querySelector("#workspaces")!).borderBottomWidth}`);
+    check(`at 2x (${scheme}) a hairline is 0.5px and nothing scrolls`, width === "2 0.5px" && !s.overflow && s.gutter === 0, `${width} ${JSON.stringify({ overflow: s.overflow, gutter: s.gutter })}`);
+    await shot(twice, `${scheme}-2x`);
+    await twice.close();
+  }
+
+  const elsewhere = requested.filter((u) => !/^(?:data|blob|about):/.test(u) && new URL(u).hostname !== "127.0.0.1");
+  check("no request left 127.0.0.1", requested.length > 0 && elsewhere.length === 0, elsewhere.join(" "));
 } catch (e) {
   check("the run finished", false, (e as Error).stack ?? String(e));
 } finally {
   await browser.close();
+  await dense.close();
   await runner.stop();
 }
 console.log(failures ? `${failures} failed` : "all passed");

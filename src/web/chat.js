@@ -98,7 +98,7 @@ function renderMarkdown(el, text) {
   el.replaceChildren(
     ...splitMarkdown(text).map((block) => {
       if (block.type === "code") {
-        const pre = h("pre", "code-block");
+        const pre = h("pre", "code-block well");
         pre.append(h("code", "", block.text));
         return pre;
       }
@@ -130,8 +130,8 @@ function toolCard(toolUseId, name, input) {
   const mark = h("span", "tool-mark small");
   summary.append(h("span", "tool-name", name), h("span", "tool-line mono", toolSummary(name, input)), mark);
   const body = h("div", "tool-body");
-  const result = h("pre", "tool-result muted", "Waiting for the result.");
-  body.append(h("div", "tool-label muted small", "Input"), h("pre", "tool-input", inputText(input, 2)), h("div", "tool-label muted small", "Result"), result);
+  const result = h("pre", "tool-result well muted", "Waiting for the result.");
+  body.append(h("div", "label", "Input"), h("pre", "tool-input well", inputText(input, 2)), h("div", "label", "Result"), result);
   details.append(summary, body);
   const tool = { details, body, result, mark, done: false };
   tools.set(toolUseId, tool);
@@ -167,7 +167,7 @@ function endOpenTools() {
 
 /** A cut text with a "show all" button after it, as a tool result has. */
 function showAll(pre, full, parent) {
-  const all = h("button", "show-all small", "show all");
+  const all = h("button", "show-all quiet small", "Show all");
   all.type = "button";
   all.addEventListener("click", () => {
     pre.textContent = full;
@@ -193,7 +193,7 @@ function approvalCard(event) {
   const view = approvalView(event.toolName, event.input);
   if (view.path) el.append(h("div", "approval-path mono", view.path));
   if (view.text) {
-    const pre = h("pre", "approval-input", view.text);
+    const pre = h("pre", "approval-input well", view.text);
     el.append(pre);
     if (view.text.length < view.full.length) showAll(pre, view.full, el);
   }
@@ -251,7 +251,7 @@ function apply(event) {
   lastSeq = event.seq;
   switch (event.kind) {
     case "user": {
-      const el = add(h("div", "msg user"));
+      const el = add(h("div", "msg user card"));
       el.append(h("div", "user-text", event.text));
       if (event.imagePath) el.append(h("div", "attachment mono muted", event.imagePath));
       break;
@@ -276,7 +276,7 @@ function apply(event) {
     case "result":
       endOpenTools();
       endOpenApprovals();
-      add(h("div", event.ok ? "note muted small" : "note error small", resultLine(event)));
+      add(h("div", event.ok ? "note num muted small" : "note num error small", resultLine(event)));
       if (!event.ok && event.text) add(h("div", "error", event.text));
       break;
     case "error":
@@ -351,7 +351,7 @@ function renderSidebar() {
     let row = rows.get(session.id);
     if (!row) {
       const item = h("li");
-      const link = h("a", "session");
+      const link = h("a", "session row");
       link.href = `/?session=${encodeURIComponent(session.id)}`;
       link.addEventListener("click", (e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
@@ -394,7 +394,7 @@ function renderHead() {
 
 function grow() {
   els.text.style.height = "auto";
-  els.text.style.height = `${els.text.scrollHeight + 2}px`;
+  els.text.style.height = `${els.text.scrollHeight + els.text.offsetHeight - els.text.clientHeight}px`;
 }
 
 function renderReply() {

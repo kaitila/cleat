@@ -22,12 +22,16 @@ function skip(why: string): never {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-async function launch(): Promise<Any> {
+/**
+ * A headless Chromium. `args` are its command line: an emulated deviceScaleFactor alone still snaps
+ * borders to whole CSS pixels, so the 2x pass starts one with --force-device-scale-factor=2.
+ */
+async function launch(args: string[] = []): Promise<Any> {
   if (process.env.CI) skip("CI is set: no browser there");
   if (!existsSync(PLAYWRIGHT)) skip(`no playwright at ${PLAYWRIGHT}`);
   try {
     const playwright: Any = await import(PLAYWRIGHT);
-    return await (playwright.chromium ?? playwright.default.chromium).launch();
+    return await (playwright.chromium ?? playwright.default.chromium).launch({ args });
   } catch (e) {
     skip(`no browser available: ${String((e as Error).message ?? e).split("\n")[0]}`);
   }
@@ -75,6 +79,9 @@ let failed = false;
 
 try {
   const context = await browser.newContext({ viewport: { width: 1100, height: 720 }, colorScheme: "light" });
+  /** Every URL the pages asked for: none may be on another host (the fonts are the runner's own files). */
+  const requested: string[] = [];
+  context.on("request", (r: Any) => requested.push(r.url()));
   const page = await context.newPage();
   const pageErrors: string[] = [];
   page.on("pageerror", (e: Error) => pageErrors.push(e.message));
@@ -84,6 +91,9 @@ try {
   const text = (selector: string) => page.locator(selector).allTextContents() as Promise<string[]>;
   const shot = async (name: string) => {
     const path = join(shots, `${name}.png`);
+    // Away from whatever was clicked, and after the colour transitions.
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(250);
     await page.screenshot({ path });
     console.log(`  screenshot: ${path}`);
   };
@@ -116,10 +126,31 @@ try {
   await page.locator("#reply-text:not([disabled])").waitFor();
   check(true, "the reply box is enabled once the turn has ended");
   await tool.locator("summary").click();
+  await page.evaluate(() => document.fonts.ready);
+  check(await page.evaluate(() => document.fonts.check('13px "Inter Variable"') && document.fonts.check('12px "JetBrains Mono Variable"')), "the interface font and the code font are loaded");
+  check(requested.some((u) => new URL(u).pathname === "/assets/fonts/inter-latin.woff2") && requested.some((u) => new URL(u).pathname === "/assets/fonts/jetbrains-mono-latin.woff2"), "from the runner's own /assets/fonts");
+  const borderOf = (p: Any) => p.locator(".sidebar").evaluate((el: Element) => getComputedStyle(el).borderRightWidth) as Promise<string>;
+  check((await borderOf(page)) === "1px", "a hairline is 1px where a CSS pixel is one device pixel");
   await shot("chat-light");
   await page.emulateMedia({ colorScheme: "dark" });
   await shot("chat-dark");
   await page.emulateMedia({ colorScheme: "light" });
+  // The same session at two device pixels per CSS pixel: hairlines become half a CSS pixel.
+  const denseBrowser = await launch(["--force-device-scale-factor=2"]);
+  for (const colorScheme of ["light", "dark"] as const) {
+    const dense = await denseBrowser.newContext({ viewport: { width: 1100, height: 720 }, colorScheme, deviceScaleFactor: 2 });
+    dense.on("request", (r: Any) => requested.push(r.url()));
+    const densePage = await dense.newPage();
+    await densePage.goto(`${runner.url}/?session=${session.id}`);
+    await densePage.locator(".note", { hasText: "Done" }).waitFor();
+    await densePage.evaluate(() => document.fonts.ready);
+    if (colorScheme === "light") check((await borderOf(densePage)) === "0.5px", "and 0.5px where it is two");
+    const path = join(shots, `chat-${colorScheme}-2x.png`);
+    await densePage.screenshot({ path });
+    console.log(`  screenshot: ${path}`);
+    await dense.close();
+  }
+  await denseBrowser.close();
 
   // ---- replying ----
   const reply = "and a second message";
@@ -287,6 +318,8 @@ try {
     await empty.stop();
   }
 
+  const elsewhere = requested.filter((u) => !/^(?:data|blob|about):/.test(u) && new URL(u).hostname !== "127.0.0.1");
+  check(requested.length > 0 && elsewhere.length === 0, `no request left 127.0.0.1 (${elsewhere.join(" ") || "none did"})`);
   check(pageErrors.length === 0 || pageErrors.every((e) => /WebSocket|ERR_CONNECTION_REFUSED|404/.test(e)), `the page logged no errors of its own (${pageErrors.join(" | ") || "none"})`);
   console.log(`chat-ui: passed (${passed.length} checks)`);
 } catch (e) {
