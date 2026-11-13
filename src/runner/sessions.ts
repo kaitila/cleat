@@ -1,8 +1,9 @@
 // Starts sessions, continues them with replies, and runs their turns in the background: every
 // output of the agent driver is stored (events) or passed on (deltas), and sent to the WebSocket clients.
-import type { ApprovalDecision, Notification, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
+import type { ApprovalDecision, Notification, PermissionMode, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
 import type { AgentDriver, ApprovalAsk, NewEvent } from "./agent";
 import { approvalBody, bodyOf, NO_TEXT, type Notifications } from "./notifications";
+import { DEFAULT_PERMISSION_MODE } from "./config";
 import type { Store } from "./store";
 
 export const NO_RESULT = "the turn ended without a result";
@@ -39,6 +40,9 @@ export class Sessions {
     private readonly send: (message: ServerMessage) => void,
     /** Where the turns' notifications go (the dock's peeks). Without it none are recorded. */
     private readonly notifications?: Notifications,
+    /** The permission mode a session in this workspace asks for (config.ts permissionModeFor). Read at the start of every turn. */
+    private readonly modeFor: (workspace: string) => PermissionMode = () => DEFAULT_PERMISSION_MODE,
+    private readonly log: (line: string) => void = (line) => console.log(line),
   ) {}
 
   /** Records a notification, titled as the session is. */
@@ -126,8 +130,25 @@ export class Sessions {
     open.settle(decision);
   }
 
+  /**
+   * The mode Claude Code reports for the turn: stored on the session, and logged when it changes. A session that asked
+   * for auto and runs in another mode gets one `permission_mode` event, the first time, so the
+   * person knows why calls come to them.
+   */
+  private modeInEffect(id: string, requested: PermissionMode, mode: string): void {
+    const before = this.store.get(id)!.permissionMode;
+    if (before !== mode) {
+      this.log(`session ${id}: asked for permissionMode ${requested}, runs in ${mode}`);
+      this.send({ type: "session", session: this.store.update(id, { permissionMode: mode }) });
+    }
+    if (requested === "auto" && mode !== "auto" && !this.store.events(id).some((e) => e.kind === "permission_mode")) {
+      this.record(id, { kind: "permission_mode", requested, mode });
+    }
+  }
+
   private async turn(id: string, prompt: string, signal: AbortSignal): Promise<void> {
     const session = this.store.get(id)!;
+    const permissionMode = this.modeFor(session.workspace);
     /** This turn's open approvals. */
     const mine = new Set<string>();
     let ended = false;
@@ -164,11 +185,13 @@ export class Sessions {
       else this.notify(id, "error", bodyOf(event.kind === "error" ? event.message : (event.kind === "result" && event.text) || lastText) || FAILED);
     };
     try {
-      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, signal, approve })) {
+      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, permissionMode, signal, approve })) {
         // A turn cut off by the runner stopping stays "running" on disk, and the next start records it as failed.
         if (signal.aborted) return;
         if (out.type === "delta") {
           this.send({ type: "delta", sessionId: id, text: out.text });
+        } else if (out.type === "permission_mode") {
+          this.modeInEffect(id, permissionMode, out.mode);
         } else if (out.type === "session_id") {
           if (session.claudeSessionId !== out.id) this.send({ type: "session", session: this.store.update(id, { claudeSessionId: out.id }) });
         } else if (out.event.kind === "result") {

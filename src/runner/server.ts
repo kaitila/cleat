@@ -16,7 +16,7 @@ import {
 import { driverFor, type AgentDriver } from "./agent";
 import { buildId } from "./build";
 import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
-import type { Config } from "./config";
+import { permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
 import { Store } from "./store";
@@ -193,7 +193,7 @@ export function startServer(config: Config, driver: AgentDriver = driverFor(conf
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
   const notifications = new Notifications((notification) => send({ type: "notification", notification }));
-  const sessions = new Sessions(store, driver, send, notifications);
+  const sessions = new Sessions(store, driver, send, notifications, (workspace) => permissionModeFor(config, workspace));
   const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts };
   const server = Bun.serve({
     hostname: HOST,

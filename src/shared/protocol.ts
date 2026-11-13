@@ -8,6 +8,9 @@ export const HOST = "127.0.0.1";
  *  idle: the turn finished, a reply continues it. error: the turn failed, a reply may retry. */
 export type SessionStatus = "running" | "waiting_approval" | "idle" | "error";
 
+/** The permission mode a session asks for (config `permissionMode`). Nothing else is ever passed to the SDK. */
+export type PermissionMode = "auto" | "default";
+
 export interface Workspace {
   name: string;
   /** Absolute WSL path, with ~ expanded. */
@@ -30,6 +33,11 @@ export interface SessionMeta {
   updatedAt: string;
   /** seq of the session's newest stored event. */
   lastSeq: number;
+  /**
+   * The permission mode in effect, as Claude Code reports it at the start of each turn (and when it
+   * changes): "auto", "default", or another of the SDK's modes. Absent until the first turn reports it.
+   */
+  permissionMode?: string;
 }
 
 interface EventBase {
@@ -48,6 +56,10 @@ export type SessionEvent = EventBase &
     | { kind: "approval_request"; approvalId: string; toolUseId?: string; toolName: string; input: unknown; reason?: string }
     | { kind: "approval_resolved"; approvalId: string; decision: ApprovalDecision }
     | { kind: "result"; ok: boolean; text?: string; costUsd?: number; durationMs?: number }
+    /** A call the auto-mode classifier (or a deny rule, or the mode) denied without asking the person. `input` is a one-line summary. */
+    | { kind: "auto_denied"; toolUseId: string; toolName: string; input?: string; reason?: string }
+    /** Once per session: it asked for `requested` but Claude Code runs it in `mode`, so calls come to the person. */
+    | { kind: "permission_mode"; requested: PermissionMode; mode: string }
     | { kind: "error"; message: string }
   );
 
