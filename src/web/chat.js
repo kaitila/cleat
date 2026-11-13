@@ -12,11 +12,11 @@ import {
   relativeTime,
   replyState,
   resultLine,
-  splitMarkdown,
   statusLabel,
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
+import { renderMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -94,19 +94,20 @@ function add(el) {
   return el;
 }
 
-function renderMarkdown(el, text) {
-  el.replaceChildren(
-    ...splitMarkdown(text).map((block) => {
-      if (block.type === "code") {
-        const pre = h("pre", "code-block well");
-        pre.append(h("code", "", block.text));
-        return pre;
-      }
-      const p = h("p");
-      for (const span of block.spans) p.append(span.code ? h("code", "", span.text) : document.createTextNode(span.text));
-      return p;
-    }),
-  );
+function renderText(el, text, streaming = false) {
+  el.replaceChildren(renderMarkdown(text, document, { streaming }));
+}
+
+let streamQueued = false;
+
+/** Deltas come faster than frames: the streaming text is drawn again at most once a frame. */
+function streamSoon() {
+  if (streamQueued) return;
+  streamQueued = true;
+  requestAnimationFrame(() => {
+    streamQueued = false;
+    renderStreamed();
+  });
 }
 
 /** Shows (or removes) the selected session's streaming text as the last thing in the stream. */
@@ -117,8 +118,8 @@ function renderStreamed() {
     streamedEl = null;
     return;
   }
-  if (!streamedEl) streamedEl = h("div", "msg assistant streaming");
-  renderMarkdown(streamedEl, text);
+  if (!streamedEl) streamedEl = h("div", "msg assistant md streaming");
+  renderText(streamedEl, text, true);
   if (streamedEl.parentNode !== els.stream) els.stream.append(streamedEl);
   follow();
 }
@@ -257,7 +258,7 @@ function apply(event) {
       break;
     }
     case "assistant_text":
-      renderMarkdown(add(h("div", "msg assistant")), event.text);
+      renderText(add(h("div", "msg assistant md")), event.text);
       break;
     case "tool_use":
       toolCard(event.toolUseId, event.name, event.input);
@@ -540,7 +541,7 @@ function onMessage(message) {
     case "delta":
       if (typeof message.text !== "string") break;
       streamed.set(message.sessionId, (streamed.get(message.sessionId) ?? "") + message.text);
-      if (message.sessionId === selected) renderStreamed();
+      if (message.sessionId === selected) streamSoon();
       break;
   }
 }

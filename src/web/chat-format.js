@@ -80,58 +80,6 @@ export function relativeTime(iso, now = Date.now()) {
   return new Date(then).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
-/** Text with `inline code` split out: [{ text, code }]. An unpaired backtick stays as text. */
-export function splitInline(text) {
-  const spans = [];
-  let last = 0;
-  for (const match of text.matchAll(/`([^`\n]+)`/g)) {
-    if (match.index > last) spans.push({ text: text.slice(last, match.index), code: false });
-    spans.push({ text: match[1], code: true });
-    last = match.index + match[0].length;
-  }
-  if (last < text.length) spans.push({ text: text.slice(last), code: false });
-  return spans;
-}
-
-/**
- * The little markdown the chat view renders: paragraphs (split at blank lines), fenced code blocks
- * and inline code. Everything else stays as the text it is.
- * Returns [{ type: "text", spans }] and [{ type: "code", lang, text }] blocks, in order.
- * A fence that is still open (the text is streaming) runs to the end.
- */
-export function splitMarkdown(text) {
-  const blocks = [];
-  let paragraph = [];
-  let fence = null;
-  const endParagraph = () => {
-    if (paragraph.length) blocks.push({ type: "text", spans: splitInline(paragraph.join("\n")) });
-    paragraph = [];
-  };
-  for (const line of String(text).replace(/\r\n?/g, "\n").split("\n")) {
-    if (fence) {
-      if (line.trim() === fence.mark) {
-        blocks.push({ type: "code", lang: fence.lang, text: fence.lines.join("\n") });
-        fence = null;
-      } else {
-        fence.lines.push(line);
-      }
-      continue;
-    }
-    const open = /^\s*(```|~~~)\s*([^\s`]*)\s*$/.exec(line);
-    if (open) {
-      endParagraph();
-      fence = { mark: open[1], lang: open[2], lines: [] };
-    } else if (line.trim() === "") {
-      endParagraph();
-    } else {
-      paragraph.push(line);
-    }
-  }
-  if (fence) blocks.push({ type: "code", lang: fence.lang, text: fence.lines.join("\n") });
-  endParagraph();
-  return blocks;
-}
-
 /** A long tool result cut for the collapsed view: { text, cut }. `cut` says there is more. */
 export function cutResult(text, maxChars = RESULT_MAX_CHARS, maxLines = RESULT_MAX_LINES) {
   let shown = text;

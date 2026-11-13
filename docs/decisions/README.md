@@ -15,3 +15,4 @@ One file per decision. Add a row when you add one.
 | [D0009](D0009-intuition-command.md) | The `intuition` command is a symlink to `src/cli.ts` in the folder bun is in; `link` replaces only its own link; a wrong command line exits 2 | 2026-11-13 | Active |
 | [D0010](D0010-dock-fixed-window.md) | The dock's window never changes size: the island is drawn and animated inside it, and the shell lets the mouse through everywhere but on the island, click-through by default | 2026-11-13 | Active |
 | [D0011](D0011-stale-runner-and-shell.md) | `start` and `up` restart a runner whose build id (a hash of its code) differs from the repo's, unless sessions are in the way (exit 3); `up` reinstalls a shell whose bundle differs | 2026-11-13 | Active |
+| [D0013](D0013-markdown-renderer.md) | Assistant messages are drawn by our own markdown renderer, which builds DOM nodes and never parses HTML; links only to http(s) and mailto; a synthesised italic | 2026-11-13 | Active |
