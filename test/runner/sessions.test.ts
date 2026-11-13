@@ -134,7 +134,7 @@ describe("WebSocket", () => {
     const socket = await connect(runner);
     const session = await runner.startSession("echo this");
     await settled(socket, session.id);
-    const mine = socket.messages.filter((m) => (m.type === "session" ? m.session.id === session.id : m.type !== "hello" && m.sessionId === session.id));
+    const mine = socket.messages.filter((m) => (m.type === "session" ? m.session.id === session.id : (m.type === "event" || m.type === "delta") && m.sessionId === session.id));
     const deltas = mine.flatMap((m) => (m.type === "delta" ? [m.text] : []));
     expect(deltas.length).toBe(3);
     expect(deltas.join("")).toBe(fakeReply("echo this"));

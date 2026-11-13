@@ -60,10 +60,12 @@ export type ServerMessage =
   | { type: "session"; session: SessionMeta }
   | { type: "event"; sessionId: string; event: SessionEvent }
   /** A piece of assistant text as it streams. Not stored: the full text follows as an assistant_text event. */
-  | { type: "delta"; sessionId: string; text: string };
+  | { type: "delta"; sessionId: string; text: string }
+  /** A notification as it is recorded. Not replayed on connect: GET /api/notifications has the kept ones. */
+  | { type: "notification"; notification: Notification };
 
 export interface Notification {
-  /** Global, starts at 1. The shell polls with ?after=<seq>. */
+  /** Global, starts at 1 each time the runner starts. GET /api/notifications?after=<seq> returns the later ones. */
   seq: number;
   ts: string;
   kind: "finished" | "needs_approval" | "error";
