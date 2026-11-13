@@ -1,9 +1,10 @@
 // Installing, starting and stopping the Windows shell from WSL.
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DOCK_PRELOAD } from "../../shell/src/dock";
 import type { LoginResult } from "../../shell/src/login";
-import { withWsl } from "../../shell/src/settings";
+import { PID_FILE, withWsl } from "../../shell/src/settings";
 import { parseWsl, type WslSettings } from "../../shell/src/wsl";
 import { hasWindows, REPO, settingsFile, SHELL_SRC, type ShellPaths, shellPaths, toWindows } from "./paths";
 
@@ -82,6 +83,30 @@ export function isInstalled(paths: ShellPaths): boolean {
   return existsSync(paths.electronExe) && existsSync(join(paths.app, BUNDLE)) && existsSync(join(paths.app, DOCK_PRELOAD));
 }
 
+/** The files an install writes into the app folder, besides Electron. */
+const INSTALLED_FILES = [BUNDLE, DOCK_PRELOAD, "package.json"];
+
+function same(a: string, b: string): boolean {
+  return existsSync(a) && existsSync(b) && readFileSync(a).equals(readFileSync(b));
+}
+
+/**
+ * True when the app folder holds exactly what `shell install` would write now: the same bundles, the
+ * same package.json and the pinned Electron. False after a pull that changed `shell/src/`, so `up`
+ * installs again instead of starting the old bundle.
+ */
+export async function isCurrent(paths: ShellPaths): Promise<boolean> {
+  if (!isInstalled(paths) || installedElectron(paths) !== wantedElectron()) return false;
+  const fresh = mkdtempSync(join(tmpdir(), "intuition-shell-bundle-"));
+  try {
+    await buildShell(fresh);
+    copyFileSync(join(SHELL_SRC, "package.json"), join(fresh, "package.json"));
+    return INSTALLED_FILES.every((name) => same(join(fresh, name), join(paths.app, name)));
+  } finally {
+    rmSync(fresh, { recursive: true, force: true });
+  }
+}
+
 function needInstalled(paths: ShellPaths): void {
   needWindows();
   if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
@@ -122,6 +147,37 @@ export function start(paths = shellPaths()): void {
 /** Asks the running shell to quit: a second copy hands it --quit and exits. Does nothing when none runs. */
 export async function stop(paths = shellPaths()): Promise<void> {
   await electron(paths, ["--quit"]).exited;
+}
+
+/** How long `stopAndWait` waits for the shell's process to end. */
+const QUIT_MS = 10_000;
+
+/** True while a Windows process has this pid (tasklist.exe). */
+export function windowsPidAlive(pid: number): boolean {
+  const p = Bun.spawnSync(["/mnt/c/Windows/System32/tasklist.exe", "/NH", "/FI", `PID eq ${pid}`], { cwd: "/mnt/c", stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  return p.exitCode === 0 && new RegExp(`\\s${pid}\\s`).test(p.stdout.toString());
+}
+
+/**
+ * Asks the running shell to quit and waits until its process has ended, so files can be replaced and
+ * a new shell can take the single-instance lock. The shell writes its pid beside its settings; a shell
+ * from before that is given two seconds. `pidFile` is that file, as a WSL path.
+ */
+export async function stopAndWait(paths: ShellPaths, pidFile: string, alive = windowsPidAlive): Promise<void> {
+  const pid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : NaN;
+  await stop(paths);
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    await Bun.sleep(2000);
+    return;
+  }
+  const end = Date.now() + QUIT_MS;
+  while (Date.now() < end && alive(pid)) await Bun.sleep(200);
+  rmSync(pidFile, { force: true });
+}
+
+/** The shell's pid file, as a WSL path: beside its settings file. */
+export function pidFile(settings = settingsFile()): string {
+  return join(dirname(settings), PID_FILE);
 }
 
 /**

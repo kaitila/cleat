@@ -17,6 +17,8 @@ export interface Config {
   configPath: string;
   /** INTUITION_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
   fakeAgent: boolean;
+  /** INTUITION_BUILD_ID: the build id the runner reports and `start` expects, instead of the hash of the code (tests only). */
+  buildId: string | null;
 }
 
 export const DEFAULT_CONFIG = {
@@ -67,5 +69,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dataDir,
     configPath: path,
     fakeAgent: env.INTUITION_FAKE_AGENT === "1",
+    buildId: env.INTUITION_BUILD_ID || null,
   };
 }

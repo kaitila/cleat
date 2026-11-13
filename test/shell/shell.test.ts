@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
 import { centred, iconBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
 import { chatUrl, dockUrl, promptUrl, sameOrigin, sessionOf, windowTarget } from "../../shell/src/origin";
 import type { SelfTestResult } from "../../shell/src/result";
-import { DEFAULT_SETTINGS, loadSettings, parseSettings, saveDock, withDock, withWsl } from "../../shell/src/settings";
+import { DEFAULT_SETTINGS, loadSettings, parseSettings, PID_FILE, saveDock, SETTINGS_FILE, withDock, withWsl } from "../../shell/src/settings";
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
-import { buildShell, BUNDLE, isInstalled, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
+import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
 import { problems, selfTestRun, STUB_SESSION, stubRunner } from "../../src/shell/selftest-run";
 
@@ -57,6 +57,42 @@ describe("bundle", () => {
     expect(isInstalled(paths)).toBe(false);
     writeFileSync(join(app, DOCK_PRELOAD), "");
     expect(isInstalled(paths)).toBe(true);
+  });
+
+  test("an install is current only when its bundles, package.json and Electron are what `shell install` would write now", async () => {
+    const app = join(dir, "current");
+    const paths = { home: dir, app, electronExe: join(app, "node_modules", "electron", "dist", "electron.exe") };
+    expect(await isCurrent(paths)).toBe(false);
+    await buildShell(app);
+    copyFileSync(join(REPO, "shell", "package.json"), join(app, "package.json"));
+    mkdirSync(dirname(paths.electronExe), { recursive: true });
+    writeFileSync(paths.electronExe, "");
+    writeFileSync(join(dirname(paths.electronExe), "version"), `v${wantedElectron()}`);
+    expect(await isCurrent(paths)).toBe(true);
+    // Bundling is repeatable: the same source gives the same bytes, or `up` would reinstall every time.
+    expect(await isCurrent(paths)).toBe(true);
+
+    for (const [file, text] of [[BUNDLE, "// an older bundle"], [DOCK_PRELOAD, "// an older preload"], ["package.json", "{}"], [join("node_modules", "electron", "dist", "version"), "v1.0.0"]] as const) {
+      const path = join(app, file);
+      const before = readFileSync(path);
+      writeFileSync(path, text);
+      expect(`${file}: ${await isCurrent(paths)}`).toBe(`${file}: false`);
+      writeFileSync(path, before);
+    }
+    expect(await isCurrent(paths)).toBe(true);
+  });
+
+  test("`up` stops an outdated shell, waits for its process to end, installs and starts it", () => {
+    const cli = readFileSync(join(REPO, "src", "cli.ts"), "utf8");
+    const up = cli.slice(cli.indexOf("  up: async"), cli.indexOf('  "shell install"'));
+    expect(up).toContain("!(await isCurrent(paths))");
+    expect(up.indexOf("await stopAndWait(paths, pidFile());")).toBeLessThan(up.lastIndexOf("await install(paths);"));
+    expect(up.indexOf("await install(paths);")).toBeLessThan(up.indexOf("startShell();"));
+    // The shell writes its pid beside its settings, and removes it as it quits.
+    expect(pidFile(join("/x", SETTINGS_FILE))).toBe(join("/x", PID_FILE));
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main).toContain('const pidFile = join(app.getPath("userData"), PID_FILE);');
+    expect(main).toContain('app.on("will-quit", () => rmSync(pidFile, { force: true }));');
   });
 
   test("the shell pins the Electron the repo has types for", () => {
@@ -401,6 +437,22 @@ describe("the dock", () => {
     expect(main).toContain("if (isMainFrame && code !== -3) hideDock();");
     expect(main).toContain('{ label: "Show dock", type: "checkbox", checked: settings.dock, click: (item) => setDock(item.checked) }');
   });
+
+  test("main.ts: a runner that answers but has no dock is said once, and the check keeps loading the page", () => {
+    expect(DOCK_STALE_RUNNER.title).toContain("the runner is older than the shell");
+    expect(DOCK_STALE_RUNNER.body).toContain("intuition up");
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    const load = main.slice(main.indexOf("async function loadDock()"), main.indexOf("/** Loads the dock's page and shows it"));
+    expect(load).toContain("if (!staleRunnerSaid && !args.selfTest && dockStatus >= 400 && (await runnerAnswers())) {");
+    expect(load).toContain("staleRunnerSaid = true;");
+    expect(load).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
+    // A dock that loads clears it, so a later stale runner is said again.
+    expect(load.indexOf("dockLoaded = true;")).toBeLessThan(load.indexOf("staleRunnerSaid = false;"));
+    // The retry: every check while the runner answers loads the page again when no dock is shown.
+    const check = main.slice(main.indexOf("async function checkDock()"), main.indexOf("/** Checks every few seconds."));
+    expect(check).toContain("await showDock();");
+    expect(main).toContain("if (!settings.dock || dockLoaded) return Promise.resolve();");
+  });
 });
 
 describe("no toasts for sessions", () => {
@@ -412,9 +464,10 @@ describe("no toasts for sessions", () => {
       expect(`${name}: ${/api\/notifications|toastOf|pollOnce|Open last session|lastSession/.test(code)}`).toBe(`${name}: false`);
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
-    // The one Notification left is notify(): the runner is not running, the hotkey is taken, start on login failed.
+    // The one Notification left is notify(): the runner is not running or is older than the shell, the hotkey is taken, start on login failed.
     expect(main.match(/new Notification\(/g)).toHaveLength(1);
-    expect(main.match(/\bnotify\(/g)).toHaveLength(4);
+    expect(main.match(/\bnotify\(/g)).toHaveLength(5);
+    expect(main).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
     for (const title of ["intuition: the runner is not running", "intuition: the hotkey is taken", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
     expect(main).toContain("app.setAppUserModelId(");
   });

@@ -3,8 +3,9 @@
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, join } from "node:path";
+import { buildId } from "../runner/build";
 import { type Config, loadConfig } from "../runner/config";
-import { HOST } from "../shared/protocol";
+import { HOST, type SessionMeta, type SessionsResponse } from "../shared/protocol";
 
 export const PID_FILE = "runner.pid";
 export const URL_FILE = "runner.url";
@@ -15,6 +16,11 @@ const MAIN = join(REPO, "src", "runner", "main.ts");
 const START_MS = 10_000;
 const STOP_MS = 5_000;
 const LOG_LINES = 200;
+/**
+ * The exit code of `start`, `up` and `restart` when a runner that runs other code than the repo's was
+ * kept (a session was in the way, or this command did not start it): not a failure, but to be noticed.
+ */
+export const KEPT = 3;
 
 type Env = Record<string, string | undefined>;
 type Log = (line: string) => void;
@@ -58,6 +64,30 @@ export async function answers(url: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The build id /health reports: null when nothing answers, "" for a runner from before build ids. */
+export async function buildOf(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(new URL("/health", url), { signal: AbortSignal.timeout(1000) });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { ok?: unknown; build?: unknown };
+    return body.ok === true ? (typeof body.build === "string" ? body.build : "") : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The runner's sessions that a restart would cut off: a turn running, or a tool call waiting for Allow or Deny. */
+export async function inTheWay(url: string): Promise<SessionMeta[]> {
+  const res = await fetch(new URL("/api/sessions", url), { signal: AbortSignal.timeout(2000) });
+  if (!res.ok) throw new Error(`${url}/api/sessions answered ${res.status}`);
+  return ((await res.json()) as SessionsResponse).sessions.filter((s) => s.status === "running" || s.status === "waiting_approval");
+}
+
+/** One line per session: its title, its workspace and why it is in the way. */
+export function describeSessions(sessions: SessionMeta[]): string {
+  return sessions.map((s) => `  ${s.title} (${s.workspace}, ${s.status === "running" ? "a turn is running" : "waiting for Allow or Deny"})`).join("\n");
 }
 
 /** The runner this data folder recorded, if it still runs. Files left by a dead one are removed. */
@@ -119,19 +149,39 @@ export interface StartOptions {
 /** Starts the runner detached, waits for /health and prints the URL. Returns the exit code. */
 export async function start(env: Env = process.env, log: Log = console.log, options: StartOptions = {}): Promise<number> {
   const f = files(env);
+  const want = buildId(f.config.buildId);
   const running = recorded(f);
   if (running) {
-    if (await waitFor(() => answers(running.url), START_MS)) {
+    if (!(await waitFor(() => answers(running.url), START_MS))) {
+      log(`pid ${running.pid} is a runner but nothing answers at ${running.url}: run \`intuition stop\`, then start again`);
+      return 1;
+    }
+    if ((await buildOf(running.url)) === want) {
       log(`already running: ${running.url} (pid ${running.pid})`);
       return 0;
     }
-    log(`pid ${running.pid} is a runner but nothing answers at ${running.url}: run \`bun src/cli.ts stop\`, then start again`);
-    return 1;
-  }
-  const configured = configuredUrl(f.config);
-  if (configured && (await answers(configured))) {
-    log(`already running: ${configured} (not started by this command)`);
-    return 0;
+    const blocked = await inTheWay(running.url);
+    if (blocked.length > 0) {
+      log(
+        `the runner at ${running.url} (pid ${running.pid}) runs older code than this repo's, and was kept: restarting it would cut off\n` +
+          `${describeSessions(blocked)}\n` +
+          "run `intuition restart` once they are done, or `intuition restart --force` now",
+      );
+      return KEPT;
+    }
+    log(`the runner at ${running.url} (pid ${running.pid}) runs older code than this repo's: restarting it`);
+    await kill(f, running.pid);
+  } else {
+    const configured = configuredUrl(f.config);
+    const build = configured ? await buildOf(configured) : null;
+    if (configured && build !== null) {
+      if (build === want) {
+        log(`already running: ${configured} (not started by this command)`);
+        return 0;
+      }
+      log(`already running: ${configured} (not started by this command), with older code than this repo's: restart it where it runs`);
+      return KEPT;
+    }
   }
   const port = f.config.port || freePort();
   const url = `http://${HOST}:${port}`;
@@ -184,15 +234,51 @@ export async function stop(env: Env = process.env, log: Log = console.log): Prom
     log("not running");
     return 0;
   }
-  process.kill(running.pid, "SIGTERM");
-  if (!(await waitFor(() => !isRunner(running.pid), STOP_MS))) {
-    process.kill(running.pid, "SIGKILL");
-    await waitFor(() => !isRunner(running.pid), STOP_MS);
+  await kill(f, running.pid);
+  log(`stopped (pid ${running.pid})`);
+  return 0;
+}
+
+/** Ends the recorded runner, by force after STOP_MS, and removes its files. */
+async function kill(f: Files, pid: number): Promise<void> {
+  process.kill(pid, "SIGTERM");
+  if (!(await waitFor(() => !isRunner(pid), STOP_MS))) {
+    process.kill(pid, "SIGKILL");
+    await waitFor(() => !isRunner(pid), STOP_MS);
   }
   rmSync(f.pid, { force: true });
   rmSync(f.url, { force: true });
-  log(`stopped (pid ${running.pid})`);
-  return 0;
+}
+
+export interface RestartOptions extends StartOptions {
+  /** Restart even when sessions are running or waiting for approval: they are cut off. */
+  force?: boolean;
+}
+
+/**
+ * Stops the recorded runner and starts it again, whatever code it runs. Like `start`, it keeps a
+ * runner whose sessions are running or waiting for approval (exit KEPT), unless `force`.
+ */
+export async function restart(env: Env = process.env, log: Log = console.log, options: RestartOptions = {}): Promise<number> {
+  const f = files(env);
+  const running = recorded(f);
+  if (running && (await answers(running.url))) {
+    const blocked = await inTheWay(running.url);
+    if (blocked.length > 0 && !options.force) {
+      log(
+        `the runner at ${running.url} (pid ${running.pid}) was kept: restarting it would cut off\n` +
+          `${describeSessions(blocked)}\n` +
+          "run `intuition restart` once they are done, or `intuition restart --force` now",
+      );
+      return KEPT;
+    }
+    if (blocked.length > 0) log(`restarting anyway (--force), which cuts off\n${describeSessions(blocked)}`);
+  }
+  if (running) {
+    await kill(f, running.pid);
+    log(`stopped (pid ${running.pid})`);
+  }
+  return start(env, log, options);
 }
 
 /** Says whether the runner runs. Returns 0 when it answers, 1 when not. */

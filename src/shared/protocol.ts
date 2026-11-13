@@ -82,6 +82,8 @@ export interface ClipboardCapture {
 }
 
 // Request and response bodies.
+/** build: a hash of the code the runner process loaded. `start` and `up` restart a runner whose build differs from the repo's. */
+export interface HealthResponse { ok: true; version: string; build: string }
 export interface WorkspacesResponse { workspaces: Workspace[]; lastUsed: string | null }
 export interface SessionsResponse { sessions: SessionMeta[] }
 export interface StartSessionRequest { workspace: string; prompt: string; imagePath?: string }

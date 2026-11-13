@@ -4,13 +4,17 @@ import { pick } from "./cli/command";
 import { link, unlink } from "./cli/link";
 import * as runner from "./cli/runner";
 import { parseLogin } from "../shell/src/login";
-import { install, isInstalled, login, start, stop, writeRunnerLocation } from "./shell/install";
+import { install, isCurrent, isInstalled, login, pidFile, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
 import { hasWindows, shellPaths } from "./shell/paths";
 
 const USAGE = `usage: intuition <command>     (no command: intuition up)
 
-  up              start the runner, install the Windows shell if it is not, and start it: the one command to run
-  start           start the runner in the background and print its URL (--login-env: with the login shell's environment)
+  up              start the runner, install the Windows shell, and start it: the one command to run. A runner or
+                  shell that runs older code than this repo's is restarted (a runner with sessions running is kept)
+  start           start the runner in the background and print its URL (--login-env: with the login shell's environment).
+                  A runner already running older code is restarted, unless a session is running or waits for approval:
+                  then it is kept, the sessions are named, and the exit code is 3
+  restart         stop the runner and start it again, with the same guard (--force: cut those sessions off)
   stop            stop the runner
   status          say whether the runner runs (exit code 0 when it does, 1 when not)
   logs            print the end of the runner's log
@@ -42,20 +46,32 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
     if (rest.some((a) => a !== "--login-env")) usageError();
     return runner.start(process.env, console.log, { loginEnv: rest.includes("--login-env") });
   },
+  restart: (rest) => {
+    if (rest.some((a) => a !== "--force")) usageError();
+    return runner.restart(process.env, console.log, { force: rest.includes("--force") });
+  },
   stop: () => runner.stop(),
   status: () => runner.status(),
   logs: () => runner.logs(),
   up: async () => {
+    // A runner kept because sessions are in the way still serves: the shell is brought up to date, and the exit code says so.
     const code = await runner.start();
-    if (code !== 0) return code;
+    if (code !== 0 && code !== runner.KEPT) return code;
     if (!hasWindows()) {
       console.log("the Windows shell needs WSL with the Windows disk at /mnt/c: only the runner was started");
-      return 0;
+      return code;
     }
     const paths = shellPaths();
-    if (!isInstalled(paths)) await install(paths);
+    if (!isInstalled(paths)) {
+      await install(paths);
+    } else if (!(await isCurrent(paths))) {
+      console.log("the installed shell is older than this repo's: stopping it, installing it again and starting it");
+      await stopAndWait(paths, pidFile());
+      await install(paths);
+    }
     writeRunnerLocation();
     startShell();
+    return code;
   },
   "shell install": async () => {
     await install();
@@ -84,7 +100,7 @@ const picked = pick(process.argv.slice(2), Object.keys(commands));
 if (!picked) usageError();
 const { name, rest } = picked;
 /** How many words each command takes after its name; the others take none. */
-const takes: Record<string, number> = { start: 1, "shell login": 1, link: 1, unlink: 1 };
+const takes: Record<string, number> = { start: 1, restart: 1, "shell login": 1, link: 1, unlink: 1 };
 if (rest.length > (takes[name] ?? 0)) usageError();
 try {
   const code = await commands[name]!(rest);

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
 import { DEFAULT_COMMAND, pick } from "../../src/cli/command";
 import { defaultDir, link, onPath, unlink } from "../../src/cli/link";
-import { isRunner, LOG_FILE, PID_FILE, runnerCommand, URL_FILE } from "../../src/cli/runner";
+import { isRunner, KEPT, LOG_FILE, PID_FILE, runnerCommand, URL_FILE } from "../../src/cli/runner";
+import { buildId } from "../../src/runner/build";
 
 const REPO = join(import.meta.dir, "..", "..");
 const CLI = join(REPO, "src", "cli.ts");
@@ -98,6 +99,86 @@ describe("start, status, stop", () => {
   });
 });
 
+describe("a runner that runs older code", () => {
+  const { env, data } = folders();
+  started.push(env);
+  const as = (build: string) => ({ ...env, INTUITION_BUILD_ID: build });
+  const pidNow = () => Number(readFileSync(join(data, PID_FILE), "utf8"));
+  const urlNow = () => readFileSync(join(data, URL_FILE), "utf8").trim();
+  const health = async () => (await (await fetch(`${urlNow()}/health`)).json()) as { build: string };
+
+  test("the runner reports the build id it was started with", async () => {
+    expect((await cli(as("one"), "start")).code).toBe(0);
+    expect(await health()).toMatchObject({ ok: true, build: "one" });
+    // The same code: nothing to do.
+    expect(await cli(as("one"), "start")).toEqual({ code: 0, out: `already running: ${urlNow()} (pid ${pidNow()})\n` });
+  });
+
+  test("start with a changed build id restarts it, says so, and a new process serves the new id", async () => {
+    const pid = pidNow();
+    const url = urlNow();
+    const { code, out } = await cli(as("two"), "start");
+    expect(code).toBe(0);
+    expect(out).toStartWith(`the runner at ${url} (pid ${pid}) runs older code than this repo's: restarting it\n`);
+    expect(out).toContain("intuition runner on ");
+    expect(isRunner(pid)).toBe(false);
+    expect(pidNow()).not.toBe(pid);
+    expect(isRunner(pidNow())).toBe(true);
+    expect((await health()).build).toBe("two");
+  });
+
+  let title = "";
+  test("with a session waiting for approval, start keeps the old process, names the session and exits 3", async () => {
+    const res = await fetch(`${urlNow()}/api/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace: "work", prompt: "needs approval: write it" }) });
+    expect(res.status).toBe(201);
+    const { session } = (await res.json()) as { session: { id: string; title: string } };
+    title = session.title;
+    const until = Date.now() + 5000;
+    while (Date.now() < until) {
+      const { sessions } = (await (await fetch(`${urlNow()}/api/sessions`)).json()) as { sessions: { id: string; status: string }[] };
+      if (sessions.find((s) => s.id === session.id)?.status === "waiting_approval") break;
+      await Bun.sleep(20);
+    }
+    const pid = pidNow();
+    const { code, out } = await cli(as("three"), "start");
+    expect(code).toBe(KEPT);
+    expect(out).toBe(
+      `the runner at ${urlNow()} (pid ${pid}) runs older code than this repo's, and was kept: restarting it would cut off\n` +
+        `  ${title} (work, waiting for Allow or Deny)\n` +
+        "run `intuition restart` once they are done, or `intuition restart --force` now\n",
+    );
+    expect(pidNow()).toBe(pid);
+    expect(isRunner(pid)).toBe(true);
+    expect((await health()).build).toBe("two");
+  });
+
+  test("restart keeps it too; restart --force cuts the session off and starts the new code", async () => {
+    const pid = pidNow();
+    const kept = await cli(as("three"), "restart");
+    expect(kept.code).toBe(KEPT);
+    expect(kept.out).toContain(`  ${title} (work, waiting for Allow or Deny)`);
+    expect(isRunner(pid)).toBe(true);
+    const forced = await cli(as("three"), "restart", "--force");
+    expect(forced.code).toBe(0);
+    expect(forced.out).toStartWith(`restarting anyway (--force), which cuts off\n  ${title} (work, waiting for Allow or Deny)\nstopped (pid ${pid})\n`);
+    expect(isRunner(pid)).toBe(false);
+    expect((await health()).build).toBe("three");
+  });
+
+  test("restart with nothing in the way stops and starts, even with the same code; with no runner it starts one", async () => {
+    const pid = pidNow();
+    const { code, out } = await cli(as("three"), "restart");
+    expect(code).toBe(0);
+    expect(out).toStartWith(`stopped (pid ${pid})\nintuition runner on `);
+    expect(pidNow()).not.toBe(pid);
+    expect((await cli(env, "stop")).code).toBe(0);
+    const fresh = await cli(as("four"), "restart");
+    expect(fresh.code).toBe(0);
+    expect(fresh.out).toStartWith("intuition runner on ");
+    expect((await health()).build).toBe("four");
+  });
+});
+
 describe("edges", () => {
   test("a pid file left by a dead runner, or naming another program, is not believed", async () => {
     const { env, data } = folders();
@@ -115,11 +196,16 @@ describe("edges", () => {
   });
 
   test("a runner that this command did not start is seen on the configured port, and is not stopped", async () => {
-    const other = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json({ ok: true, version: "other" }) });
+    let build: string | undefined = buildId();
+    const other = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => Response.json({ ok: true, version: "other", build }) });
     try {
       const { env, data } = folders(String(other.port));
       const url = `http://127.0.0.1:${other.port}`;
       expect(await cli(env, "start")).toEqual({ code: 0, out: `already running: ${url} (not started by this command)\n` });
+      // Running other code, or from before build ids: kept, since this command cannot restart it, and said.
+      for (build of ["older", undefined]) {
+        expect(await cli(env, "start")).toEqual({ code: KEPT, out: `already running: ${url} (not started by this command), with older code than this repo's: restart it where it runs\n` });
+      }
       expect(existsSync(join(data, PID_FILE))).toBe(false);
       expect(await cli(env, "status")).toEqual({ code: 0, out: `running: ${url} (not started by this command)\n` });
       const stop = await cli(env, "stop");
@@ -142,7 +228,7 @@ describe("edges", () => {
 
   test("unknown commands and stray words print the usage on stderr and exit 2", async () => {
     const { env } = folders();
-    for (const words of [["nope"], ["start", "now"], ["stop", "x"], ["shell", "login"], ["shell", "login", "maybe"], ["shell", "login", "on", "x"], ["link", "a", "b"], ["help", "x"]]) {
+    for (const words of [["nope"], ["start", "now"], ["restart", "now"], ["restart", "--force", "x"], ["stop", "x"], ["shell", "login"], ["shell", "login", "maybe"], ["shell", "login", "on", "x"], ["link", "a", "b"], ["help", "x"]]) {
       const p = Bun.spawnSync([process.execPath, CLI, ...words], { cwd: REPO, env: { ...process.env, ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
       expect(`${words.join(" ")}: ${p.exitCode}`).toBe(`${words.join(" ")}: 2`);
       expect(p.stderr.toString()).toContain("usage: intuition <command>");
@@ -159,7 +245,7 @@ describe("edges", () => {
       expect(out).toContain("usage: intuition <command>");
       expect(out).toContain("intuition up");
       expect(out).not.toContain("bun src/cli.ts");
-      for (const name of ["up", "start", "stop", "status", "logs", "shell install", "shell login on|off|status", "link [dir]", "unlink [dir]", "help"]) expect(out).toContain(`  ${name}`);
+      for (const name of ["up", "start", "restart", "stop", "status", "logs", "shell install", "shell login on|off|status", "link [dir]", "unlink [dir]", "help"]) expect(out).toContain(`  ${name}`);
     }
   });
 });

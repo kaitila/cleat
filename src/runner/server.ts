@@ -6,6 +6,7 @@ import {
   type ClipboardCapture,
   type ErrorResponse,
   type EventsResponse,
+  type HealthResponse,
   type NotificationsResponse,
   type ServerMessage,
   type SessionResponse,
@@ -13,6 +14,7 @@ import {
   type WorkspacesResponse,
 } from "../shared/protocol";
 import { driverFor, type AgentDriver } from "./agent";
+import { buildId } from "./build";
 import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
 import type { Config } from "./config";
 import { Notifications } from "./notifications";
@@ -63,6 +65,8 @@ interface App {
   sessions: Sessions;
   clipboard: Clipboard;
   notifications: Notifications;
+  /** The build id of the code this process loaded, taken once at its start (build.ts). */
+  build: string;
   /** Where the Windows drives are mounted (/mnt). */
   mounts: string;
 }
@@ -165,7 +169,7 @@ async function handle(req: Request, app: App): Promise<Response> {
     }
     if (path === "/api/clipboard") return json(app.clipboard.get() ?? {});
     if (path === "/api/clipboard/image") return clipboardImage(app);
-    if (path === "/health") return json({ ok: true, version: VERSION });
+    if (path === "/health") return json({ ok: true, version: VERSION, build: app.build } satisfies HealthResponse);
     if (path === "/") return page("chat.html");
     if (path === "/prompt") return page("prompt.html");
     if (path === "/dock") return page("dock.html");
@@ -190,7 +194,7 @@ export function startServer(config: Config, driver: AgentDriver = driverFor(conf
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
   const notifications = new Notifications((notification) => send({ type: "notification", notification }));
   const sessions = new Sessions(store, driver, send, notifications);
-  const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), notifications, mounts };
+  const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts };
   const server = Bun.serve({
     hostname: HOST,
     port: config.port,

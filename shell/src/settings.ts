@@ -16,6 +16,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = { runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", dock: true };
 export const SETTINGS_FILE = "settings.json";
+/** The running shell's Windows pid, beside the settings: `up` waits for that process to end before it installs over it. */
+export const PID_FILE = "shell.pid";
 
 function httpUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;

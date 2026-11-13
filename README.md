@@ -40,8 +40,9 @@ A workspace whose folder is missing is listed but can't be picked. Sessions and 
 | Command | What it does |
 |---|---|
 | `bun src/cli.ts link [dir]` | Put `intuition` on the PATH: a symlink in `dir`, or else in the folder bun is in. `intuition unlink [dir]` removes it |
-| `intuition up`, or `intuition` alone | Start the runner, install the Windows shell if needed, start it |
-| `intuition start` | Start the runner in the background; prints its URL once it answers. Says so and exits 0 if it already runs |
+| `intuition up`, or `intuition` alone | Start the runner, install the Windows shell if needed, start it. A runner or shell older than the repo (after a pull) is restarted |
+| `intuition start` | Start the runner in the background; prints its URL once it answers. Says so and exits 0 if it already runs the repo's code. If it runs older code it is restarted, unless a session is running or waits for approval: then it is kept, the sessions are named, and the exit code is 3 |
+| `intuition restart [--force]` | Stop the runner and start it again. Keeps it (exit 3) while a session is running or waits for approval, unless `--force` |
 | `intuition stop` | Stop the runner that `start` started |
 | `intuition status` | Whether the runner runs (exit code 0 when it does, 1 when not) |
 | `intuition logs` | The end of the runner's log |
