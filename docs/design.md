@@ -16,7 +16,10 @@ Small, clean and calm: a tool that lives in the tray. Everything is in `src/web/
 | `--control`, `--control-s`, `--dot` | Heights: 28px for buttons, inputs and rows; 20px for small buttons and key hints; the 7px status dot |
 | `--hairline`, `--ring` | Border width (below); the 2px focus ring |
 | `--shadow` | Only for what floats above the page (a menu). Nothing in the page's flow has one, and neither has the dock (below) |
-| `--motion`, `--ease` | 150ms for colour changes. `prefers-reduced-motion` turns all motion off |
+| `--motion`, `--ease` | 150ms for colour changes, and the curve for fades. `prefers-reduced-motion` turns all motion off but fades |
+| `--ease-gentle`, `--ease-bouncy`, `--ease-snappy` with `--dur-gentle`, `--dur-bouncy`, `--dur-snappy` | The springs, below ("Motion") |
+| `--dur-fade`, `--dur-out`, `--rise`, `--pop` | 120ms for a fade in, 110ms for the way out; how far a thing that springs in travels (6px) and the scale it grows from (0.96) |
+| `--device-px`, `--snip-line`, `--snip-mark`, `--snip-mark-w`, `--snip-label`, `--snip-dim`, `--snip-edge` | The snip overlay, the same in both schemes (below) |
 | `--island-open`, `--island-close`, `--settle`, `--island-quiet` | The dock's island: 320ms to grow, on a curve that leaves fast and settles long without passing its size; 220ms to shrink; how much of it shows (0.55) while nothing is going on |
 | `--sidebar`, `--measure` | Chat view: the sidebar's width; the widest the stream gets |
 
@@ -50,6 +53,28 @@ Every border is `var(--hairline) solid` a line colour: one device pixel, so 1px,
 - **Tool call**: `<details class="tool">` with `.tool-name`, `.tool-line`, `.tool-mark` in its summary and a `.tool-body`: one 28px row until opened.
 - **Approval card**: `.approval` with `data-state` `open`, `allow`, `deny` or `unanswered`; `.approval-head`, `-tool`, `-state`, `-path`, `-input`, `-reason`, `-actions`. Open, it is the one amber thing on the page; decided, it is as quiet as a tool call.
 - **Markdown**: `.md` on an assistant's message, drawn by `markdown.js` ([D0013](decisions/D0013-markdown-renderer.md)). Compact, a chat and not a document: blocks `--space-2` apart, headings at `--text-m` semibold (`h1` at `--text-l`, `h5`/`h6` muted), lists indented by one and a half times the type size with muted markers, task marks as small boxes (done: filled with the accent), quotes behind a `--line-strong` hairline in `--muted`, rules and table rows as hairlines, code blocks as `.well` that scroll sideways with their language as a quiet caption. Links are the accent, underlined in `--accent-soft`. `<em>` is the browser's slanted Inter, the one synthesis allowed. The person's own messages stay plain text.
+
+## Motion
+Things move like objects with a little weight, not on straight lines: they spring. Three springs, as CSS `linear()` curves, each with the duration it takes to come to rest:
+
+| Spring | Feel | Duration | Use it for |
+|---|---|---|---|
+| `--ease-gentle` | Near critical, under 1% overshoot | `--dur-gentle` 290ms | Something appearing or sliding without fuss: a page's contents as its window opens |
+| `--ease-bouncy` | About 11% past its end, then back | `--dur-bouncy` 350ms | Something that arrives or is chosen: the snip's prompt box, a clipboard attachment, the workspace mark sliding |
+| `--ease-snappy` | Critical in effect, under 0.2% | `--dur-snappy` 190ms | A quick answer to a key or a click |
+
+Always pair a curve with its own duration (`animation: x var(--dur-bouncy) var(--ease-bouncy)`): the curve is the spring's path over exactly that time. Opacity doesn't spring: a thing that springs in also fades in on `--dur-fade` and `--ease`, as a second animation. Leaving is a fade on `--dur-out`, quick and soft, with no spring.
+
+Animate `transform` and `opacity` only, never size or position: a change of size is a FLIP (set the new size at once, draw it where it was with a transform, let the transform go), as the pop-up's workspace mark does. Travel is small: `--rise` and `--pop`. Something that follows the pointer (the snip's selection while dragging) follows it exactly, with no easing; it may settle with a spring when let go. The focus never waits for an animation: put it in place first, then start the motion.
+
+The curves come from `src/web/motion.js`, which turns a stiffness and a damping into `linear()` points and a settle time; `bun src/web/motion.js` prints the tokens to paste into `base.css`, and `test/web/motion.test.ts` fails when the two differ. A new spring is a new entry there, not a hand-written curve.
+
+**Reduced motion.** Under `prefers-reduced-motion` base.css stops every animation and transition, and sets `--rise` to 0, `--pop` to 1, every spring to `linear` and every spring's duration to `--dur-fade`. A page that wants its fades back says so in its own `@media (prefers-reduced-motion: reduce)` rule, naming only fade keyframes with `!important` (as `snip.css`, `prompt.css` and `dock.css` do): a short plain fade, nothing that moves.
+
+## The snip overlay
+One window over each display, on the frozen screen. The rest of the screen is dimmed by the dark back surface at `--snip-dim` (about half), fading in fast (`--dur-fade`) once the capture is up; the selection is cut out of the dim, so it shows the screen as it is. Nothing in it is the accent: its edge is a neutral light hairline (`--snip-line`), a ring one device pixel wide (`--device-px`, which `snip.js` sets from the display's scale) just outside the selection, drawn on the device pixels the crop takes, as part of `--snip-edge` with a faint light inside the edge that lifts the area a little above the dim. Its corners have short marks two device pixels wide (`--snip-mark`, `--snip-mark-w`), left out on a selection too small for them. Its size, in device pixels, sits on a dark veil (`--snip-label`) in the same light.
+
+The prompt box is centred on the selection, below it, above it when there is no room below, inside it at its bottom when neither fits, and kept on the display (`anchorBox` in `snip-geometry.js`). While dragging, the selection follows the pointer exactly. On release the corner marks settle in from a few pixels out on `--ease-bouncy`, and the box springs in on it (from `--pop` and `--rise` below its place) with the focus already in its task box. Esc, or a started session, fades the dim, the edge and the box out (`--dur-out`) to the frozen screen, then closes the window.
 
 ## The dock
 One dark island hanging from the top edge of the screen, the same in both schemes (`.dark`), on the `--sunken` surface: the darkest, so it reads as one object on any desktop. Its top corners are square, since it hangs from the edge; the bottom ones have `--radius`. Its edge is a hairline on the three free sides: `--line-strong`, and the quieter `--line` when nothing is going on. It has no shadow, filter or blur.

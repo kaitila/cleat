@@ -2,7 +2,8 @@
    hairline, one quiet line. Layout only: every colour, size, radius and border is a token or a
    component of base.css (docs/design.md). */
 body { overflow: hidden; }
-/* The window's contents rise into place on the gentle spring as it opens. */
+/* The window's contents grow into place on the gentle spring as it opens: half the pop, from the
+   middle, so nothing passes the window's edge (a rise would, and the page would scroll). */
 .prompt {
   height: 100%;
   display: flex;
@@ -136,7 +137,7 @@ body { overflow: hidden; }
 .keys span { margin-right: var(--space-2); }
 .keys span:last-child { margin-right: 0; }
 
-@keyframes page-in { from { transform: translateY(calc(var(--rise) / 2)); } }
+@keyframes page-in { from { transform: scale(calc((1 + var(--pop)) / 2)); } }
 @keyframes pop-in { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
 @keyframes fade-in { from { opacity: 0; } }
 

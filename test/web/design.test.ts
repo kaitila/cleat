@@ -34,7 +34,7 @@ function rawValues(css: string): string[] {
     if (property === "font" || property === "font-family") why("pages don't set fonts");
     if (property === "font-weight" && !/^var\(--(?:regular|medium|semibold)\)$/.test(value)) why("a weight that is not a token");
     if (/^border(?:-[a-z]+)*-radius$/.test(property!) && !/^(?:0|50%|inherit|var\(--radius(?:-s)?\))$/.test(value)) why("a radius that is not a token");
-    if (property === "box-shadow" && !/^(?:none|var\(--(?:shadow|glow)\))$/.test(value)) why("a shadow that is not a token");
+    if (property === "box-shadow" && !/^(?:none|var\(--(?:shadow|snip-edge)\))$/.test(value)) why("a shadow that is not a token");
     if (/^(?:transition|animation)(?:-duration)?$/.test(property!) && /\d(?:ms|s)\b/.test(value.replace(/var\(--[a-z0-9-]+\)/g, ""))) why("a duration that is not the token");
   }
   return found;

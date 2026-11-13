@@ -11,6 +11,7 @@ import { deflateSync } from "node:zlib";
 import type { EventsResponse, SessionsResponse } from "../../src/shared/protocol";
 import { loadConfig } from "../../src/runner/config";
 import { startServer } from "../../src/runner/server";
+import { frameStrip, pauseAll, type FramePage } from "./motion-frames";
 
 interface Rect { x: number; y: number; width: number; height: number }
 // The little of playwright's API this script uses (the package isn't a dependency, so no types).
@@ -18,7 +19,8 @@ interface Page {
   goto(url: string): Promise<unknown>;
   evaluate<T, A = undefined>(fn: (arg: A) => T, arg?: A): Promise<T>;
   waitForFunction(fn: () => unknown, arg?: unknown, options?: { timeout?: number }): Promise<unknown>;
-  screenshot(options: { path: string }): Promise<unknown>;
+  screenshot(options: { path?: string; clip?: Rect; fullPage?: boolean }): Promise<Uint8Array>;
+  setContent(html: string): Promise<unknown>;
   close(): Promise<void>;
   addInitScript<A>(fn: (arg: A) => void, arg: A): Promise<void>;
   exposeFunction(name: string, fn: (...args: never[]) => unknown): Promise<void>;
@@ -28,7 +30,7 @@ interface Page {
   mouse: { move(x: number, y: number, options?: { steps?: number }): Promise<void>; down(): Promise<void>; up(): Promise<void>; click(x: number, y: number): Promise<void> };
 }
 interface Browser {
-  newContext(options: { viewport: { width: number; height: number }; colorScheme: "light" | "dark"; deviceScaleFactor?: number }): Promise<{
+  newContext(options: { viewport: { width: number; height: number }; colorScheme: "light" | "dark"; deviceScaleFactor?: number; reducedMotion?: "reduce" | "no-preference" }): Promise<{
     newPage(): Promise<Page>;
     on(event: "request", listener: (request: { url(): string }) => void): void;
   }>;
@@ -128,8 +130,8 @@ const userEvents = async (id: string) => ((await (await fetch(`${runner.url}/api
 const requested: string[] = [];
 
 /** A page with the stand-in bridge. `crops` and `closes` record what the page asked of it. */
-async function open(colorScheme: "light" | "dark", bridge = true) {
-  const context = await browser.newContext({ viewport: SIZE, colorScheme, deviceScaleFactor: SCALE });
+async function open(colorScheme: "light" | "dark", bridge = true, reducedMotion: "reduce" | "no-preference" = "no-preference") {
+  const context = await browser.newContext({ viewport: SIZE, colorScheme, deviceScaleFactor: SCALE, reducedMotion });
   context.on("request", (r) => requested.push(r.url()));
   const page = await context.newPage();
   const seen = { crops: [] as Rect[], closes: 0 };
@@ -152,6 +154,13 @@ async function open(colorScheme: "light" | "dark", bridge = true) {
   await page.waitForFunction(() => document.querySelector("#workspace-name")?.textContent !== "no workspace", undefined, { timeout: 3000 }).catch(() => {});
   return { page, seen };
 }
+/** An empty page to lay a frame strip out on. */
+const blank = async () => (await (await browser.newContext({ viewport: { width: 1200, height: 400 }, colorScheme: "light" })).newPage()) as unknown as FramePage;
+/** Waits up to 2s for the bridge's close(). */
+async function closed(seen: { closes: number }) {
+  for (let i = 0; i < 20 && seen.closes === 0; i++) await Bun.sleep(100);
+  return seen.closes;
+}
 
 const state = () => {
   const box = document.querySelector<HTMLElement>("#box")!;
@@ -162,7 +171,9 @@ const state = () => {
   return {
     focus: document.activeElement?.id ?? "",
     boxShown: !box.hidden,
-    box: rect(box),
+    // Where the box is laid out: its spring (a transform) doesn't move this.
+    box: { x: box.offsetLeft, y: box.offsetTop, width: box.offsetWidth, height: box.offsetHeight },
+    drawn: rect(box),
     placement: box.dataset.placement ?? "",
     selection: document.querySelector<HTMLElement>("#selection")!.hidden ? null : rect(document.querySelector("#selection")!),
     size: document.querySelector<HTMLElement>("#size")!.hidden ? null : document.querySelector("#size")!.textContent,
@@ -178,6 +189,30 @@ const state = () => {
     cursor: getComputedStyle(document.body).cursor,
   };
 };
+/** How the selection, its marks, its label and the dim are drawn, and what is animating. */
+const look = () => {
+  const css = (sel: string) => getComputedStyle(document.querySelector(sel)!);
+  const rgba = (c: string) => (c.match(/[\d.]+/g) ?? []).map(Number);
+  const box = document.querySelector<HTMLElement>("#box")!;
+  return {
+    // The edge is the first shadow: a ring with no offset or blur, spread one device pixel.
+    edge: rgba(css("#selection").boxShadow.split(/,(?![^(]*\))/)[0]!.match(/rgba?\([^)]*\)/)?.[0] ?? ""),
+    edgeSpread: parseFloat(css("#selection").boxShadow.split(/,(?![^(]*\))/)[0]!.replace(/rgba?\([^)]*\)/, "").trim().split(/\s+/)[3] ?? "NaN"),
+    outlineStyle: css("#selection").outlineStyle,
+    corner: rgba(css(".corner").borderTopColor),
+    label: rgba(css("#size").color),
+    labelBg: rgba(css("#size").backgroundColor),
+    glow: css("#selection").boxShadow,
+    dim: Number(css("#shade").opacity),
+    boxAnimations: box.getAnimations().map((a) => ({ name: (a as CSSAnimation).animationName, easing: String((a.effect as KeyframeEffect).getKeyframes()[0]?.easing ?? ""), duration: Number((a.effect as KeyframeEffect).getTiming().duration) })),
+    cornerAnimations: document.querySelector("#selection")!.getAnimations({ subtree: true }).map((a) => (a as CSSAnimation).animationName),
+    selectionMoves: document.querySelector("#selection")!.getAnimations().length + getComputedStyle(document.querySelector("#selection")!).transitionDuration.split(",").filter((d) => parseFloat(d) > 0).length,
+    boxTransform: getComputedStyle(box).transform,
+    dpr: devicePixelRatio,
+  };
+};
+/** A colour with no hue: its red, green and blue within 2 of each other. */
+const neutral = (c: number[]) => c.length >= 3 && Math.max(c[0]!, c[1]!, c[2]!) - Math.min(c[0]!, c[1]!, c[2]!) <= 2;
 async function shot(page: Page, name: string): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
   const path = join(shots, `${name}.png`);
@@ -203,16 +238,48 @@ try {
   check("nothing scrolls", !s.overflow);
   await shot(page, "light-start");
 
-  await drag(page, { x: 200, y: 150 }, { x: 600, y: 400 });
+  // Mid-drag: the selection is where the pointer is, with nothing easing it there.
+  await page.mouse.move(200, 150);
+  await page.mouse.down();
+  await page.mouse.move(450, 330, { steps: 5 });
   s = await page.evaluate(state);
+  let l = await page.evaluate(look);
+  check("while dragging, the selection follows the pointer exactly, with no animation or transition on it", s.selection !== null && near(s.selection.x + s.selection.width, 450) && near(s.selection.y + s.selection.height, 330) && l.selectionMoves === 0 && !s.boxShown, JSON.stringify({ sel: s.selection, moves: l.selectionMoves }));
+  await page.mouse.move(600, 400, { steps: 3 });
+  await page.mouse.up();
+  s = await page.evaluate(state);
+  l = await page.evaluate(look);
   check("the drag draws the selection where the pointer went", s.selection !== null && near(s.selection.x, 200) && near(s.selection.y, 150) && near(s.selection.width, 400) && near(s.selection.height, 250), JSON.stringify(s.selection));
-  check("the selection is cut out of the dim", s.clip.includes("evenodd") && /M\s*200\s+150\s*H\s*600\s*V\s*400\s*H\s*200\s*Z/.test(s.clip), s.clip);
+  // On the device pixels the crop takes: 150 CSS px is 187.5 device px, so the edge is at 187 (149.6).
+  check("the selection is cut out of the dim, on whole device pixels", s.clip.includes("evenodd") && /M\s*200\s+149\.6\s*H\s*600\s*V\s*400\s*H\s*200\s*Z/.test(s.clip), s.clip);
+  check("the edge is a light neutral hairline of one device pixel, no accent", l.outlineStyle === "none" && neutral(l.edge) && l.edge[0]! >= 230 && Math.abs(l.edgeSpread - 1 / SCALE) < 0.01, JSON.stringify({ edge: l.edge, spread: l.edgeSpread }));
+  check("the corner marks are the same neutral light", neutral(l.corner) && l.corner[0]! >= 230, JSON.stringify(l.corner));
+  check("the size label is neutral too", neutral(l.label) && neutral(l.labelBg), JSON.stringify({ label: l.label, bg: l.labelBg }));
+  check("the area is lifted: the rest dimmed by about half, a faint light inside the edge", l.dim >= 0.45 && l.dim <= 0.6 && /inset/.test(l.glow), JSON.stringify({ dim: l.dim, glow: l.glow }));
+  const pop = l.boxAnimations.find((a) => a.name === "box-pop");
+  check("on release the box springs in: the bouncy linear() curve, about 350ms, with a fade", pop !== undefined && pop.easing.startsWith("linear(") && pop.duration >= 300 && pop.duration <= 400 && l.boxAnimations.some((a) => a.name === "fade-in"), JSON.stringify(l.boxAnimations));
+  check("and the selection's corners settle on a spring", l.cornerAnimations.filter((n) => n.startsWith("corner-")).length === 4, JSON.stringify(l.cornerAnimations));
   check("its size is shown in device pixels", s.size === "500 × 313", String(s.size));
   check("the size label sits just above its top left corner", near(s.sizeAt.x, 200) && s.sizeAt.y + s.sizeAt.height <= 150 && s.sizeAt.y > 120, JSON.stringify(s.sizeAt));
-  check("on release the box appears below the selection, left edges lined up", s.boxShown && s.placement === "below" && near(s.box.x, 200) && near(s.box.y, 408), JSON.stringify({ placement: s.placement, box: s.box }));
+  const centre = (r: Rect) => r.x + r.width / 2;
+  check("on release the box appears below the selection, centred on it", s.boxShown && s.placement === "below" && s.selection !== null && near(centre(s.box), centre(s.selection)) && near(s.box.y, 408), JSON.stringify({ placement: s.placement, box: s.box, selection: s.selection }));
   check("the box has the focus at once", s.focus === "task", s.focus);
   check("the hint is gone", s.hint === null);
   check("the workspace chip shows the first that exists (none used yet)", s.workspace === "alpha", String(s.workspace));
+  // The frames of what release started, while it is still running: the box and the corners.
+  const times = [0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 350];
+  const pad = 24;
+  await pauseAll(page as unknown as FramePage);
+  const boxClip = { x: s.box.x - pad, y: s.box.y - pad, width: s.box.width + pad * 2, height: s.box.height + pad * 2 };
+  const boxFrames = await frameStrip(page as unknown as FramePage, await blank(), { selector: "#box", clip: boxClip, times, path: join(shots, "strip-prompt-appearing.png"), title: "The snip's prompt box springing in (box-pop on --ease-bouncy)" });
+  console.log(`screenshot: ${join(shots, "strip-prompt-appearing.png")}`);
+  const cornerClip = { x: 200 - pad, y: 150 - pad, width: 64, height: 48 };
+  const cornerFrames = await frameStrip(page as unknown as FramePage, await blank(), { selector: ".corner", clip: cornerClip, times, path: join(shots, "strip-selection-settling.png"), title: "The selection's top left corner settling (corner-tl on --ease-bouncy), at 4x", zoom: 4 });
+  console.log(`screenshot: ${join(shots, "strip-selection-settling.png")}`);
+  check("the frame strips stepped the running springs", boxFrames >= 2 && cornerFrames === 4, `${boxFrames} ${cornerFrames}`);
+  s = await page.evaluate(state);
+  check("once settled, the box is drawn where it is laid out", near(s.drawn.x, s.box.x) && near(s.drawn.y, s.box.y) && near(s.drawn.width, s.box.width), JSON.stringify({ drawn: s.drawn, box: s.box }));
+  check("and the focus is still in the task box", s.focus === "task", s.focus);
   await shot(page, "light-selected");
 
   await page.keyboard.type("What is in this area?");
@@ -285,12 +352,14 @@ try {
   await corner.page.keyboard.type("This button");
   await shot(corner.page, "dark-corner");
   await corner.page.keyboard.press("Escape");
+  await closed(corner.seen);
   check("Esc closes, and nothing was cropped or started", corner.seen.closes === 1 && corner.seen.crops.length === 0 && !(await sessions()).some((x) => x.title === "This button"), JSON.stringify(corner.seen));
   await corner.page.close();
 
   // Esc before any selection closes too.
   const early = await open("light");
   await early.page.keyboard.press("Escape");
+  await closed(early.seen);
   check("Esc before any press closes", early.seen.closes === 1);
   await early.page.close();
 
@@ -302,6 +371,27 @@ try {
   check("at the top edge the size label is inside the selection", s.sizeAt.y >= 0 && s.sizeAt.y < 20, JSON.stringify(s.sizeAt));
   await shot(top.page, "light-top-right");
   await top.page.close();
+
+  // Esc fades the marks out before the window goes: soft, and quick.
+  const soft = await open("light");
+  await drag(soft.page, { x: 300, y: 200 }, { x: 700, y: 450 });
+  await Bun.sleep(450);
+  const t0 = Date.now();
+  await soft.page.keyboard.press("Escape");
+  const fading = await soft.page.evaluate(() => document.querySelector("#shade")!.getAnimations().map((a) => (a as CSSAnimation).animationName));
+  check("Esc first fades the dim, the edge and the box out", soft.seen.closes === 0 && fading.includes("fade-out"), JSON.stringify({ closes: soft.seen.closes, fading }));
+  await closed(soft.seen);
+  check("then closes, within a quarter second", soft.seen.closes === 1 && Date.now() - t0 < 250 + 100, `${Date.now() - t0}ms`);
+  await soft.page.close();
+
+  // Reduced motion: the box only fades in; nothing grows, rises or bounces.
+  const still = await open("dark", true, "reduce");
+  await drag(still.page, { x: 300, y: 200 }, { x: 700, y: 450 });
+  l = await still.page.evaluate(look);
+  check("with prefers-reduced-motion the box fades in, short and linear, and doesn't move", l.boxAnimations.length === 1 && l.boxAnimations[0]!.name === "fade-in" && l.boxAnimations[0]!.easing === "linear" && l.boxAnimations[0]!.duration <= 150 && l.boxTransform === "none" && l.cornerAnimations.length === 0, JSON.stringify(l));
+  s = await still.page.evaluate(state);
+  check("and the box is still centred and focused", s.selection !== null && near(centre(s.box), centre(s.selection)) && s.focus === "task", JSON.stringify({ box: s.box, sel: s.selection }));
+  await still.page.close();
 
   // No bridge (a plain browser): the page says it opens from the shell, and does nothing.
   const plain = await open("light", false);

@@ -30,13 +30,11 @@ body.snip {
 body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backwards; }
 
 /* The selection's edge: a light neutral hairline of one device pixel, just outside it, so every
-   selected pixel shows as it is; a faint light inside the edge lifts it off the dim. It follows
+   selected pixel shows as it is; a faint light inside the edge lifts it off the dim (--snip-edge). It follows
    the pointer exactly: nothing here moves it on a curve. snip.js sets its box on device pixels. */
 .selection {
   position: fixed;
-  outline: var(--device-px) solid var(--snip-line);
-  outline-offset: 0;
-  box-shadow: var(--glow);
+  box-shadow: var(--snip-edge);
   pointer-events: none;
 }
 /* Corner marks, a little bolder than the edge. On release (data-settle) they come in from a few
@@ -49,10 +47,10 @@ body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backward
   border-color: var(--snip-mark);
   border-width: 0;
 }
-.corner[data-at="tl"] { top: calc(var(--ring) * -1); left: calc(var(--ring) * -1); border-top-width: var(--ring); border-left-width: var(--ring); }
-.corner[data-at="tr"] { top: calc(var(--ring) * -1); right: calc(var(--ring) * -1); border-top-width: var(--ring); border-right-width: var(--ring); }
-.corner[data-at="bl"] { bottom: calc(var(--ring) * -1); left: calc(var(--ring) * -1); border-bottom-width: var(--ring); border-left-width: var(--ring); }
-.corner[data-at="br"] { bottom: calc(var(--ring) * -1); right: calc(var(--ring) * -1); border-bottom-width: var(--ring); border-right-width: var(--ring); }
+.corner[data-at="tl"] { top: calc(var(--snip-mark-w) * -1); left: calc(var(--snip-mark-w) * -1); border-top-width: var(--snip-mark-w); border-left-width: var(--snip-mark-w); }
+.corner[data-at="tr"] { top: calc(var(--snip-mark-w) * -1); right: calc(var(--snip-mark-w) * -1); border-top-width: var(--snip-mark-w); border-right-width: var(--snip-mark-w); }
+.corner[data-at="bl"] { bottom: calc(var(--snip-mark-w) * -1); left: calc(var(--snip-mark-w) * -1); border-bottom-width: var(--snip-mark-w); border-left-width: var(--snip-mark-w); }
+.corner[data-at="br"] { bottom: calc(var(--snip-mark-w) * -1); right: calc(var(--snip-mark-w) * -1); border-bottom-width: var(--snip-mark-w); border-right-width: var(--snip-mark-w); }
 .selection[data-settle] .corner { animation: var(--dur-bouncy) var(--ease-bouncy) backwards; }
 .selection[data-settle] .corner[data-at="tl"] { animation-name: corner-tl; }
 .selection[data-settle] .corner[data-at="tr"] { animation-name: corner-tr; }
