@@ -37,11 +37,11 @@ export class Sessions {
     private readonly store: Store,
     private readonly driver: AgentDriver,
     private readonly send: (message: ServerMessage) => void,
-    /** Where the turns' notifications go (the shell's toasts). Without it none are recorded. */
+    /** Where the turns' notifications go (the dock's peeks). Without it none are recorded. */
     private readonly notifications?: Notifications,
   ) {}
 
-  /** Records a notification for the shell, titled as the session is. */
+  /** Records a notification, titled as the session is. */
   private notify(id: string, kind: Notification["kind"], body: string): void {
     this.notifications?.add({ kind, sessionId: id, title: this.store.get(id)?.title ?? "", body });
   }

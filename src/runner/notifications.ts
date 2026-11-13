@@ -1,5 +1,6 @@
-// The notifications the Windows shell shows as toasts: the newest 200, in memory only, with a global
-// seq that starts at 1 each time the runner starts (docs/protocol.md, "Notifications").
+// The notifications the dock shows as peeks: the newest 200, in memory only, with a global seq that
+// starts at 1 each time the runner starts (docs/protocol.md, "Notifications"). Each one is handed to
+// `onAdd` as it is recorded (the server pushes it to the WebSocket clients) and kept for the polling route.
 import type { Notification, NotificationsResponse } from "../shared/protocol";
 
 export const KEEP_NOTIFICATIONS = 200;
@@ -11,7 +12,7 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
-/** A toast's body: one line, at most 140 characters. */
+/** A notification's body: one line, at most 140 characters. */
 export function bodyOf(text: string): string {
   return oneLine(text).slice(0, BODY_MAX);
 }
@@ -45,10 +46,13 @@ export class Notifications {
   private readonly kept: Notification[] = [];
   private seq = 0;
 
+  constructor(private readonly onAdd?: (notification: Notification) => void) {}
+
   add(n: Omit<Notification, "seq" | "ts">): Notification {
     const stored: Notification = { seq: ++this.seq, ts: new Date().toISOString(), ...n };
     this.kept.push(stored);
     if (this.kept.length > KEEP_NOTIFICATIONS) this.kept.splice(0, this.kept.length - KEEP_NOTIFICATIONS);
+    this.onAdd?.(stored);
     return stored;
   }
 

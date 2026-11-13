@@ -1,11 +1,12 @@
-// Notifications: what the runner records for the shell's toasts, and GET /api/notifications.
+// Notifications: what the runner records for the dock's peeks, how it pushes them on the WebSocket,
+// and GET /api/notifications.
 import { afterAll, describe, expect, test } from "bun:test";
-import type { NotificationsResponse, SessionEvent } from "../../src/shared/protocol";
+import type { NotificationsResponse, ServerMessage, SessionEvent } from "../../src/shared/protocol";
 import type { AgentDriver } from "../../src/runner/agent";
 import { FAKE_ERROR, fakeDecided, fakeReply } from "../../src/runner/agent-fake";
 import { approvalBody, bodyOf, KEEP_NOTIFICATIONS, NO_TEXT, Notifications, toolSummary } from "../../src/runner/notifications";
 import { FAILED, NO_RESULT } from "../../src/runner/sessions";
-import { connect, settled, testRunner, type TestRunner } from "./helpers";
+import { connect, settled, testRunner, type Socket, type TestRunner } from "./helpers";
 
 async function notes(runner: TestRunner, query = ""): Promise<NotificationsResponse> {
   const res = await runner.get(`/api/notifications${query}`);
@@ -25,6 +26,15 @@ describe("the notification log", () => {
     expect(log.after(1)).toMatchObject({ notifications: [{ seq: 2, title: "two" }], latest: 2 });
     expect(log.after(2)).toEqual({ notifications: [], latest: 2 });
     expect(log.after(99)).toEqual({ notifications: [], latest: 2 });
+  });
+
+  test("each one is handed to onAdd as it is recorded, as stored", () => {
+    const pushed: unknown[] = [];
+    const log = new Notifications((n) => pushed.push(n));
+    const first = log.add({ kind: "finished", sessionId: "s1", title: "one", body: "done" });
+    const second = log.add({ kind: "needs_approval", sessionId: "s2", title: "two", body: "Bash: ls" });
+    expect(pushed).toEqual([first, second]);
+    expect(log.after(0).notifications).toEqual([first, second]);
   });
 
   test("only the newest 200 are kept, and seq goes on", () => {
@@ -118,6 +128,57 @@ describe("what the runner records", () => {
   test("the route passes the same guard as the others", async () => {
     const res = await fetch(`${runner.url}/api/notifications`, { headers: { origin: "http://evil.test" } });
     expect(res.status).toBe(403);
+  });
+});
+
+describe("pushed on the WebSocket", () => {
+  const runner = testRunner();
+  afterAll(() => runner.stop());
+  const pushedTo = (socket: Socket) => socket.messages.flatMap((m) => (m.type === "notification" ? [m.notification] : []));
+
+  test("a finished turn is pushed once, the same notification the polling route returns", async () => {
+    const socket = await connect(runner);
+    const session = await runner.startSession("say hello");
+    const message = await socket.waitFor((m) => m.type === "notification" && m.notification.sessionId === session.id);
+    expect(message).toEqual({ type: "notification", notification: { seq: 1, ts: expect.any(String), kind: "finished", sessionId: session.id, title: "say hello", body: fakeReply("say hello") } });
+    expect((await notes(runner)).notifications).toEqual(pushedTo(socket));
+    socket.close();
+  });
+
+  test("an approval is pushed after the session says it waits, and the end of the turn after it is idle", async () => {
+    const socket = await connect(runner);
+    const session = await runner.startSession("this needs approval");
+    await socket.waitFor((m) => m.type === "notification" && m.notification.kind === "needs_approval");
+    const index = (match: (m: ServerMessage) => boolean) => socket.messages.findIndex(match);
+    const mine = (m: ServerMessage) => m.type === "notification" && m.notification.sessionId === session.id;
+    expect(index((m) => m.type === "session" && m.session.id === session.id && m.session.status === "waiting_approval")).toBeLessThan(index(mine));
+    const ask = socket.messages.flatMap((m) => (m.type === "event" && m.event.kind === "approval_request" ? [m.event] : []))[0]!;
+    await runner.post(`/api/sessions/${session.id}/approvals/${ask.approvalId}`, { decision: "deny" });
+    await socket.waitFor((m) => m.type === "notification" && m.notification.kind === "finished" && m.notification.sessionId === session.id);
+    expect(pushedTo(socket).map((n) => [n.seq, n.kind, n.body])).toEqual([
+      [2, "needs_approval", `Write: ${runner.dir}/work/fake.txt`],
+      [3, "finished", fakeDecided("deny")],
+    ]);
+    expect(index((m) => m.type === "session" && m.session.id === session.id && m.session.status === "idle")).toBeLessThan(index((m) => mine(m) && m.type === "notification" && m.notification.kind === "finished"));
+    socket.close();
+  });
+
+  test("a failed turn is pushed as an error, to every client", async () => {
+    const [one, two] = [await connect(runner), await connect(runner)];
+    const session = await runner.startSession("please fail");
+    for (const socket of [one, two]) {
+      const message = await socket.waitFor((m) => m.type === "notification" && m.notification.sessionId === session.id);
+      expect(message).toMatchObject({ notification: { seq: 4, kind: "error", title: "please fail", body: FAKE_ERROR } });
+      socket.close();
+    }
+  });
+
+  test("nothing is replayed to a client that connects later: only `hello` arrives", async () => {
+    const socket = await connect(runner);
+    await Bun.sleep(50);
+    expect(socket.messages.map((m) => m.type)).toEqual(["hello"]);
+    expect((await notes(runner)).latest).toBe(4);
+    socket.close();
   });
 });
 

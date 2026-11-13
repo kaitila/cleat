@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>intuition dock</title>
+  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/base.css">
+  <link rel="stylesheet" href="/assets/dock.css">
+  <script type="module" src="/assets/dock.js"></script>
+</head>
+<body>
+  <main id="island" class="island" data-state="idle">
+    <div id="pill" class="pill" role="status" data-tone="none">
+      <span id="pill-dot" class="dot" hidden></span>
+      <span id="pill-text" class="pill-text">intuition</span>
+      <span id="pill-failed" class="dot" data-status="error" title="The last one failed" hidden></span>
+    </div>
+
+    <div id="peek" class="peek" role="status" hidden>
+      <div class="peek-head">
+        <span id="peek-dot" class="dot"></span>
+        <span id="peek-title" class="peek-title strong"></span>
+        <span id="peek-label" class="peek-label small"></span>
+      </div>
+      <p id="peek-body" class="peek-body muted small"></p>
+    </div>
+
+    <section id="panel" class="panel" aria-label="Sessions" hidden>
+      <header class="panel-head">
+        <span class="brand">intuition</span>
+        <span id="connection" class="connection muted small" role="status" hidden>reconnecting</span>
+        <a class="button quiet small" href="/prompt" target="_blank" rel="noopener">New task</a>
+      </header>
+      <ul id="sessions" class="sessions"></ul>
+      <p id="sessions-empty" class="empty muted small" hidden>No sessions yet. Start one with New task.</p>
+      <div id="session" class="session" hidden>
+        <div class="session-head">
+          <h1 id="title" class="session-title strong"></h1>
+          <a id="open-chat" class="button quiet small" href="/" target="_blank" rel="noopener">Open in chat</a>
+        </div>
+        <div id="scroller" class="scroller">
+          <div id="stream" class="stream" role="log" aria-label="Session"></div>
+        </div>
+        <form id="reply" class="reply">
+          <textarea id="reply-text" class="input" rows="1" placeholder="Reply" aria-label="Reply" aria-describedby="reply-hint" disabled></textarea>
+          <p id="reply-hint" class="reply-hint muted small" role="status"></p>
+        </form>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -58,7 +58,7 @@ ws.onmessage = (e) => {
     if (event.kind === "assistant_text" && event.text.includes("pong")) seen.pong = true;
     if (event.kind === "result" && event.ok) seen.resultOk = true;
     if (event.kind === "error" || (event.kind === "result" && !event.ok)) void finish(1, "the turn failed");
-  } else {
+  } else if (message.type === "session") {
     const s = message.session;
     console.log(`session status=${s.status} claudeSessionId=${s.claudeSessionId} lastSeq=${s.lastSeq}`);
     if (s.status === "idle" && s.claudeSessionId) seen.idleWithClaudeId = true;

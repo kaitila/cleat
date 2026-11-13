@@ -168,6 +168,7 @@ async function handle(req: Request, app: App): Promise<Response> {
     if (path === "/health") return json({ ok: true, version: VERSION });
     if (path === "/") return page("chat.html");
     if (path === "/prompt") return page("prompt.html");
+    if (path === "/dock") return page("dock.html");
     if (path.startsWith("/assets/")) {
       const rel = normalize(path.slice("/assets/".length));
       if (rel.startsWith("..") || rel.startsWith("/")) return fail(404, "not found");
@@ -187,7 +188,7 @@ const TOPIC = "all";
 export function startServer(config: Config, driver: AgentDriver = driverFor(config), mounts = MOUNTS): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
-  const notifications = new Notifications();
+  const notifications = new Notifications((notification) => send({ type: "notification", notification }));
   const sessions = new Sessions(store, driver, send, notifications);
   const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), notifications, mounts };
   const server = Bun.serve({

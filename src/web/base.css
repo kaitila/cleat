@@ -127,6 +127,27 @@
     --shadow: 0 0 0 var(--hairline) rgb(255 255 255 / 0.1), 0 8px 28px rgb(0 0 0 / 0.6);
   }
 }
+/* Dark whatever the scheme: the dock's page (<html class="dark">) is one dark island on any desktop.
+   The same values as the dark scheme above; test/web/dock.test.ts fails when the two differ. */
+.dark {
+  color-scheme: dark;
+  --sunken: #0f0f11;
+  --bg: #151517;
+  --surface: #1b1b1e;
+  --hover: #1f1f23;
+  --selected: #27272c;
+  --line: #2a2a2f;
+  --line-strong: #3c3c43;
+  --text: #ececef;
+  --muted: #9c9ca6;
+  --accent: #8da2fb;
+  --accent-text: #0d1230;
+  --accent-soft: rgb(141 162 251 / 0.32);
+  --running: #46c483;
+  --warn: #e3a73a;
+  --danger: #f17a6e;
+  --shadow: 0 0 0 var(--hairline) rgb(255 255 255 / 0.1), 0 8px 28px rgb(0 0 0 / 0.6);
+}
 @media (min-resolution: 2dppx) {
   :root { --hairline: 0.5px; }
 }
