@@ -27,4 +27,4 @@ Claude Code keeps every session as a transcript, `~/.claude/projects/<project>/<
 - The 409 guard goes by the transcript's modification time. A terminal left open but idle for more than two minutes takes a reply without force, and the two processes can then both write to the transcript.
 
 ## Not done here
-- The pages: a terminal marker, a force reply, and `intuition resume` (T-0026).
+- The pages: a terminal marker, a force reply, and `intuition resume` (T-0026, [D0016](D0016-synced-sessions-in-the-pages.md)).

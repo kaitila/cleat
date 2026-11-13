@@ -16,6 +16,7 @@ import { Store } from "../../src/runner/store";
 import { DOCK_SIZES, DOCK_WINDOW, type DockState, islandRect } from "../../shell/src/dock";
 import { testRunner } from "../runner/helpers";
 import { MARKDOWN_EXPECTED, markdownProblems, seedMarkdown } from "./markdown-sample";
+import { assistantEntry, MemoryTranscripts, userEntry } from "./chat-transcripts";
 
 const PLAYWRIGHT = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
 /** Markup that would run if any of it reached the page as HTML. */
@@ -670,6 +671,75 @@ try {
   // A step for the shape and one for each time the content under it grew: none of them a frame on the way.
   check(fade === "layer-fade" && moves === "none 0s,none 0s" && steps.size <= 5, `prefers-reduced-motion: no transition on the shape, which changes in steps (${[...steps].join(" then ")}px), and the content fades in plainly (${fade})`);
   await q.context.close();
+
+  // ================= a session from the terminal: its mark, a turn from it, Send anyway, Continue in terminal =================
+  {
+    const transcripts = new MemoryTranscripts();
+    const term = testRunner({ driver: fakeDriver(5), sync: { transcripts, pollMs: 50, idleMs: 400 } });
+    const t = await dock("dark");
+    try {
+      const work = term.config.workspaces.find((w) => w.name === "work")!.path;
+      const first = "started in a terminal";
+      // Written five minutes ago: imported idle, and not taken as open in a terminal.
+      transcripts.write("term-1", work, [userEntry(first), assistantEntry("hello from the terminal")], Date.now() - 5 * 60_000);
+      await term.startSession("one of the runner's own");
+      await t.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: term.url });
+      await t.page.goto(`${term.url}/dock`);
+      await t.page.locator("#pill").waitFor();
+      await t.settle("idle");
+      await t.hover();
+      await t.page.locator("#panel").waitFor();
+      await t.settle("open");
+      const termRow = t.page.locator(".session-row", { hasText: first });
+      await termRow.waitFor();
+      check((await t.page.locator(".session-row .terminal-mark:not([hidden])").count()) === 1, "dock: only the session from the terminal has the terminal mark");
+      const mark = termRow.locator(".terminal-mark");
+      check((await mark.getAttribute("title")) === "started in the terminal" && (await mark.textContent()) === ">_" && (await mark.isVisible()), "a quiet glyph whose tooltip says 'started in the terminal'");
+      await termRow.click();
+      await t.page.locator(".msg.assistant", { hasText: "hello from the terminal" }).waitFor();
+      const resumeButton = t.page.locator(".session-head .resume");
+      check(await resumeButton.isVisible(), "the dock's session head offers 'Continue in terminal'");
+      await resumeButton.click();
+      await t.page.locator(".session-head .resume", { hasText: "Copied" }).waitFor();
+      const copied = await t.page.evaluate(() => navigator.clipboard.readText());
+      check(copied === `cd ${work} && claude --resume term-1`, `it copies the command that continues it, and says Copied (${copied})`);
+      // A turn arrives from the terminal.
+      const typedThere = "typed in the terminal";
+      transcripts.write("term-1", work, [userEntry(typedThere)]);
+      await t.page.locator(".session-head .session-status", { hasText: "in terminal" }).waitFor();
+      check(true, "a turn arriving from the terminal: the head says 'in terminal'");
+      await t.page.locator(".msg.user", { hasText: typedThere }).waitFor();
+      check(!(await t.page.locator("#reply-text").isDisabled()) && (await t.page.locator("#reply-hint").textContent()) !== "Working. You can reply when this turn ends.", "the reply box stays on, without the usual running hint");
+      await t.settle("open");
+      await t.fits("open");
+      await t.shot("open-terminal-turn");
+      const box = t.page.locator("#reply-text");
+      const here = "and this from the dock";
+      await box.click();
+      await box.fill(here);
+      await box.press("Enter");
+      const anyway = t.page.locator("#reply-hint button", { hasText: "Send anyway" });
+      await anyway.waitFor();
+      check((await t.page.locator("#reply-hint").textContent())?.startsWith("It looks open in a terminal.") && (await box.inputValue()) === here, "a reply answered 409 'open in a terminal' says so inline, and the typed text is kept");
+      await t.settle("open");
+      await t.fits("open");
+      await t.shot("open-send-anyway");
+      const bodies: unknown[] = [];
+      t.page.on("request", (req: Any) => {
+        if (req.method() === "POST" && req.url().endsWith("/messages")) bodies.push(req.postDataJSON());
+      });
+      await anyway.click();
+      await t.page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${here}` }).waitFor();
+      check(JSON.stringify(bodies) === JSON.stringify([{ prompt: here, force: true }]), "'Send anyway' repeats the request with force: true, and it goes through");
+      await t.page.waitForFunction(() => document.querySelector(".session-head .session-status")?.textContent === "");
+      check(true, "and the head no longer says 'in terminal'");
+    } finally {
+      await t.context.close();
+      await term.stop();
+    }
+    // The 409 above was asked for: the browser logs every refused request.
+    for (let i = pageErrors.length - 1; i >= 0; i--) if (/409 \(Conflict\)/.test(pageErrors[i]!)) pageErrors.splice(i, 1);
+  }
 
   // ================= a normal browser: no bridge =================
   const b = await dock("light", { bridge: false, scale: 1 });

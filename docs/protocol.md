@@ -43,7 +43,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 - `SessionMeta.permissionMode` is the permission mode the session runs in, as Claude Code reports it (the `init` system message at the start of each turn, and `status` messages when it changes). It is absent until the first turn reports it, and may be a mode other than the two the config allows (for example `"default"` where auto mode is unavailable).
 - Status: `running` while a turn runs, `waiting_approval` while at least one approval is open, `idle` after a `result`, `error` after a failed turn.
 - `SessionMeta.source`: `"intuition"` for a session the runner started, `"terminal"` for one it imported (below). The runner always sends it; a session stored before it existed reads as `"intuition"`.
-- `SessionMeta.terminalTurn`: `true` while the session is `running` only because its transcript grows (a turn arriving from a terminal), absent otherwise. The pages show "in terminal" for it. See "Terminal sessions".
+- `SessionMeta.terminalTurn`: `true` while the session is `running` only because its transcript grows (a turn arriving from a terminal), absent otherwise. The pages show "in terminal" for it and keep the reply box on ([D0016](decisions/D0016-synced-sessions-in-the-pages.md)). See "Terminal sessions".
 - Stored under the data folder (`~/.local/share/intuition`, or `INTUITION_DATA_DIR`): `sessions.json` for metadata, `events/<id>.jsonl` for events, `state.json` for the last workspace used, `sync.json` for the transcript sync.
 
 ## Terminal sessions

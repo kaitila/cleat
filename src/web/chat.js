@@ -379,7 +379,6 @@ function renderSidebar() {
         place: h("span"),
         mark: terminalMark(),
       };
-      row.workspace.append(row.mark, row.place);
       link.append(row.dot, row.title, row.time, row.workspace);
       item.append(link);
       rows.set(session.id, row);
@@ -387,8 +386,10 @@ function renderSidebar() {
     row.dot.dataset.status = session.status;
     row.dot.title = sessionStatus(session);
     row.title.textContent = session.title || "Untitled";
-    row.mark.hidden = !startedInTerminal(session);
     row.place.textContent = session.workspace;
+    // The mark is in the line only for a session started in the terminal.
+    const parts = startedInTerminal(session) ? [row.mark, row.place] : [row.place];
+    if (row.workspace.childNodes.length !== parts.length) row.workspace.replaceChildren(...parts);
     row.time.dateTime = session.updatedAt;
     row.time.textContent = relativeTime(session.updatedAt, now);
     if (session.id === selected) row.link.setAttribute("aria-current", "true");
