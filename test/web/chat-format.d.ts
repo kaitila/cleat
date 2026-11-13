@@ -17,7 +17,14 @@ declare module "*/web/chat-format.js" {
   export function byActivity<T extends SessionLike>(sessions: Iterable<T>): T[];
   export function pickSession(sessions: SessionLike[], wanted: string | null): string | null;
   export function statusLabel(status: string): string;
-  export function replyState(session: SessionLike | undefined): { enabled: boolean; hint: string };
+  export function replyState(session: (SessionLike & { terminalTurn?: boolean }) | undefined): { enabled: boolean; hint: string };
+  export function sessionStatus(session: { status: string; terminalTurn?: boolean } | undefined): string;
+  export const TERMINAL_MARK_TITLE: string;
+  export function startedInTerminal(session: { source?: string } | undefined): boolean;
+  export function isOpenInTerminal(status: number, error: unknown): boolean;
+  export const OPEN_IN_TERMINAL_HINT: string;
+  export function shellWord(word: string): string;
+  export function resumeCommand(session: { claudeSessionId: string | null; cwd: string } | undefined): string | null;
   export function resultLine(event: { ok: boolean; durationMs?: number; costUsd?: number }): string;
   export function unknownNote(event: unknown): string;
   export function backoffMs(attempt: number): number;

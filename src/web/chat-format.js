@@ -106,9 +106,48 @@ export function statusLabel(status) {
   return STATUS_LABEL[status] ?? String(status);
 }
 
+/** What the head says beside the dot: "in terminal" while a turn arrives from a terminal, else the status. */
+export function sessionStatus(session) {
+  if (session?.status === "running" && session.terminalTurn === true) return "in terminal";
+  return statusLabel(session?.status);
+}
+
+/** The tooltip of the list's terminal mark. */
+export const TERMINAL_MARK_TITLE = "started in the terminal";
+
+/** Whether the list marks the session as one started in the terminal. */
+export function startedInTerminal(session) {
+  return session?.source === "terminal";
+}
+
+/** The start of the runner's 409 for a reply to a session another process writes to (OPEN_IN_TERMINAL in the contract). */
+const OPEN_IN_TERMINAL_START = "it looks open in a terminal";
+
+/** True for a reply refused because the session looks open in a terminal: the page offers "Send anyway" (force). */
+export function isOpenInTerminal(status, error) {
+  return status === 409 && typeof error === "string" && error.startsWith(OPEN_IN_TERMINAL_START);
+}
+
+/** What the reply hint says when the runner answered with that 409. */
+export const OPEN_IN_TERMINAL_HINT = "It looks open in a terminal.";
+
+/** A word for a POSIX shell: as it is when it is plainly safe, else in single quotes. */
+export function shellWord(word) {
+  if (/^[A-Za-z0-9_\-./@%+=:,]+$/.test(word)) return word;
+  return `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
+/** The command that continues the session in a WSL terminal, or null before it has a Claude Code session id. */
+export function resumeCommand(session) {
+  if (!session?.claudeSessionId || !session.cwd) return null;
+  return `cd ${shellWord(session.cwd)} && claude --resume ${shellWord(session.claudeSessionId)}`;
+}
+
 /** Whether a reply can be sent, and the hint under the reply box. */
 export function replyState(session) {
   if (!session) return { enabled: false, hint: "" };
+  // A turn in a terminal: a reply here may go in all the same (the runner asks for force).
+  if (session.status === "running" && session.terminalTurn === true) return { enabled: true, hint: "A turn is arriving from the terminal." };
   if (session.status === "running") return { enabled: false, hint: "Working. You can reply when this turn ends." };
   if (session.status === "waiting_approval") return { enabled: false, hint: "Waiting for your Allow or Deny above." };
   if (session.status === "error") return { enabled: true, hint: "The last turn failed. A reply tries again." };

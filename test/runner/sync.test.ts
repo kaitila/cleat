@@ -244,10 +244,11 @@ describe("live transcripts", () => {
     t.write(claudeId, workPath(r), [user("from terminal")]);
     await socket.waitFor((m) => m.type === "session" && m.session.id === session.id && m.session.status === "running" && m.session.lastSeq === 4);
     await Bun.sleep(SYNC.idleMs * 2);
-    // Its last entry is the person's: still running.
-    expect((await sessionsOf(r))[0]!.status).toBe("running");
+    // Its last entry is the person's: still running, a turn from the terminal.
+    expect((await sessionsOf(r))[0]).toMatchObject({ status: "running", terminalTurn: true });
     t.write(claudeId, workPath(r), [assistant("from terminal too")]);
     await socket.waitFor((m) => m.type === "session" && m.session.id === session.id && m.session.status === "idle" && m.session.lastSeq === 6);
+    expect((await sessionsOf(r))[0]!.terminalTurn).toBeUndefined();
     const events = (await eventsFrom(r, session.id)).slice(3);
     expect(events.map((e) => [e.seq, e.kind])).toEqual([[4, "user"], [5, "assistant_text"], [6, "result"]]);
     expect(events[0]).toMatchObject({ text: "from terminal" });
@@ -285,6 +286,8 @@ describe("replying to a session open in a terminal", () => {
     expect((await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from intuition", force: "yes" })).status).toBe(400);
     const forced = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from intuition", force: true });
     expect(forced.status).toBe(202);
+    // The runner's own turn is no terminal turn.
+    expect(((await forced.json()) as { session: SessionMeta }).session.terminalTurn).toBeUndefined();
     await socket.waitFor((m) => m.type === "session" && m.session.id === session.id && m.session.status === "idle" && m.session.lastSeq === 6);
     // The runner's own turn is no other process: the next reply needs no force, and nothing was stored twice.
     await Bun.sleep(100);

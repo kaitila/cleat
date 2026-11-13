@@ -10,13 +10,18 @@ import {
   backoffMs,
   byActivity,
   decidedLabel,
+  isOpenInTerminal,
+  OPEN_IN_TERMINAL_HINT,
   relativeTime,
   replyState,
   resultLine,
-  statusLabel,
+  sessionStatus,
+  startedInTerminal,
+  TERMINAL_MARK_TITLE,
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
+import { resumeControl } from "./chat-resume.js";
 import { renderMarkdown } from "./markdown.js";
 import {
   CLOSE_MS,
@@ -64,6 +69,10 @@ const els = {
   text: $("reply-text"),
   hint: $("reply-hint"),
 };
+/** Beside the title: "in terminal" while a turn arrives from a terminal, else nothing. */
+const headStatus = h("span", "session-status muted small");
+const resume = resumeControl(document);
+els.openChat.before(headStatus, resume.el);
 
 /** An element with a class and text. The text is set as textContent, so it is never parsed. */
 function h(tag, className, text) {
@@ -231,6 +240,8 @@ let loadErrorEl = null;
 const typed = new Map();
 let sending = false;
 let replyError = "";
+/** The session whose last reply was refused as open in a terminal: its hint offers "Send anyway". */
+let openElsewhere = null;
 /** True when the box was switched off while it had the focus: the focus goes back to it when the turn ends. */
 let wantFocus = false;
 /** True while the person is at the bottom of the stream: new events keep it there. */
@@ -491,14 +502,26 @@ function renderList() {
         e.preventDefault();
         select(session.id);
       });
-      row = { item, link, dot: h("span", "dot"), title: h("span", "row-title"), workspace: h("span", "row-workspace muted small"), time: h("time", "row-time muted small") };
-      link.append(row.dot, row.title, row.workspace, row.time);
+      row = {
+        item,
+        link,
+        dot: h("span", "dot"),
+        title: h("span", "row-title"),
+        mark: h("span", "terminal-mark mono muted small", ">_"),
+        workspace: h("span", "row-workspace muted small"),
+        time: h("time", "row-time muted small"),
+      };
+      row.mark.title = TERMINAL_MARK_TITLE;
+      row.mark.setAttribute("aria-label", TERMINAL_MARK_TITLE);
+      row.mark.setAttribute("role", "img");
+      link.append(row.dot, row.title, row.mark, row.workspace, row.time);
       item.append(link);
       rows.set(session.id, row);
     }
     row.dot.dataset.status = session.status;
-    row.dot.title = statusLabel(session.status);
+    row.dot.title = sessionStatus(session);
     row.title.textContent = session.title || "Untitled";
+    row.mark.hidden = !startedInTerminal(session);
     row.workspace.textContent = session.workspace;
     row.time.dateTime = session.updatedAt;
     row.time.textContent = relativeTime(session.updatedAt, now);
@@ -517,6 +540,9 @@ function renderHead() {
   if (!session) return;
   els.title.textContent = session.title || "Untitled";
   els.openChat.href = `/?session=${encodeURIComponent(session.id)}`;
+  const status = sessionStatus(session);
+  headStatus.textContent = status === "in terminal" ? status : "";
+  resume.show(session);
 }
 
 function grow() {
@@ -531,7 +557,15 @@ function renderReply() {
   // Switched off under the person's caret (their reply was sent): the focus comes back with the box.
   if (!enabled && document.activeElement === els.text) wantFocus = true;
   els.text.disabled = !enabled;
-  els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : sending ? "Sending." : replying.hint;
+  if (!sending && openElsewhere === selected && selected) {
+    // Refused as open in a terminal: say so, and offer to send it all the same.
+    const anyway = h("button", "send-anyway quiet small", "Send anyway");
+    anyway.type = "button";
+    anyway.addEventListener("click", () => void send(true));
+    els.hint.replaceChildren(`${OPEN_IN_TERMINAL_HINT} `, anyway);
+  } else {
+    els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : sending ? "Sending." : replying.hint;
+  }
   // Back to the box after the turn, unless the person has moved on or the dock has closed.
   if (enabled && wantFocus) {
     wantFocus = false;
@@ -542,20 +576,30 @@ function renderReply() {
   scheduleClose();
 }
 
-async function send() {
+/** Sends the typed reply. `force`: even though the session looks open in a terminal ("Send anyway"). */
+async function send(force = false) {
   const id = selected;
   const prompt = els.text.value;
   if (!id || sending || !prompt.trim() || !replyState(sessions.get(id)).enabled) return;
   sending = true;
   replyError = "";
+  openElsewhere = null;
   renderReply();
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(force ? { prompt, force: true } : { prompt }),
     });
-    if (!res.ok) throw new Error(await errorText(res));
+    if (!res.ok) {
+      const error = await errorText(res);
+      // The typed text stays in the box for "Send anyway".
+      if (isOpenInTerminal(res.status, error)) {
+        openElsewhere = id;
+        return;
+      }
+      throw new Error(error);
+    }
     // The reply itself arrives as a user event on the WebSocket, like everything else in the stream.
     typed.delete(id);
     if (selected === id) {
@@ -609,6 +653,7 @@ function select(id) {
   els.stream.replaceChildren();
   stick = true;
   replyError = "";
+  openElsewhere = null;
   wantFocus = false;
   els.text.value = (id && typed.get(id)) || "";
   renderList();
