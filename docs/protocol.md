@@ -39,12 +39,23 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 
 ## Sessions and events
 - A session is one Claude Code conversation in one workspace. The runner keeps its own id and stores Claude Code's session id once known, to resume with it.
-- Each turn's SDK messages are reduced to `SessionEvent`s: `user`, `assistant_text`, `tool_use`, `tool_result`, `approval_request`, `approval_resolved`, `result`, `error`.
+- Each turn's SDK messages are reduced to `SessionEvent`s: `user`, `assistant_text`, `tool_use`, `tool_result`, `approval_request`, `approval_resolved`, `auto_denied`, `permission_mode`, `result`, `error`.
+- `SessionMeta.permissionMode` is the permission mode the session runs in, as Claude Code reports it (the `init` system message at the start of each turn, and `status` messages when it changes). It is absent until the first turn reports it, and may be a mode other than the two the config allows (for example `"default"` where auto mode is unavailable).
 - Status: `running` while a turn runs, `waiting_approval` while at least one approval is open, `idle` after a `result`, `error` after a failed turn.
 - Stored under the data folder (`~/.local/share/intuition`, or `INTUITION_DATA_DIR`): `sessions.json` for metadata, `events/<id>.jsonl` for events, `state.json` for the last workspace used.
 
 ## Permissions
-Sessions run with `permissionMode: "default"` and the workspace's own Claude Code settings (user, project and local), so its allow and deny rules apply. Any call that would prompt goes through the SDK's `canUseTool` and becomes an `approval_request`; the call waits until the person answers in the chat view. The runner never answers one itself. Denying sends the model a message that the person declined.
+Each turn asks for the permission mode of its workspace: the workspace's own `permissionMode` in the config file, else the top-level one, else `"auto"` ([D0012](decisions/D0012-auto-mode.md)). Only `"auto"` and `"default"` are accepted; any other value is refused when the config is read. Sessions also load the workspace's own Claude Code settings (user, project and local), so its allow and deny rules apply.
+- `auto`: the SDK's classifier allows or denies each call itself, and asks through `canUseTool` only when it can't decide.
+- `default`: every call that would prompt asks through `canUseTool`.
+
+A call that reaches `canUseTool`, in either mode, becomes an `approval_request` and waits until the person answers in the chat view. The runner never answers one itself. Denying sends the model a message that the person declined.
+
+A call denied without asking (the classifier, a deny rule, the mode: the SDK's `system`/`permission_denied` message) is stored as `auto_denied` with `toolUseId`, `toolName`, `input` (a one-line summary of the call's input, at most 200 characters, when the call's `tool_use` was seen) and `reason` (the deciding component's reason, else the message the model got). Nobody is asked about it.
+
+A session that asked for `auto` and runs in another mode gets one `permission_mode` event (`requested`, `mode`), the first time it is reported, so the person knows why calls come to them. Every change of the mode in effect is logged by the runner.
+
+The pages show `auto_denied` and `permission_mode` as quiet notes, as any kind they don't know.
 
 ## Clipboard images
 The shell saves a clipboard image as a PNG under the Windows user's temp folder (`%TEMP%\\intuition\\clip-<time>.png`, the newest 20 kept) and posts its Windows path. The runner turns `C:\Users\x\...` into `/mnt/c/Users/x/...` (drive letter lowercased, backslashes to slashes, normalised) and stores that.

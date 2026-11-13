@@ -2,7 +2,7 @@
 // not part of the test suite or CI. Run it with `bun scripts/smoke-approval.ts`.
 //
 // It starts the runner in this process on a free port, with a temp config, a temp data folder and a
-// throwaway workspace, and asks Claude to create proof.txt containing "hi" with the Write tool.
+// throwaway workspace, with permissionMode "default" so every write asks, and asks Claude to create proof.txt containing "hi" with the Write tool.
 //   Run one: expects an approval_request, answers deny (to every request of the turn), and checks
 //            that proof.txt does not exist when the turn ends.
 //   Run two: a new session with the same task. It answers allow to the Write of proof.txt (and deny
@@ -27,7 +27,8 @@ const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const proof = join(workspace, "proof.txt");
 const configFile = join(dir, "config.json");
-writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace }] }));
+// permissionMode "default": in auto mode the classifier would allow this write without asking (smoke-auto.ts checks that).
+writeFileSync(configFile, JSON.stringify({ permissionMode: "default", workspaces: [{ name: "smoke", path: workspace }] }));
 // Its own environment, so a INTUITION_FAKE_AGENT left in the shell can't turn this into a fake run.
 const runner = startServer(loadConfig({ INTUITION_CONFIG: configFile, INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}`);

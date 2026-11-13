@@ -3,16 +3,26 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { DEFAULT_PORT, type Workspace } from "../shared/protocol";
+import { DEFAULT_PORT, type PermissionMode, type Workspace } from "../shared/protocol";
+
+/** Only these two: every other SDK mode (the ones that allow calls without the classifier or the person) is refused when the config is read. */
+const Mode = z.enum(["auto", "default"]);
+
+export const DEFAULT_PERMISSION_MODE: PermissionMode = "auto";
 
 const ConfigFile = z.object({
   port: z.number().int().min(0).max(65535).default(DEFAULT_PORT),
-  workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1) })).min(1),
+  permissionMode: Mode.default(DEFAULT_PERMISSION_MODE),
+  workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1), permissionMode: Mode.optional() })).min(1),
 });
 
 export interface Config {
   port: number;
   workspaces: Workspace[];
+  /** The permission mode sessions ask for: config `permissionMode`, "auto" when left out. */
+  permissionMode: PermissionMode;
+  /** Workspaces whose own `permissionMode` overrides the top-level one, by name. */
+  workspaceModes: Record<string, PermissionMode>;
   dataDir: string;
   configPath: string;
   /** INTUITION_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
@@ -28,6 +38,11 @@ export const DEFAULT_CONFIG = {
     { name: "theta", path: "~/.projects/theta" },
   ],
 };
+
+/** The permission mode a session in this workspace asks for: the workspace's own, else the top-level one. */
+export function permissionModeFor(config: Pick<Config, "permissionMode" | "workspaceModes">, workspace: string): PermissionMode {
+  return Object.hasOwn(config.workspaceModes, workspace) ? config.workspaceModes[workspace]! : config.permissionMode;
+}
 
 export function expandHome(path: string): string {
   if (path === "~") return homedir();
@@ -66,6 +81,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       const p = resolve(expandHome(w.path));
       return { name: w.name, path: p, exists: existsSync(p) };
     }),
+    permissionMode: parsed.data.permissionMode,
+    workspaceModes: Object.fromEntries(parsed.data.workspaces.flatMap((w) => (w.permissionMode ? [[w.name, w.permissionMode]] : []))),
     dataDir,
     configPath: path,
     fakeAgent: env.INTUITION_FAKE_AGENT === "1",
