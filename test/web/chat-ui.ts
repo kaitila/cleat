@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { Store } from "../../src/runner/store";
 import { startServer, type Runner } from "../../src/runner/server";
 import { testRunner } from "../runner/helpers";
+import { MARKDOWN_EXPECTED, markdownProblems, seedMarkdown } from "./markdown-sample";
 
 const PLAYWRIGHT = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
 /** Markup that would run if any of it reached the page as HTML. */
@@ -66,8 +67,10 @@ function seed(dataDir: string): string {
   // Appending set the time to now: put it back three hours, so the session started below is the newest.
   store.get(id)!.updatedAt = at;
   store.create(store.get(id)!);
+  markdownId = seedMarkdown(store);
   return id;
 }
+let markdownId = "";
 
 const browser = await launch();
 const dir = mkdtempSync(join(tmpdir(), "intuition-chat-ui-"));
@@ -251,6 +254,24 @@ try {
   check((await text(".msg.user .attachment"))[0] === "/mnt/c/Users/x/AppData/Local/Temp/intuition/clip-1.png", "an imagePath is shown as its path");
   check((await text(".msg.assistant p code"))[0] === "bun test", "inline code is rendered");
   check((await text(".msg.assistant pre.code-block"))[0] === `const html = '${HOSTILE}';`, "a fenced code block is rendered");
+  // ---- every markdown construct, in light and dark ----
+  await page.goto(`${runner.url}/?session=${markdownId}`);
+  await page.locator(".msg.assistant.md", { hasText: "CREANDUM" }).waitFor();
+  const mdWrong = (await page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
+  check(mdWrong.length === 0, `every markdown construct is drawn, links only to http(s) and mailto, and nothing widens the stream (${mdWrong.join("; ") || "all there"})`);
+  check((await page.evaluate(() => (window as Any).__xss)) === undefined, "and nothing in it ran");
+  check((await text(".msg.user .user-text"))[0] === "Show me **every** construct", "the user's markdown stays plain text");
+  await page.setViewportSize({ width: 1100, height: 1500 });
+  for (const scheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await shot(`chat-markdown-${scheme}`);
+  }
+  await page.setViewportSize({ width: 600, height: 1600 });
+  await shot("chat-markdown-narrow-dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.setViewportSize({ width: 1100, height: 720 });
+  await page.goto(`${runner.url}/?session=${hostileId}`);
+  await page.locator(".note", { hasText: "Done · 4.2 s · $0.031" }).waitFor();
   check((await bad.evaluate((el: HTMLDetailsElement) => el.open)) === false, "the failed tool call is closed too");
   check((await bad.locator(".tool-mark").textContent()) === "failed" && (await bad.getAttribute("data-error")) === "true", "an error result is marked");
   check((await bad.locator(".tool-line").textContent()) === `/tmp/${HOSTILE}.txt`, "a file tool's summary is its path");

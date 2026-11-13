@@ -15,6 +15,7 @@ import { fakeDriver } from "../../src/runner/agent-fake";
 import { Store } from "../../src/runner/store";
 import { DOCK_SIZES, DOCK_WINDOW, type DockState, islandRect } from "../../shell/src/dock";
 import { testRunner } from "../runner/helpers";
+import { MARKDOWN_EXPECTED, markdownProblems, seedMarkdown } from "./markdown-sample";
 
 const PLAYWRIGHT = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
 /** Markup that would run if any of it reached the page as HTML. */
@@ -76,8 +77,10 @@ function seed(dataDir: string): string {
   // Appending set the time to now: put it back three hours, so the sessions started below are newer.
   store.get(id)!.updatedAt = at;
   store.create(store.get(id)!);
+  markdownId = seedMarkdown(store);
   return id;
 }
+let markdownId = "";
 
 const browser = await launch();
 const dir = mkdtempSync(join(tmpdir(), "intuition-dock-ui-"));
@@ -256,7 +259,18 @@ async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, r
   /** The pointer onto the island, and away from it: out of the window, as it must go from an island that fills it. */
   const hover = () => page.mouse.move(middle, 8);
   const leave = () => page.mouse.move(-40, viewport.height + 40);
-  return { context, page, calls, lastCall, text, shape, settle, fits, shot, hover, leave, middle };
+  /** The markdown sample through the open dock: the stream scrolled to its top, middle and end. */
+  const markdownShots = async () => {
+    for (const [name, at] of [["top", 0], ["middle", 0.5], ["end", 1]] as const) {
+      await page.evaluate((f: number) => {
+        const s = document.getElementById("scroller")!;
+        s.scrollTop = (s.scrollHeight - s.clientHeight) * f;
+      }, at);
+      await page.waitForTimeout(100);
+      await shot(`open-markdown-${name}`);
+    }
+  };
+  return { context, page, calls, lastCall, text, shape, settle, fits, shot, hover, leave, middle, markdownShots };
 }
 
 type Dock = Awaited<ReturnType<typeof dock>>;
@@ -374,8 +388,8 @@ try {
   const openCall = await d.lastCall();
   check(openCall.state === "open" && openCall.at - hoveredAt >= 80, `hovering opens, after a moment's rest on the island (${openCall.at - hoveredAt} ms; the wait is 80)`);
   check((await page.locator('.session-row[aria-current="true"] .row-title').textContent()) === needs, "the session that peeked and needs approval is preselected");
-  check((await d.text(".row-title")).join("|") === [needs, prompt, HOSTILE].join("|"), "the list has the sessions, newest activity first");
-  check((await page.locator('.session-row[aria-current="true"] .row-workspace').textContent()) === "work" && (await d.text(".row-time")).join(",") === "now,now,3h", "each with its workspace and a short relative time");
+  check((await d.text(".row-title")).join("|") === [needs, prompt, "Markdown sample", HOSTILE].join("|"), "the list has the sessions, newest activity first");
+  check((await page.locator('.session-row[aria-current="true"] .row-workspace').textContent()) === "work" && (await d.text(".row-time")).join(",") === "now,now,2h,3h", "each with its workspace and a short relative time");
   check((await page.locator('.session-row[aria-current="true"] .dot').getAttribute("data-status")) === "waiting_approval", "and a status dot");
   const card = page.locator(".approval");
   await card.locator("button", { hasText: "Allow" }).waitFor();
@@ -571,6 +585,14 @@ try {
     return s.scrollHeight > s.clientHeight;
   })), `a long session fills the island to its ${DOCK_SIZES.open.height}px and the stream scrolls inside it`);
   await d.shot("open-hostile");
+  // ---- every markdown construct, in the open dock, light here and dark below ----
+  await page.locator(".session-row", { hasText: "Markdown sample" }).click();
+  await page.locator(".msg.assistant.md", { hasText: "CREANDUM" }).waitFor();
+  const mdWrong = (await page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
+  check(mdWrong.length === 0, `light: every markdown construct is drawn in the dock, links only to http(s) and mailto, nothing wider than the stream (${mdWrong.join("; ") || "all there"})`);
+  check((await page.evaluate(() => (window as Any).__xss)) === undefined && (await d.text(".msg.user"))[0] === "Show me **every** construct", "nothing in it ran, and the user's markdown stays plain text");
+  await d.settle("open");
+  await d.markdownShots();
   await d.leave();
   await page.locator("#pill").waitFor();
   await d.settle("idle");
@@ -602,6 +624,12 @@ try {
   check((await k.page.locator('.session-row[aria-current="true"] .row-title').textContent()) === darkPrompt, "dark: opened from a peek, its session is selected");
   await k.fits("open");
   await k.shot("open");
+  await k.page.locator(".session-row", { hasText: "Markdown sample" }).click();
+  await k.page.locator(".msg.assistant.md", { hasText: "CREANDUM" }).waitFor();
+  const mdDark = (await k.page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
+  check(mdDark.length === 0, `dark: every markdown construct is drawn in the dock (${mdDark.join("; ") || "all there"})`);
+  await k.settle("open");
+  await k.markdownShots();
   const colours = (p: Any) => p.evaluate(() => [getComputedStyle(document.querySelector(".surface")!).backgroundColor, getComputedStyle(document.body).color]) as Promise<string[]>;
   const darkColours = await colours(k.page);
   await k.page.emulateMedia({ colorScheme: "light" });

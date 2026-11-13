@@ -18,8 +18,6 @@ import {
   relativeTime,
   replyState,
   resultLine,
-  splitInline,
-  splitMarkdown,
   toolSummary,
   unknownNote,
 } from "../../src/web/chat-format.js";
@@ -54,7 +52,7 @@ describe("served by the runner", () => {
 
   test("every module chat.js imports is one the runner serves", async () => {
     const imports = [...source("chat.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports).toEqual(["chat-format.js"]);
+    expect(imports).toEqual(["chat-format.js", "markdown.js"]);
     for (const file of imports) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
   });
 });
@@ -134,40 +132,6 @@ describe("relativeTime", () => {
   test("a clock that is behind, and a time that isn't one", () => {
     expect(relativeTime(ago(-60_000), now)).toBe("now");
     expect(relativeTime("nonsense", now)).toBe("");
-  });
-});
-
-describe("splitMarkdown", () => {
-  test("paragraphs split at blank lines, single line breaks kept", () => {
-    expect(splitMarkdown("one\ntwo\n\n\nthree")).toEqual([
-      { type: "text", spans: [{ text: "one\ntwo", code: false }] },
-      { type: "text", spans: [{ text: "three", code: false }] },
-    ]);
-    expect(splitMarkdown("")).toEqual([]);
-  });
-  test("inline code", () => {
-    expect(splitInline("run `bun test` now")).toEqual([
-      { text: "run ", code: false },
-      { text: "bun test", code: true },
-      { text: " now", code: false },
-    ]);
-    expect(splitInline("a lone ` stays")).toEqual([{ text: "a lone ` stays", code: false }]);
-  });
-  test("a fenced block keeps its text as it is, with its language", () => {
-    expect(splitMarkdown("Before:\n```ts\nconst a = `x`;\n\n  indented\n```\nafter")).toEqual([
-      { type: "text", spans: [{ text: "Before:", code: false }] },
-      { type: "code", lang: "ts", text: "const a = `x`;\n\n  indented" },
-      { type: "text", spans: [{ text: "after", code: false }] },
-    ]);
-  });
-  test("a fence still open while streaming runs to the end", () => {
-    expect(splitMarkdown("```\nhalf")).toEqual([{ type: "code", lang: "", text: "half" }]);
-  });
-  test("markup is only ever text", () => {
-    const blocks = splitMarkdown('<img src=x onerror="alert(1)"> and `<b>`');
-    expect(blocks).toEqual([
-      { type: "text", spans: [{ text: '<img src=x onerror="alert(1)"> and ', code: false }, { text: "<b>", code: true }] },
-    ]);
   });
 });
 

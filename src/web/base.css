@@ -339,6 +339,68 @@ kbd {
 .approval-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
 .approval-error { min-width: 0; overflow-wrap: anywhere; }
 
+/* ---------- markdown: an assistant's message, drawn by markdown.js ---------- */
+/* Compact: a chat, not a document. Headings stay near the text size, lists are indented by about
+   the type size, code and tables scroll sideways inside their hairline instead of widening the page. */
+.md { display: grid; gap: var(--space-2); min-width: 0; overflow-wrap: anywhere; }
+.md :is(h1, h2, h3, h4, h5, h6) { margin: 0; font-size: var(--text-m); font-weight: var(--semibold); line-height: var(--leading-tight); }
+.md h1 { font-size: var(--text-l); letter-spacing: var(--track-l); }
+.md :is(h4, h5, h6) { font-weight: var(--medium); }
+.md :is(h5, h6) { color: var(--muted); }
+.md > :not(h1, h2, h3, h4, h5, h6) + :is(h1, h2, h3, h4, h5, h6) { margin-top: var(--space-1); }
+.md strong { font-weight: var(--semibold); }
+/* Inter ships no italic here: an <em> is slanted by the browser, the one synthesis allowed (D0013). */
+.md em { font-style: italic; font-synthesis: style; }
+.md del { color: var(--muted); }
+.md a { text-decoration: underline; text-decoration-color: var(--accent-soft); text-decoration-thickness: var(--hairline); text-underline-offset: calc(var(--space-1) / 2); }
+.md a:hover { text-decoration-color: var(--accent); }
+.md :not(pre) > code { padding: 0 var(--space-1); background: var(--sunken); border: var(--hairline) solid var(--line); border-radius: var(--radius-s); overflow-wrap: anywhere; }
+.md :is(ul, ol) { margin: 0; padding-inline-start: calc(var(--text-m) * 1.5); display: grid; gap: var(--space-1); }
+.md li > * + * { margin-top: var(--space-1); }
+.md li::marker { color: var(--muted); }
+.md ul.tasks { padding-inline-start: 0; }
+.md li.task { list-style: none; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: var(--space-2); }
+.md li.task > :not(.task-mark) { grid-column: 2; }
+.md li.task > .task-mark + * { margin-top: 0; }
+.task-mark {
+  grid-row: 1;
+  display: inline-grid;
+  place-items: center;
+  width: var(--text-m);
+  height: var(--text-m);
+  margin-top: calc((var(--leading) - 1) * var(--text-m) / 2);
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: calc(var(--radius-s) / 2);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+.md li.task[data-done="true"] > .task-mark { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.md li.task[data-done="true"] > .task-mark + * { color: var(--muted); }
+.md blockquote { margin: 0; display: grid; gap: var(--space-2); padding-inline-start: var(--space-3); border-left: var(--hairline) solid var(--line-strong); color: var(--muted); }
+.md hr { width: 100%; margin: var(--space-1) 0; border: 0; border-top: var(--hairline) solid var(--line); }
+.md pre.code-block { white-space: pre; word-break: normal; overflow-wrap: normal; overflow-x: auto; }
+.md pre.code-block[data-lang]::before {
+  content: attr(data-lang);
+  position: sticky;
+  left: 0;
+  display: block;
+  width: fit-content;
+  margin-bottom: var(--space-1);
+  font-family: var(--font);
+  font-size: var(--text-xs);
+  font-weight: var(--medium);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.md .table { overflow-x: auto; }
+.md table { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.md :is(th, td) { padding: var(--space-1) var(--space-3) var(--space-1) 0; text-align: left; vertical-align: top; border-bottom: var(--hairline) solid var(--line); overflow-wrap: normal; }
+.md th { font-weight: var(--medium); border-bottom-color: var(--line-strong); }
+.md :is(th, td):last-child { padding-inline-end: 0; }
+.md [data-align="center"] { text-align: center; }
+.md [data-align="right"] { text-align: right; }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

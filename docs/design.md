@@ -25,7 +25,7 @@ Light and dark come from `prefers-color-scheme`, each with its own values: in bo
 `.dark` gives everything inside it the dark values whatever the scheme. Only the dock's page uses it (`<html class="dark">`). It repeats the dark scheme's values, and `test/web/dock.test.ts` fails when the two differ: change both together.
 
 ## Type
-Inter for the interface, JetBrains Mono for code (`--font`, `--mono`), both variable and served from `/assets/fonts`; the pages ask no other host for anything. Weights are `--regular` 400, `--medium` 500 and `--semibold` 600, never synthesised.
+Inter for the interface, JetBrains Mono for code (`--font`, `--mono`), both variable and served from `/assets/fonts`; the pages ask no other host for anything. Weights are `--regular` 400, `--medium` 500 and `--semibold` 600, never synthesised; an `<em>` in a message is slanted by the browser (D0013).
 
 | Size | For |
 |---|---|
@@ -49,6 +49,7 @@ Every border is `var(--hairline) solid` a line colour: one device pixel, so 1px,
 - **Well**: `.well`, a sunken block for code and output.
 - **Tool call**: `<details class="tool">` with `.tool-name`, `.tool-line`, `.tool-mark` in its summary and a `.tool-body`: one 28px row until opened.
 - **Approval card**: `.approval` with `data-state` `open`, `allow`, `deny` or `unanswered`; `.approval-head`, `-tool`, `-state`, `-path`, `-input`, `-reason`, `-actions`. Open, it is the one amber thing on the page; decided, it is as quiet as a tool call.
+- **Markdown**: `.md` on an assistant's message, drawn by `markdown.js` ([D0013](decisions/D0013-markdown-renderer.md)). Compact, a chat and not a document: blocks `--space-2` apart, headings at `--text-m` semibold (`h1` at `--text-l`, `h5`/`h6` muted), lists indented by one and a half times the type size with muted markers, task marks as small boxes (done: filled with the accent), quotes behind a `--line-strong` hairline in `--muted`, rules and table rows as hairlines, code blocks as `.well` that scroll sideways with their language as a quiet caption. Links are the accent, underlined in `--accent-soft`. `<em>` is the browser's slanted Inter, the one synthesis allowed. The person's own messages stay plain text.
 
 ## The dock
 One dark island hanging from the top edge of the screen, the same in both schemes (`.dark`), on the `--sunken` surface: the darkest, so it reads as one object on any desktop. Its top corners are square, since it hangs from the edge; the bottom ones have `--radius`. Its edge is a hairline on the three free sides: `--line-strong`, and the quieter `--line` when nothing is going on. It has no shadow, filter or blur.
