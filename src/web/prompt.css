@@ -1,20 +1,18 @@
-/* The pop-up prompt: a 560x380 window with a row of workspaces, the task box and one quiet line.
-   Layout only. Colours and font sizes are the tokens of base.css. */
+/* The pop-up prompt: a 560x380 window. A row of workspaces, a hairline, the task box, a
+   hairline, one quiet line. Layout only: every colour, size, radius and border is a token or a
+   component of base.css (docs/design.md). */
 body { overflow: hidden; }
-.prompt {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--gap-3);
-  padding: var(--gap-4);
-}
+.prompt { height: 100%; display: flex; flex-direction: column; }
 
-/* Workspaces: real radio buttons (Tab and the arrow keys work), drawn as chips. */
+/* Workspaces: real radio buttons (Tab and the arrow keys work), drawn as chips with their key. */
 .workspaces {
+  flex: none;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--gap-2);
-  min-height: calc(var(--gap-4) + var(--gap-2));
+  gap: var(--space-1);
+  min-height: calc(var(--control) + var(--space-3) * 2 + var(--hairline));
+  padding: var(--space-3);
+  border-bottom: var(--hairline) solid var(--line);
 }
 .workspace { position: relative; display: inline-flex; }
 .workspace input {
@@ -26,84 +24,81 @@ body { overflow: hidden; }
 }
 .workspace span {
   display: inline-flex;
-  align-items: baseline;
-  gap: var(--gap-2);
-  padding: var(--gap-1) var(--gap-3);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control);
+  padding: 0 var(--space-3) 0 var(--space-1);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius-s);
   color: var(--muted);
+  font-weight: var(--medium);
+  transition: background-color var(--motion) var(--ease), color var(--motion) var(--ease);
 }
-.workspace kbd { color: var(--muted); }
-.workspace input:hover:not(:disabled) + span { border-color: var(--line); }
-.workspace input:checked + span {
-  background: var(--surface);
-  border-color: var(--line);
-  color: var(--text);
-}
-.workspace input:checked + span kbd { color: var(--accent); }
-.workspace input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.workspace input:hover:not(:disabled) + span { background: var(--hover); }
+.workspace input:checked + span { background: var(--selected); color: var(--text); }
+.workspace input:checked + span kbd { border-color: var(--muted); color: var(--text); }
+.workspace input:focus-visible + span { outline: var(--ring) solid var(--accent); outline-offset: var(--hairline); }
 .workspace input:disabled { cursor: default; }
-.workspace input:disabled + span { opacity: 0.45; text-decoration: line-through; }
+.workspace input:disabled + span { opacity: 0.5; text-decoration: line-through; }
 
-/* The task box takes the room that is left. Its focus is the border, not a ring: it is always focused. */
+/* The task box is the window: no border, no ring (it holds the focus from the start, and its
+   caret says so). It takes the room that is left. */
 .task {
   flex: 1;
   min-height: 0;
   width: 100%;
-  padding: var(--gap-3);
+  padding: var(--space-4);
+  border: 0;
+  background: transparent;
+  resize: none;
   font-size: var(--text-l);
-  line-height: 1.45;
+  line-height: var(--leading);
+  letter-spacing: var(--track-l);
+  caret-color: var(--accent);
 }
 .task::placeholder { color: var(--muted); }
-.task:focus-visible { outline: none; border-color: var(--accent); }
+.task:focus-visible { outline: none; }
 
-/* The clipboard attachment: one quiet row under the task box, a label, the thumbnail or the first
-   lines of the text, and the remove control. */
+/* The clipboard attachment: one row above the foot, a label, the thumbnail or the first lines
+   of the text, and the remove control. */
 .clipboard {
   flex: none;
   display: flex;
   align-items: center;
-  gap: var(--gap-3);
+  gap: var(--space-3);
   min-width: 0;
-  padding: var(--gap-1) var(--gap-1) var(--gap-1) var(--gap-3);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--sunken);
-  font-size: var(--text-s);
+  margin: 0 var(--space-3) var(--space-3);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
 }
-.clipboard[hidden] { display: none; }
 .clip-label { flex: none; }
 .clip-text {
   flex: 1;
   min-width: 0;
-  max-height: calc(var(--gap-4) * 2);
+  max-height: calc(var(--text-s) * var(--leading) * 2);
   overflow: hidden;
   white-space: pre;
   text-overflow: ellipsis;
-  font-family: var(--mono);
+  color: var(--muted);
 }
 .clip-image {
-  max-width: calc(var(--gap-4) * 6);
-  height: calc(var(--gap-4) * 2);
+  max-width: calc(var(--space-6) * 3);
+  height: var(--space-6);
   margin-right: auto;
   object-fit: contain;
   border-radius: var(--radius-s);
 }
-.clip-remove {
-  flex: none;
-  padding: 0 var(--gap-2);
-  border-color: transparent;
-  background: transparent;
-  color: var(--muted);
-}
-.clip-remove:hover { color: var(--text); }
+.clip-remove { flex: none; }
 
 .foot {
+  flex: none;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--gap-3);
-  min-height: calc(var(--gap-4) - var(--gap-1) / 2);
+  gap: var(--space-3);
+  min-height: calc(var(--control-s) + var(--space-2) * 2 + var(--hairline));
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-top: var(--hairline) solid var(--line);
+  background: var(--sunken);
 }
 .status {
   min-width: 0;
@@ -113,8 +108,6 @@ body { overflow: hidden; }
   color: var(--muted);
 }
 .status[data-kind="error"] { color: var(--danger); }
-.status a { color: var(--accent); }
-.keys { flex: none; white-space: nowrap; }
-kbd { font-family: var(--mono); font-size: var(--text-s); }
-.keys kbd { margin-left: var(--gap-2); color: var(--text); }
-.keys kbd:first-child { margin-left: 0; }
+.keys { flex: none; display: flex; align-items: center; gap: var(--space-1); white-space: nowrap; font-size: var(--text-xs); }
+.keys span { margin-right: var(--space-2); }
+.keys span:last-child { margin-right: 0; }

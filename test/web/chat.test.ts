@@ -1,6 +1,6 @@
 // The chat view: its files are served by the runner, its pure helpers do what the page relies on,
 // and its sources keep the two rules a reader can't see on the page: untrusted text never becomes
-// markup, and the stylesheet has no colours or font sizes of its own.
+// markup. (That the stylesheet has no raw values of its own is test/web/design.test.ts.)
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -225,21 +225,5 @@ describe("the sources", () => {
       expect(source(file)).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|DOMParser|createContextualFragment|setHTML/);
     }
     expect(source("chat.html")).not.toMatch(/\son[a-z]+\s*=/i);
-  });
-  test("chat.css has no colours or font sizes of its own, and every token it uses is in base.css", () => {
-    const css = source("chat.css").replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(css).not.toMatch(/#[0-9a-f]{3,8}\b/i);
-    expect(css).not.toMatch(/\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\(/i);
-    const allowed = ["px", "solid", "none", "transparent", "inherit", "currentColor", "auto"];
-    for (const [, property, value] of css.matchAll(/(?:^|[;{\s])(color|background(?:-color)?|border(?:-[a-z]+)*|outline(?:-color)?|fill|stroke)\s*:\s*([^;}]+)/g)) {
-      const words = value!.replace(/var\(--[a-z0-9-]+\)/g, "").match(/[a-z]+/gi) ?? [];
-      expect({ property, value, extra: words.filter((w) => !allowed.includes(w)) }).toEqual({ property, value, extra: [] });
-    }
-    for (const [, value] of css.matchAll(/font-size\s*:\s*([^;}]+)/g)) expect(value!.trim()).toMatch(/^var\(--text-[sml]\)$/);
-    expect(css).not.toMatch(/(?:^|[;{\s])font\s*:/);
-    const defined = new Set([...source("base.css").matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
-    const used = [...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]);
-    expect(used.length).toBeGreaterThan(0);
-    expect(used.filter((token) => !defined.has(token))).toEqual([]);
   });
 });

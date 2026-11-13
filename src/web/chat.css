@@ -1,12 +1,10 @@
-/* The chat view's layout. Colours, font sizes, gaps and radii are the tokens of base.css. */
+/* The chat view's layout. Every colour, size, radius and border is a token or a component of
+   base.css (docs/design.md); nothing here is a raw value. */
 .app {
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
   height: 100%;
 }
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
-[hidden] { display: none !important; }
 
 /* Sidebar */
 .sidebar {
@@ -14,142 +12,85 @@ a:hover { text-decoration: underline; }
   flex-direction: column;
   min-height: 0;
   background: var(--sunken);
-  border-right: 1px solid var(--line);
+  border-right: var(--hairline) solid var(--line);
 }
 .sidebar-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  padding: var(--gap-3) var(--gap-3) var(--gap-2) var(--gap-4);
+  padding: var(--space-3) var(--space-2) var(--space-2) var(--space-4);
 }
-.brand { font-weight: 600; }
+.brand { font-weight: var(--semibold); letter-spacing: var(--track-l); }
 .sessions {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: var(--hairline);
   list-style: none;
   margin: 0;
-  padding: 0 var(--gap-2) var(--gap-2);
+  padding: 0 var(--space-2) var(--space-2);
 }
+/* A session: its dot, title and time on one line, its workspace under the title. */
 .session {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  column-gap: var(--gap-2);
-  padding: var(--gap-2) var(--gap-3);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  color: inherit;
+  column-gap: var(--space-2);
+  padding: var(--space-2);
+  line-height: var(--leading-tight);
 }
-.session:hover { background: var(--bg); text-decoration: none; }
-.session[aria-current="true"] { background: var(--surface); border-color: var(--line); }
+.session[aria-current="true"] .session-title { font-weight: var(--medium); }
 .session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-workspace { grid-column: 2 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sessions-empty, .connection { margin: 0; padding: var(--gap-2) var(--gap-4); }
-.connection { border-top: 1px solid var(--line); }
+.sessions-empty, .connection { padding: var(--space-2) var(--space-4); }
+.connection { border-top: var(--hairline) solid var(--line); }
 
 /* The selected session */
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 /* The head, the stream and the reply box share one column, so their left edges line up. */
-.head { padding-block: var(--gap-3); border-bottom: 1px solid var(--line); }
-.head > *, .stream, .reply { width: 100%; max-width: var(--measure); margin-inline: auto; padding-inline: var(--gap-4); }
-.title {
-  margin-block: 0;
-  font-size: var(--text-l);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.meta { display: flex; align-items: center; gap: var(--gap-2); margin-block: 0; }
-.meta #workspace::after { content: "·"; margin-left: var(--gap-2); }
+.head { display: grid; gap: var(--space-1); padding-block: var(--space-3); border-bottom: var(--hairline) solid var(--line); }
+.head > *, .stream, .reply { width: 100%; max-width: var(--measure); margin-inline: auto; padding-inline: var(--space-5); }
+.head .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { display: flex; align-items: center; gap: var(--space-2); }
+.meta #workspace::after { content: "·"; margin-left: var(--space-2); }
 .scroller { flex: 1; min-height: 0; overflow-y: auto; }
-.stream { display: flex; flex-direction: column; gap: var(--gap-3); padding-block: var(--gap-4); }
-.empty { padding: var(--gap-4); text-align: center; margin-top: 20vh; }
-.empty p { margin: 0; }
+.stream { display: flex; flex-direction: column; gap: var(--space-3); padding-block: var(--space-5); }
+.empty { display: grid; gap: var(--space-1); padding: var(--space-5); text-align: center; margin-top: 24vh; }
 
 .msg { overflow-wrap: anywhere; }
-.msg.user {
-  align-self: flex-end;
-  max-width: 85%;
-  padding: var(--gap-2) var(--gap-3);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
+/* The person's message: a card on the right. */
+.msg.user { align-self: flex-end; max-width: 85%; padding: var(--space-2) var(--space-3); }
+.msg.user:not(:first-child) { margin-top: var(--space-3); }
 .user-text { white-space: pre-wrap; }
-.attachment { margin-top: var(--gap-1); }
-.msg.assistant { display: grid; gap: var(--gap-2); min-width: 0; }
-.msg.assistant p { margin: 0; white-space: pre-wrap; }
-.msg.assistant p code { padding: 1px var(--gap-1); background: var(--sunken); border-radius: var(--radius-s); }
-.code-block {
-  padding: var(--gap-2) var(--gap-3);
-  background: var(--sunken);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  white-space: pre;
-  overflow-x: auto;
-}
+.attachment { margin-top: var(--space-1); }
+.msg.assistant { display: grid; gap: var(--space-2); min-width: 0; }
+.msg.assistant p { white-space: pre-wrap; }
+.msg.assistant p code { padding: 0 var(--space-1); background: var(--sunken); border: var(--hairline) solid var(--line); border-radius: var(--radius-s); }
+.code-block { white-space: pre; overflow-x: auto; }
 .msg.streaming { color: var(--muted); }
 
-/* A tool call: one closed line until opened */
-.tool { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); min-width: 0; }
-.tool summary {
-  display: flex;
-  align-items: baseline;
-  gap: var(--gap-2);
-  padding: var(--gap-1) var(--gap-3);
-  border-radius: var(--radius);
-  cursor: pointer;
-  list-style: none;
-}
-.tool summary::-webkit-details-marker { display: none; }
-.tool summary::before { content: "›"; color: var(--muted); }
-.tool[open] summary::before { transform: rotate(90deg); }
-.tool-name { font-size: var(--text-s); font-weight: 600; flex: none; }
-.tool-line { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-mark { flex: none; color: var(--danger); }
-.tool-body { display: grid; gap: var(--gap-1); padding: var(--gap-2) var(--gap-3) var(--gap-3); border-top: 1px solid var(--line); }
-.tool-body pre { max-height: 50vh; overflow: auto; padding: var(--gap-2); background: var(--sunken); border-radius: var(--radius-s); }
-.tool-label:not(:first-child) { margin-top: var(--gap-1); }
-.tool[data-error] .tool-result { border-left: 2px solid var(--danger); }
-.show-all { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); }
-.show-all:hover { text-decoration: underline; }
-
-/* A tool call waiting for Allow or Deny. While it is open it is the one accented thing in the
-   stream, in the amber of its session's dot; decided, it is as quiet as a tool call. */
-.approval {
-  display: grid;
-  gap: var(--gap-2);
-  min-width: 0;
-  padding: var(--gap-2) var(--gap-3) var(--gap-3);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.approval[data-state="open"] { border-color: var(--warn); border-left-width: 3px; }
-.approval:not([data-state="open"]) { padding-bottom: var(--gap-2); }
-.approval-head { display: flex; align-items: baseline; gap: var(--gap-2); }
-.approval-tool { font-size: var(--text-s); font-weight: 600; }
-.approval-state { color: var(--muted); }
-.approval[data-state="open"] .approval-state { color: var(--warn); font-weight: 600; }
-.approval[data-state="deny"] .approval-state { color: var(--danger); }
-.approval-path { overflow-wrap: anywhere; }
-.approval-input { max-height: 40vh; overflow: auto; padding: var(--gap-2); background: var(--sunken); border-radius: var(--radius-s); }
-.approval-reason { overflow-wrap: anywhere; }
-.approval-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-2); }
-.approval-error { min-width: 0; overflow-wrap: anywhere; }
-
-.note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.error { padding-left: var(--gap-3); border-left: 2px solid var(--danger); color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The end of a turn (and other one-line notes): quiet text, then a hairline to the edge. */
+.note { display: flex; align-items: center; gap: var(--space-3); min-width: 0; white-space: nowrap; overflow: hidden; }
+.note::after { content: ""; flex: 1; border-top: var(--hairline) solid var(--line); }
+.note.error { color: var(--danger); }
+.error:not(.note) { padding: var(--space-2) var(--space-3); border: var(--hairline) solid var(--danger); border-radius: var(--radius); color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
+.show-all { justify-self: start; }
 
 /* Reply box */
-.reply { padding-bottom: var(--gap-2); }
-.reply textarea { display: block; width: 100%; max-height: 40vh; }
-.reply textarea:disabled { background: var(--sunken); }
-.reply-hint { margin: var(--gap-1) 0 0; min-height: 1.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Full width, so its hairline closes the stream; its padding keeps the box in the shared column. */
+.reply {
+  max-width: none;
+  padding-block: var(--space-3) var(--space-2);
+  padding-inline: max(var(--space-5), calc(50% - var(--measure) / 2 + var(--space-5)));
+  border-top: var(--hairline) solid var(--line);
+}
+.reply textarea { max-height: 40vh; }
+.reply-hint { margin-top: var(--space-1); min-height: calc(var(--text-s) * var(--leading)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* A slim window: the sessions go above the stream. */
 @media (max-width: 700px) {
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .sidebar { max-height: 34vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .sidebar { max-height: 34vh; border-right: 0; border-bottom: var(--hairline) solid var(--line); }
+  .head > *, .stream, .reply { padding-inline: var(--space-4); }
 }

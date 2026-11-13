@@ -1,6 +1,5 @@
 // The pop-up prompt page: the runner serves it, and its pure helpers.
 import { afterAll, describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { testRunner } from "../runner/helpers";
 
@@ -37,41 +36,18 @@ describe("the runner serves the pop-up", () => {
   test("everything the page loads is served", async () => {
     const html = await (await runner.get("/prompt")).text();
     const assets = [...html.matchAll(/(?:href|src)="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
-    expect(assets.sort()).toEqual(["/assets/base.css", "/assets/prompt.css", "/assets/prompt.js"]);
+    // The font is preloaded: the pop-up opens often, and its first paint should be in its own type.
+    expect(assets.sort()).toEqual(["/assets/base.css", "/assets/fonts/inter-latin.woff2", "/assets/prompt.css", "/assets/prompt.js"]);
     for (const asset of assets) {
       const res = await runner.get(asset);
       expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")).toContain(asset.endsWith(".js") ? "javascript" : "text/css");
+      expect(res.headers.get("content-type")).toContain(asset.endsWith(".js") ? "javascript" : asset.endsWith(".woff2") ? "font/woff2" : "text/css");
     }
     expect(await (await runner.get("/assets/prompt.js")).text()).toContain("/api/sessions");
   });
 });
 
-describe("prompt.css", () => {
-  const css = readFileSync(join(WEB, "prompt.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-
-  test("has no colours of its own", () => {
-    expect(css).not.toMatch(/#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix|color)\(/i);
-    for (const [, value] of css.matchAll(/(?:^|[;{\s])(?:color|background|background-color|border-color|outline-color)\s*:\s*([^;}]+)/g)) {
-      expect(value!.trim()).toMatch(/^(?:var\(--[a-z-]+\)|transparent|inherit|none)$/);
-    }
-    for (const [, value] of css.matchAll(/(?:^|[;{\s])(?:border|outline)\s*:\s*([^;}]+)/g)) {
-      expect(value!.trim()).toMatch(/^(?:none|\d+px solid (?:var\(--[a-z-]+\)|transparent))$/);
-    }
-  });
-
-  test("has no font sizes of its own", () => {
-    const sizes = [...css.matchAll(/font-size\s*:\s*([^;}]+)/g)].map((m) => m[1]!.trim());
-    expect(sizes.length).toBeGreaterThan(0);
-    for (const size of sizes) expect(size).toMatch(/^var\(--text-[sml]\)$/);
-    expect(css).not.toMatch(/(?:^|[;{\s])font\s*:/);
-  });
-
-  test("uses only tokens that base.css defines", () => {
-    const base = readFileSync(join(WEB, "base.css"), "utf8");
-    for (const [, token] of css.matchAll(/var\((--[a-z0-9-]+)\)/g)) expect(base).toContain(`${token}:`);
-  });
-});
+// That prompt.css has no colours or sizes of its own is test/web/design.test.ts.
 
 describe("initialWorkspace", () => {
   const list = [
