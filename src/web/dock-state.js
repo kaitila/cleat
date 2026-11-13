@@ -2,18 +2,26 @@
 // dock.js draws what these return. The contract with the shell is docs/protocol.md, "Dock".
 import { byActivity } from "./chat-format.js";
 
-/** The window's exact size in each state, in CSS pixels: the same numbers as the shell's DOCK_SIZES. */
+/** The shell's window, in CSS pixels: one size for the dock's whole life. The same numbers as the shell's DOCK_WINDOW. */
+export const DOCK_WINDOW = { width: 460, height: 480 };
+/**
+ * The most the island covers in each state, hanging from the top centre of the window: the same
+ * numbers as the shell's DOCK_SIZES. The shell takes the mouse only inside this rectangle, so the
+ * island is never drawn outside it. Idle is as narrow as its text, open as short as its content.
+ */
 export const DOCK_SIZES = {
-  idle: { width: 280, height: 40 },
-  peek: { width: 420, height: 76 },
-  open: { width: 460, height: 600 },
+  idle: { width: 128, height: 22 },
+  peek: { width: 380, height: 40 },
+  open: { width: DOCK_WINDOW.width, height: DOCK_WINDOW.height },
 };
-const RANK = { idle: 0, peek: 1, open: 2 };
+
+/** The pill with nothing going on is shorter still: a dot in a sliver. */
+export const QUIET_HEIGHT = 16;
 
 /** How long a peek shows, unless it waits for an approval. */
 export const PEEK_MS = 5000;
-/** How long the pointer rests on the island before it opens: a pointer that only crosses it opens nothing. */
-export const OPEN_MS = 120;
+/** How long the pointer rests on the island before it opens: a pointer that brushes past the top edge opens nothing. */
+export const OPEN_MS = 80;
 /** How long after the pointer left the open dock closes. */
 export const CLOSE_MS = 400;
 /** The most peeks that wait their turn: older ones are dropped. */
@@ -23,15 +31,37 @@ export const RECENT_EVENTS = 30;
 
 const KINDS = ["finished", "needs_approval", "error"];
 
+/** The island's rectangle in a state, inside the window: the same as the shell's islandRect. */
+export function islandRect(state) {
+  const { width, height } = DOCK_SIZES[state];
+  return { x: (DOCK_WINDOW.width - width) / 2, y: 0, width, height };
+}
+
 /**
- * When to tell the shell about a change of state: "before" the island animates when the window has
- * to grow, "after" when it shrinks, "same" when the window is already that size.
- * `windowState` is what the shell was last told.
+ * The size the island is drawn at: never more than the state's rectangle. Idle is as wide as the
+ * pill's content (`measured.pill`, in pixels) and at least as wide as it is tall, and shorter with nothing going on
+ * (`measured.quiet`); open is as tall
+ * as the panel's content (`measured.panel`); peek is exactly its rectangle.
  */
-export function resizeOrder(windowState, target) {
-  const from = RANK[windowState] ?? 0;
-  const to = RANK[target] ?? 0;
-  return to > from ? "before" : to < from ? "after" : "same";
+export function islandSize(state, measured) {
+  const most = DOCK_SIZES[state];
+  const fit = (value, least, limit) => Math.min(limit, Math.max(least, Math.ceil(Number.isFinite(value) ? value : 0)));
+  if (state === "idle") {
+    const height = measured?.quiet ? Math.min(QUIET_HEIGHT, most.height) : most.height;
+    return { width: fit(measured?.pill, height, most.width), height };
+  }
+  if (state === "open") return { width: most.width, height: fit(measured?.panel, DOCK_SIZES.peek.height, most.height) };
+  return { ...most };
+}
+
+/**
+ * Whether a point is on the island: `x` from the island's middle, `y` from the top edge. On what
+ * is drawn (`drawn`), and, closed, anywhere in the state's rectangle, which is where the shell
+ * takes the mouse: the dot of a quiet pill is small, its rectangle is the handle.
+ */
+export function onIsland(state, drawn, x, y) {
+  const inside = (size) => y >= 0 && y < size.height && Math.abs(x) <= size.width / 2;
+  return inside(drawn) || (state !== "open" && inside(DOCK_SIZES[state]));
 }
 
 /**

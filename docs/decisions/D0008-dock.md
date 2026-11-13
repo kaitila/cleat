@@ -1,6 +1,6 @@
 # D0008: A dock instead of toasts
 
-Date: 2026-11-13. Status: active. Replaces the shell's half of [D0005](D0005-toasts.md).
+Date: 2026-11-13. Status: active, except the window: its sizes, "the window resizes" and the order of `setState` and the animation are replaced by [D0010](D0010-dock-fixed-window.md), and opening takes 80 ms, not 120. Replaces the shell's half of [D0005](D0005-toasts.md).
 
 ## Decision
 - What the sessions are doing is shown by a dock: the runner's page `/dock`, in a small window of the shell at the top centre of the primary display. The shell shows no toasts for sessions and no longer polls. The contract between page and shell is in [protocol](../protocol.md) under "Dock"; the window is described in [windows-shell](../windows-shell.md).

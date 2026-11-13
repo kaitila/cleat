@@ -10,23 +10,23 @@
   <script type="module" src="/assets/dock.js"></script>
 </head>
 <body>
-  <main id="island" class="island" data-state="idle">
-    <div id="pill" class="pill" role="status" data-tone="none">
-      <span id="pill-dot" class="dot" hidden></span>
-      <span id="pill-text" class="pill-text">intuition</span>
+  <!-- The island is as large as the window and never changes size: what is seen of it is its clip. -->
+  <main id="island" class="island" data-state="idle" data-tone="none">
+    <div class="surface">
+    <div id="pill" class="pill layer small" role="status" data-tone="none">
+      <span id="pill-dot" class="dot"></span>
+      <span id="pill-text" class="pill-text" hidden>intuition</span>
       <span id="pill-failed" class="dot" data-status="error" title="The last one failed" hidden></span>
     </div>
 
-    <div id="peek" class="peek" role="status" hidden>
-      <div class="peek-head">
-        <span id="peek-dot" class="dot"></span>
-        <span id="peek-title" class="peek-title strong"></span>
-        <span id="peek-label" class="peek-label small"></span>
-      </div>
-      <p id="peek-body" class="peek-body muted small"></p>
+    <div id="peek" class="peek layer" role="status" hidden>
+      <span id="peek-dot" class="dot"></span>
+      <span id="peek-title" class="peek-title strong"></span>
+      <span id="peek-body" class="peek-body muted small"></span>
+      <span id="peek-label" class="peek-label small"></span>
     </div>
 
-    <section id="panel" class="panel" aria-label="Sessions" hidden>
+    <section id="panel" class="panel layer" aria-label="Sessions" hidden>
       <header class="panel-head">
         <span class="brand">intuition</span>
         <span id="connection" class="connection muted small" role="status" hidden>reconnecting</span>
@@ -48,6 +48,7 @@
         </form>
       </div>
     </section>
+    </div>
   </main>
 </body>
 </html>

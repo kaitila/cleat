@@ -45,16 +45,33 @@ export interface SelfTestResult {
   dockBridge: string | null;
   /** The primary display's bounds, which the dock's are checked against. */
   primaryDisplay: Area | null;
-  /** The dock's window as first shown: the idle bounds, not focusable, not focused. */
+  /**
+   * The mouse. The self-test cannot move the real cursor: it gives the shell's cursor watching a made-up
+   * position and reads what the shell last told the window (setIgnoreMouseEvents; Electron has no getter).
+   * With the window created and no page loaded, the cursor where the island will be was ignored.
+   */
+  dockIgnoresMouseBeforeLoad: boolean;
+  /** The dock's window as first shown: its one place and size, not focusable, not focused. */
   dockIdleBounds: Area | null;
   dockIdleFocusable: boolean | null;
   dockIdleFocused: boolean | null;
-  /** After the page called setState("open"). */
+  /** Idle: the cursor on the pill's rectangle was taken; far away, and just below the pill inside the window, it was ignored. */
+  dockMouseOnIdleIsland: boolean;
+  dockMouseAwayIgnored: boolean;
+  dockMouseBelowPillIgnored: boolean;
+  /** After the page called setState("peek"): the same bounds, not focusable. */
+  dockPeekBounds: Area | null;
+  dockPeekFocusable: boolean | null;
+  /** Peek: the cursor below the peek was ignored, and on it taken. */
+  dockMouseOnPeekIsland: boolean;
+  /** After the page called setState("open"): the same bounds, focusable. */
   dockOpenBounds: Area | null;
   dockOpenFocusable: boolean | null;
+  /** Open: the point that was below the pill is on the island now and was taken; far away was ignored. */
+  dockMouseOnOpenIsland: boolean;
   /** setState with a value that is not a state changed nothing: still open, still focusable. */
   dockOtherValueIgnored: boolean;
-  /** After the page called setState("idle"). */
+  /** After the page called setState("idle"): the same bounds, not focusable. */
   dockBackBounds: Area | null;
   dockBackFocusable: boolean | null;
   /** setState from a page whose origin is not the runner's changed nothing. */
@@ -65,6 +82,10 @@ export interface SelfTestResult {
   dockOpenedPromptUrl: string | null;
   /** New windows from the dock to another of the runner's paths and to another origin opened nothing. */
   dockOtherWindowRefused: boolean;
+  /** A page that loaded and never called setState: the cursor on the island was ignored. */
+  dockIgnoresMouseUnreported: boolean;
+  /** The page's process was crashed: the window hid, and the cursor where the open island was was ignored. */
+  dockIgnoresMouseAfterCrash: boolean;
   /** With no runner answering, the dock stayed for one check and was hidden by the second. */
   dockHiddenWithoutRunner: boolean;
   /** The runner answering again, the next check loaded the page and showed the dock, idle. */

@@ -2,6 +2,7 @@
 // person, and, on hover, an open view where a session is read, approved and continued.
 // The contract with the shell is docs/protocol.md, "Dock": the page picks one of three states and
 // tells the shell through window.intuitionDock.setState, which is absent in a normal browser.
+// The shell's window never changes size: the page draws the island inside it and animates it alone.
 // Text from the model, from tools and from the person is untrusted: it reaches the page only as
 // text nodes (textContent), never as markup.
 import {
@@ -20,20 +21,22 @@ import {
 import {
   CLOSE_MS,
   DOCK_SIZES,
+  DOCK_WINDOW,
   OPEN_MS,
   PEEK_MS,
   RECENT_EVENTS,
   asPeek,
   enqueue,
+  islandSize,
   mayClose,
   nextPeek,
+  onIsland,
   peekLabel,
   peekOver,
   peekStatus,
   pillOf,
   preselect,
   recentEvents,
-  resizeOrder,
 } from "./dock-state.js";
 
 const $ = (id) => document.getElementById(id);
@@ -78,12 +81,17 @@ const sessions = new Map();
 /** What the island shows: "idle", "peek" or "open". */
 let state = "idle";
 /** What the shell was last told. Null before the first call. */
-let windowState = null;
-/** Goes up with every change of state, so a shrink that was overtaken tells the shell nothing. */
-let move = 0;
+let told = null;
+/** The size the island is drawn at now (or is on its way to). */
+let drawn = { width: 0, height: 0 };
 
+/**
+ * Tells the shell the state, at once, growing or shrinking: its window never changes, it only needs
+ * to know where the island is for the mouse.
+ */
 function tellShell(next) {
-  windowState = next;
+  if (told === next) return;
+  told = next;
   try {
     window.intuitionDock?.setState(next);
   } catch {
@@ -91,50 +99,69 @@ function tellShell(next) {
   }
 }
 
-function sizeTo(el, { width, height }) {
-  el.style.width = `${width}px`;
-  el.style.height = `${height}px`;
-}
+const LAYERS = { idle: els.pill, peek: els.peek, open: els.panel };
 
-/** How long the island takes to change size: nothing under prefers-reduced-motion. */
-function motionMs() {
-  const first = getComputedStyle(els.island).transitionDuration.split(",")[0].trim();
-  const n = Number.parseFloat(first) || 0;
-  return first.endsWith("ms") ? n : n * 1000;
+/** Shows a state's content, or lets it fade out and then takes it away. */
+function show(el, on) {
+  if (on) {
+    el.classList.remove("leaving");
+    el.hidden = false;
+    return;
+  }
+  if (el.hidden || el.classList.contains("leaving")) return;
+  el.classList.add("leaving");
+  // Under prefers-reduced-motion nothing runs, and it goes at once.
+  void Promise.allSettled(el.getAnimations().map((a) => a.finished)).then(() => {
+    if (!el.classList.contains("leaving")) return;
+    el.hidden = true;
+    el.classList.remove("leaving");
+  });
 }
 
 /**
- * Changes the state. Growing, the shell is told first and the island animates inside the larger
- * window; shrinking, the island animates first and the shell is told once it is small.
+ * Draws the island at the size its state and content ask for. Only the clip changes (dock.css):
+ * no box changes size, here or in the shell.
  */
-function go(next) {
-  const order = resizeOrder(windowState ?? "idle", next);
-  move += 1;
-  const mine = move;
-  if (order === "before" || windowState === null) tellShell(next);
-  state = next;
-  els.island.dataset.state = next;
-  sizeTo(els.island, DOCK_SIZES[next]);
-  els.pill.hidden = next !== "idle";
-  els.peek.hidden = next !== "peek";
-  els.panel.hidden = next !== "open";
-  if (order === "after") {
-    setTimeout(() => {
-      if (mine === move) tellShell(next);
-    }, motionMs());
-  }
+function resize() {
+  const size = islandSize(state, { pill: els.pill.offsetWidth, panel: els.panel.offsetHeight, quiet: els.pill.dataset.tone === "none" });
+  if (size.width === drawn.width && size.height === drawn.height) return;
+  drawn = size;
+  els.island.style.setProperty("--island-w", `${size.width}px`);
+  els.island.style.setProperty("--island-h", `${size.height}px`);
 }
+
+/** Changes the state: the content swaps and the island's shape follows. */
+function go(next) {
+  state = next;
+  tellShell(next);
+  els.island.dataset.state = next;
+  for (const [name, el] of Object.entries(LAYERS)) show(el, name === next);
+  resize();
+}
+
+// The pill is as wide as its text and the panel as tall as its content: when either changes
+// (another count, the font arriving, an answer streaming in), the island follows.
+const sized = new ResizeObserver(() => resize());
+sized.observe(els.pill);
+sized.observe(els.panel);
 
 // ---------- idle: the pill ----------
 
 function renderPill() {
   const pill = pillOf(sessions.values());
   els.pill.dataset.tone = pill.tone;
+  els.island.dataset.tone = pill.tone;
   els.pillText.textContent = pill.text;
-  els.pillDot.hidden = pill.status === null;
+  els.pill.setAttribute("aria-label", pill.text);
+  // Nothing going on: the dot alone, dimmed. The words come with something to say.
+  els.pillText.hidden = pill.tone === "none";
   if (pill.status) els.pillDot.dataset.status = pill.status;
+  else delete els.pillDot.dataset.status;
   // Beside "2 running" or "needs you": the newest one that finished failed.
   els.pillFailed.hidden = !pill.failed || pill.tone === "failed";
+  // With nothing going on the sliver is shorter still.
+  els.pill.style.height = `${islandSize("idle", { quiet: pill.tone === "none" }).height}px`;
+  resize();
 }
 
 // ---------- peek ----------
@@ -596,8 +623,34 @@ function select(id) {
 /** The pointer is on the island; a button of it is held down. */
 let inside = false;
 let down = false;
+/** Closed with Esc under the pointer: it has to leave before it can open the dock again. */
+let dismissed = false;
 let openTimer = 0;
 let closeTimer = 0;
+
+/**
+ * Whether a point of the page is on the island. The island's box never changes, so it does not say:
+ * the size it is drawn at does, and, closed, the state's whole rectangle (dock-state.js).
+ */
+function over(x, y) {
+  const box = els.island.getBoundingClientRect();
+  return onIsland(state, drawn, x - (box.left + box.width / 2), y - box.top);
+}
+
+/** The pointer is on the island, or not. Opening waits a moment: a pointer that brushes past opens nothing. */
+function point(on) {
+  if (!on) dismissed = false;
+  const next = on && !dismissed;
+  if (next === inside) return;
+  inside = next;
+  clearTimeout(openTimer);
+  if (!inside) {
+    scheduleClose();
+    return;
+  }
+  clearTimeout(closeTimer);
+  if (state !== "open") openTimer = setTimeout(() => inside && open(), OPEN_MS);
+}
 
 function holds() {
   return {
@@ -627,9 +680,11 @@ function open() {
 function close() {
   clearTimeout(closeTimer);
   if (state !== "open") return;
+  // Closed under the pointer (Esc): it stays closed until the pointer has left.
+  dismissed = inside;
   inside = false;
   wantFocus = false;
-  // The shell gives the keyboard back to the window below once the dock is small.
+  // The shell gives the keyboard back to the window below when it hears "idle".
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   go("idle");
 }
@@ -643,20 +698,16 @@ function scheduleClose() {
   }, CLOSE_MS);
 }
 
-els.island.addEventListener("pointerenter", () => {
-  inside = true;
-  clearTimeout(closeTimer);
-  clearTimeout(openTimer);
-  // A pointer that only crosses the island on its way elsewhere opens nothing.
-  if (state !== "open") openTimer = setTimeout(() => inside && open(), OPEN_MS);
-});
-els.island.addEventListener("pointerleave", () => {
-  inside = false;
-  clearTimeout(openTimer);
-  scheduleClose();
-});
-window.addEventListener("pointerdown", () => {
-  down = true;
+// The pointer is followed by where it is, not by which element it is on: the island's box is as
+// large as the window in every state, and only its clip says where the island is.
+window.addEventListener("pointermove", (e) => point(over(e.clientX, e.clientY)));
+document.documentElement.addEventListener("pointerleave", () => point(false));
+window.addEventListener("pointerdown", (e) => {
+  const on = over(e.clientX, e.clientY);
+  point(on);
+  // A press beside the open dock puts it away at once, whatever is typed in it: the draft is kept.
+  if (state === "open" && !on) close();
+  else down = true;
 });
 for (const type of ["pointerup", "pointercancel"]) {
   window.addEventListener(type, () => {
@@ -767,9 +818,15 @@ setInterval(() => {
   for (const [id, row] of rows) row.time.textContent = relativeTime(sessions.get(id)?.updatedAt ?? "", now);
 }, 30_000);
 
-sizeTo(els.pill, DOCK_SIZES.idle);
-sizeTo(els.peek, DOCK_SIZES.peek);
-sizeTo(els.panel, DOCK_SIZES.open);
+// The contract's sizes (docs/protocol.md, "Dock"). The island's box is the window; each state's
+// content has its own size and never changes with the island's shape.
+els.island.style.width = `${DOCK_WINDOW.width}px`;
+els.island.style.height = `${DOCK_WINDOW.height}px`;
+els.pill.style.maxWidth = `${DOCK_SIZES.idle.width}px`;
+els.peek.style.width = `${DOCK_SIZES.peek.width}px`;
+els.peek.style.height = `${DOCK_SIZES.peek.height}px`;
+els.panel.style.width = `${DOCK_SIZES.open.width}px`;
+els.panel.style.maxHeight = `${DOCK_SIZES.open.height}px`;
 renderPill();
 go("idle");
 connect();

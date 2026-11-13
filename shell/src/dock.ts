@@ -1,16 +1,26 @@
-// The dock: its three states, where its window goes, and which setState calls are taken.
-// No Electron imports here: main.ts owns the window, dock-preload.ts the bridge.
+// The dock: its window, its three states, where the island is in each, and which setState calls are
+// taken. No Electron imports here: main.ts owns the window, dock-preload.ts the bridge.
 import type { Area } from "./geometry";
 import { sameOrigin } from "./origin";
 
 export const DOCK_STATES = ["idle", "peek", "open"] as const;
 export type DockState = (typeof DOCK_STATES)[number];
 
-/** The window's exact size in each state, in CSS pixels. The contract in docs/protocol.md ("Dock"). */
+/**
+ * The window's one size, in CSS pixels, for the dock's whole life: as large as the open island can
+ * get. It is never resized or moved on a change of state. The contract in docs/protocol.md ("Dock").
+ */
+export const DOCK_WINDOW = { width: 460, height: 480 } as const;
+
+/**
+ * The most the island covers in each state, in CSS pixels, hanging from the top centre of the
+ * window. The page never draws outside it (idle may be narrower, open shorter), and the shell takes
+ * the mouse only inside it. The same numbers as the page's (src/web/dock-state.js).
+ */
 export const DOCK_SIZES: Record<DockState, { width: number; height: number }> = {
-  idle: { width: 280, height: 40 },
-  peek: { width: 420, height: 76 },
-  open: { width: 460, height: 600 },
+  idle: { width: 128, height: 22 },
+  peek: { width: 380, height: 40 },
+  open: { width: DOCK_WINDOW.width, height: DOCK_WINDOW.height },
 };
 
 /** The one message the bridge sends: the state the page asks for. */
@@ -27,12 +37,52 @@ export function isDockState(value: unknown): value is DockState {
 }
 
 /**
- * Where the dock's window goes in a state: centred on the display, touching its top edge.
+ * Where the dock's window is, in every state: centred on the display, touching its top edge.
  * `display` is the primary display's bounds, not its work area: the dock sits on the very edge.
  */
-export function dockBounds(display: Area, state: DockState): Area {
-  const { width, height } = DOCK_SIZES[state];
+export function dockBounds(display: Area): Area {
+  const { width, height } = DOCK_WINDOW;
   return { x: Math.round(display.x + (display.width - width) / 2), y: display.y, width, height };
+}
+
+/** The island's rectangle in a state, inside the window: top centre, the state's size. */
+export function islandRect(state: DockState): Area {
+  const { width, height } = DOCK_SIZES[state];
+  return { x: (DOCK_WINDOW.width - width) / 2, y: 0, width, height };
+}
+
+/** A point on the screen, in the units of the window's bounds. */
+export interface Spot { x: number; y: number }
+
+/** How far the cursor is from the island, in pixels: 0 on it. `win` is the window's bounds on the screen. */
+export function islandDistance(win: Area, state: DockState, cursor: Spot): number {
+  const r = islandRect(state);
+  const left = win.x + r.x;
+  const top = win.y + r.y;
+  // The right and bottom edges are the first pixels outside.
+  const dx = Math.max(left - cursor.x, 0, cursor.x - (left + r.width - 1));
+  const dy = Math.max(top - cursor.y, 0, cursor.y - (top + r.height - 1));
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Whether the window takes the mouse: only while the cursor is on the island of the state the page
+ * last reported. `state` is null until the page has reported one (not loaded yet, failed, crashed,
+ * reloading): then the window lets every click through, so a broken page can block nothing.
+ */
+export function takesMouse(win: Area, state: DockState | null, cursor: Spot): boolean {
+  return state !== null && islandDistance(win, state, cursor) === 0;
+}
+
+/** While the cursor is within this many pixels of the island it is watched closely. */
+export const DOCK_NEAR = 160;
+/** How often the cursor is looked at: near the island, and anywhere else. */
+export const DOCK_WATCH_NEAR_MS = 20;
+export const DOCK_WATCH_FAR_MS = 120;
+
+/** How long until the cursor is looked at again. */
+export function watchMs(win: Area, state: DockState | null, cursor: Spot): number {
+  return state !== null && islandDistance(win, state, cursor) <= DOCK_NEAR ? DOCK_WATCH_NEAR_MS : DOCK_WATCH_FAR_MS;
 }
 
 /** Only in "open" can the window take the keyboard. */

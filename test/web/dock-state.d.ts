@@ -4,13 +4,18 @@ declare module "*/web/dock-state.js" {
   interface SessionLike { id: string; status: string; updatedAt: string }
   export interface Peek { kind: "finished" | "needs_approval" | "error"; sessionId: string; title: string; body: string }
   export interface Pill { tone: "none" | "running" | "needs" | "failed"; text: string; status: string | null; failed: boolean }
-  export const DOCK_SIZES: Record<DockState, { width: number; height: number }>;
+  export interface Size { width: number; height: number }
+  export const DOCK_WINDOW: Size;
+  export const DOCK_SIZES: Record<DockState, Size>;
+  export const QUIET_HEIGHT: number;
   export const PEEK_MS: number;
   export const OPEN_MS: number;
   export const CLOSE_MS: number;
   export const PEEK_MAX: number;
   export const RECENT_EVENTS: number;
-  export function resizeOrder(windowState: DockState, target: DockState): "before" | "after" | "same";
+  export function islandRect(state: DockState): { x: number; y: number; width: number; height: number };
+  export function islandSize(state: DockState, measured?: { pill?: number; panel?: number; quiet?: boolean }): Size;
+  export function onIsland(state: DockState, drawn: Size, x: number, y: number): boolean;
   export function pillOf(sessions: Iterable<SessionLike>): Pill;
   export function asPeek(notification: unknown): Peek | null;
   export function enqueue(queue: Peek[], peek: Peek, max?: number): Peek[];

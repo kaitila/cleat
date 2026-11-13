@@ -1,72 +1,94 @@
-/* The dock's layout: one dark island hanging from the top edge, in three sizes (docs/protocol.md,
-   "Dock"). Every colour, size, radius and border is a token or a component of base.css
-   (docs/design.md); nothing here is a raw value. The three sizes are the contract's, and dock.js
-   sets them from DOCK_SIZES. The page is dark in both schemes: <html class="dark">. */
+/* The dock's layout: one dark island hanging from the top edge (docs/protocol.md, "Dock"). Every
+   colour, size, radius, border and duration is a token or a component of base.css (docs/design.md);
+   nothing here is a raw value. The sizes are the contract's, and dock.js sets them. The page is
+   dark in both schemes: <html class="dark">.
+
+   The window never changes size, and neither does any box in it. The island is one element as large
+   as the window; what is seen of it is its clip-path, a rectangle hanging from the top centre whose
+   size is --island-w by --island-h (set by dock.js). A change of state animates that clip and the
+   opacity and transform of the content, and nothing else: no layout on the way, no shadow, no
+   filter. */
 html, body { background: transparent; overflow: hidden; }
-/* In the shell the window is exactly the island's size. In a browser the island hangs from the
-   top of the page, in the middle. */
+/* In the shell the window is exactly the island's box. In a browser it hangs from the top of the
+   page, in the middle. */
 body { display: flex; justify-content: center; align-items: flex-start; }
 
-/* The island fills its window, so it has no shadow (there is no room to draw one): its edge is a
-   hairline on three sides, drawn over the content so the content keeps the full width. */
+/* The island's own colour is its edge: the surface inside it is clipped one hairline smaller on the
+   three free sides, so a hairline of the island shows around it. The top is the screen's edge. */
 .island {
   position: relative;
   flex: none;
-  overflow: hidden;
-  background: var(--sunken);
-  border-bottom-left-radius: var(--radius);
-  border-bottom-right-radius: var(--radius);
+  background: var(--line-strong);
+  clip-path: inset(0 calc((100% - var(--island-w)) / 2) calc(100% - var(--island-h)) calc((100% - var(--island-w)) / 2) round 0 0 var(--radius) var(--radius));
+  transition: clip-path var(--island-close) var(--ease), opacity var(--motion) linear;
   cursor: default;
-  transition: width calc(var(--motion) * 2) var(--ease), height calc(var(--motion) * 2) var(--ease);
 }
-.island::after {
-  content: "";
+.surface {
   position: absolute;
   inset: 0;
-  border: var(--hairline) solid var(--line-strong);
-  border-top: 0;
-  border-radius: inherit;
-  pointer-events: none;
+  background: var(--sunken);
+  clip-path: inset(0 calc((100% - var(--island-w)) / 2 + var(--hairline)) calc(100% - var(--island-h) + var(--hairline)) calc((100% - var(--island-w)) / 2 + var(--hairline)) round 0 0 calc(var(--radius) - var(--hairline)) calc(var(--radius) - var(--hairline)));
+  transition: clip-path var(--island-close) var(--ease);
 }
-/* Each state's content keeps its own full size (set by dock.js) while the island changes size
-   around it, so nothing reflows on the way. */
-.pill, .peek, .panel {
+/* Growing takes a little longer than shrinking, and settles. */
+.island:is([data-state="peek"], [data-state="open"]),
+.island:is([data-state="peek"], [data-state="open"]) > .surface {
+  transition-duration: var(--island-open);
+  transition-timing-function: var(--settle);
+}
+/* With nothing going on the sliver all but disappears: shorter (dock.js), its edge the quieter
+   hairline, and the whole of it faint. */
+.island[data-state="idle"][data-tone="none"] { background: var(--line); opacity: var(--island-quiet); }
+
+/* Each state's content keeps its own full size and place, top centre, while the clip changes
+   around it, so nothing reflows on the way. It fades in once the shape is most of the way there,
+   and out at once. */
+.layer {
   position: absolute;
   top: 0;
   left: 50%;
-  transform: translateX(-50%);
-  animation: dock-in calc(var(--motion) * 2) var(--ease);
+  translate: -50% 0;
+  animation: layer-in calc(var(--island-open) / 2) var(--ease) calc(var(--island-open) * 0.4) backwards;
 }
-@keyframes dock-in { from { opacity: 0; } }
+.pill.layer { animation-duration: calc(var(--island-close) / 2); animation-delay: calc(var(--island-close) / 2); }
+.layer.leaving { animation: layer-out calc(var(--motion) / 2) linear forwards; pointer-events: none; }
+@keyframes layer-in { from { opacity: 0; transform: translateY(calc(var(--space-1) * -1)); } }
+@keyframes layer-out { to { opacity: 0; } }
+@keyframes layer-fade { from { opacity: 0; } }
+/* Reduced motion: the shape changes at once and the content fades in, plainly. */
+@media (prefers-reduced-motion: reduce) {
+  .layer { animation: layer-fade var(--motion) linear !important; }
+  .layer.leaving { animation: none !important; }
+}
 /* The dock's own chrome is not text to select: a drag that starts on it selects nothing. The stream is. */
 .pill, .peek, .panel-head, .sessions, .session-head { user-select: none; }
 
-/* Idle: one quiet line. */
-.pill { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0 var(--space-4); white-space: nowrap; }
-.pill-text { font-weight: var(--medium); overflow: hidden; text-overflow: ellipsis; }
-.pill[data-tone="none"] .pill-text { color: var(--muted); font-weight: var(--regular); }
-.pill[data-tone="needs"] .pill-text { color: var(--warn); }
-.pill[data-tone="failed"] .pill-text { color: var(--danger); }
+/* Idle: a sliver. A dot alone when nothing is going on; a few quiet words when something runs;
+   colour only when a session needs the person or failed. */
+.pill { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0 var(--space-3); white-space: nowrap; line-height: var(--leading-tight); }
+.pill-text { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.pill[data-tone="needs"] .pill-text { color: var(--warn); font-weight: var(--medium); }
+.pill[data-tone="failed"] .pill-text { color: var(--danger); font-weight: var(--medium); }
 
-/* Peek: the session's title and one line of what happened. */
-.peek { display: grid; align-content: center; gap: var(--space-1); padding: 0 var(--space-4); }
-.peek-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
-.peek-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Peek: one line. The session's title, the start of what happened, and how it ended. */
+.peek { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4); white-space: nowrap; }
+.peek-title { flex: 0 1 auto; min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+.peek-body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .peek-label { flex: none; color: var(--muted); }
 .peek[data-kind="needs_approval"] .peek-label { color: var(--warn); font-weight: var(--medium); }
-.peek[data-kind="error"] .peek-label { color: var(--danger); }
-.peek-body { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peek[data-kind="error"] .peek-label { color: var(--danger); font-weight: var(--medium); }
 
-/* Open: the sessions, the selected one's stream, the reply box. */
+/* Open: the sessions, the selected one's stream, the reply box. As tall as its content, up to the
+   contract's height (dock.js sets that as its max-height): then the stream scrolls. */
 .panel { display: flex; flex-direction: column; }
 .panel-head { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1) var(--space-4); }
 .brand { font-weight: var(--semibold); letter-spacing: var(--track-l); }
 .connection { flex: 1; }
 .panel-head .button { margin-left: auto; }
-/* About eight rows, the rest scroll. */
+/* About four rows, the rest scroll. */
 .sessions {
   flex: none;
-  max-height: calc(var(--control) * 8 + var(--hairline) * 7 + var(--space-2));
+  max-height: calc(var(--control) * 4 + var(--hairline) * 3 + var(--space-2));
   overflow-y: auto;
   scrollbar-width: thin;
   display: grid;
@@ -83,10 +105,10 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .row-time { flex: none; }
 .empty { padding: var(--space-2) var(--space-4) var(--space-4); }
 
-.session { flex: 1; min-height: 0; display: flex; flex-direction: column; border-top: var(--hairline) solid var(--line); }
+.session { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: var(--hairline) solid var(--line); }
 .session-head { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1) var(--space-4); }
 .session-title { flex: 1; min-width: 0; font-size: var(--text-m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scroller { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+.scroller { flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 .stream { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) var(--space-4) var(--space-3); }
 
 .msg { min-width: 0; overflow-wrap: anywhere; }
