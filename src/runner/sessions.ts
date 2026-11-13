@@ -29,7 +29,15 @@ export function promptWithImage(prompt: string, imagePath?: string): string {
   return imagePath ? `${prompt}\n\nAttached image (read this file): ${imagePath}` : prompt;
 }
 
+/** Told when a runner turn starts and ends, while the turn is still counted as running (the transcript sync, sync.ts). */
+export interface TurnWatcher {
+  turnStarted(id: string): void;
+  turnEnded(id: string): void;
+}
+
 export class Sessions {
+  /** Set by the server once the sync exists. */
+  watcher: TurnWatcher | null = null;
   private readonly turns = new Map<string, { abort: AbortController; done: Promise<void> }>();
   /** The open approvals, by approvalId. `settle` gives the waiting tool call its answer. */
   private readonly approvals = new Map<string, { sessionId: string; settle: (decision: ApprovalDecision) => void }>();
@@ -59,6 +67,7 @@ export class Sessions {
       workspace: workspace.name,
       cwd: workspace.path,
       title: titleOf(prompt),
+      source: "intuition",
       status: "running",
       createdAt: now,
       updatedAt: now,
@@ -98,11 +107,17 @@ export class Sessions {
       }),
     };
     this.turns.set(id, entry);
+    this.watcher?.turnStarted(id);
   }
 
-  /** Stores an event and tells the clients: the event, then the session with its new lastSeq. */
-  private record(id: string, event: NewEvent, status?: SessionStatus): void {
-    const stored = this.store.append(id, event);
+  /** True while the runner runs a turn of this session. */
+  isRunning(id: string): boolean {
+    return this.turns.has(id);
+  }
+
+  /** Stores an event and tells the clients: the event, then the session with its new lastSeq. `ts` is the event's time (now by default). */
+  record(id: string, event: NewEvent, status?: SessionStatus, ts?: string): void {
+    const stored = this.store.append(id, event, ts);
     this.send({ type: "event", sessionId: id, event: stored });
     this.send({ type: "session", session: status ? this.store.update(id, { status }) : this.store.get(id)! });
   }
@@ -185,7 +200,7 @@ export class Sessions {
       else this.notify(id, "error", bodyOf(event.kind === "error" ? event.message : (event.kind === "result" && event.text) || lastText) || FAILED);
     };
     try {
-      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, permissionMode, signal, approve })) {
+      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, title: session.title, permissionMode, signal, approve })) {
         // A turn cut off by the runner stopping stays "running" on disk, and the next start records it as failed.
         if (signal.aborted) return;
         if (out.type === "delta") {
@@ -210,6 +225,8 @@ export class Sessions {
       if (!signal.aborted) end({ kind: "error", message: (e as Error).message || String(e) }, "error");
     } finally {
       ended = true;
+      // Still in `turns` here, so the sync can't take the turn's own transcript entries for another process's.
+      if (!signal.aborted) this.watcher?.turnEnded(id);
     }
   }
 

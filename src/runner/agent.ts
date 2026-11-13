@@ -23,6 +23,8 @@ export interface TurnInput {
   cwd: string;
   /** Claude Code's session id to continue, or null for a new conversation. */
   resume: string | null;
+  /** The session's title, given to a new conversation so the transcript (and `claude --resume`'s picker) shows it. */
+  title?: string;
   /** The permission mode to ask Claude Code for (config `permissionMode`). It may run in another: see the `permission_mode` output. */
   permissionMode: PermissionMode;
   /** Aborted when the runner stops: the driver ends the turn without more output. */

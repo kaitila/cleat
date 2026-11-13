@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import {
   HOST,
+  OPEN_IN_TERMINAL,
   type ClipboardCapture,
   type ErrorResponse,
   type EventsResponse,
@@ -20,6 +21,7 @@ import { permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
 import { Store } from "./store";
+import { Sync, noTranscripts, type SyncOptions } from "./sync";
 
 export const VERSION = "0.1.0";
 const WEB_DIR = join(import.meta.dir, "..", "web");
@@ -65,6 +67,7 @@ interface App {
   sessions: Sessions;
   clipboard: Clipboard;
   notifications: Notifications;
+  sync: Sync;
   /** The build id of the code this process loaded, taken once at its start (build.ts). */
   build: string;
   /** Where the Windows drives are mounted (/mnt). */
@@ -106,9 +109,15 @@ async function reply(req: Request, app: App, id: string): Promise<Response> {
   if (typeof b.prompt !== "string" || !b.prompt.trim()) return fail(400, "prompt is empty");
   const imagePath = imageOf(b, app);
   if (imagePath === null) return fail(400, NOT_AN_IMAGE);
+  if (b.force !== undefined && typeof b.force !== "boolean") return fail(400, "force must be true or false");
+  // The history (of an imported session) and what a terminal wrote since the last round are stored
+  // first, so the reply follows them. A session another process wrote to lately waits for force.
+  const { openElsewhere } = await app.sync.beforeReply(id);
+  if (openElsewhere && b.force !== true) return fail(409, OPEN_IN_TERMINAL);
   // Nothing awaits between this check and the turn starting, so two replies sent at once
-  // can't both start one.
-  const why = busy(app.store.get(id)!);
+  // can't both start one. A session shown running only because its transcript grows is no runner turn.
+  const session = app.store.get(id)!;
+  const why = !app.sessions.isRunning(id) && app.sync.isLive(id) ? null : busy(session);
   if (why) return fail(409, why);
   return json({ session: app.sessions.reply(id, b.prompt, imagePath) } satisfies SessionResponse, 202);
 }
@@ -160,6 +169,8 @@ async function handle(req: Request, app: App): Promise<Response> {
       if (!app.store.get(events[1]!)) return fail(404, "no such session");
       const raw = url.searchParams.get("after");
       if (raw !== null && !/^\d+$/.test(raw)) return fail(400, "after must be a whole number");
+      // An imported session's events are read from its transcript the first time they are asked for.
+      await app.sync.load(events[1]!);
       return json({ events: app.store.events(events[1]!, raw === null ? 0 : Number(raw)) } satisfies EventsResponse);
     }
     if (path === "/api/notifications") {
@@ -186,15 +197,21 @@ async function handle(req: Request, app: App): Promise<Response> {
 const TOPIC = "all";
 
 /**
- * Starts the runner. `driver` replaces the agent the config asks for, and `mounts` the folder the
- * Windows drives are mounted in (both for tests: CI has no /mnt/c).
+ * Starts the runner. `driver` replaces the agent the config asks for, `mounts` the folder the
+ * Windows drives are mounted in, and `sync` the transcript sync's reader and timings (all for tests:
+ * CI has no /mnt/c and no transcripts). With the fake agent there are no transcripts to read.
  */
-export function startServer(config: Config, driver: AgentDriver = driverFor(config), mounts = MOUNTS): Runner {
+export function startServer(config: Config, driver: AgentDriver = driverFor(config), mounts = MOUNTS, sync: Partial<SyncOptions> = {}): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
   const notifications = new Notifications((notification) => send({ type: "notification", notification }));
   const sessions = new Sessions(store, driver, send, notifications, (workspace) => permissionModeFor(config, workspace));
-  const app: App = { config, store, sessions, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts };
+  const transcriptSync = new Sync(store, sessions, send, config.workspaces, config.dataDir, {
+    ...(config.fakeAgent ? { transcripts: noTranscripts() } : {}),
+    ...sync,
+  });
+  sessions.watcher = transcriptSync;
+  const app: App = { config, store, sessions, sync: transcriptSync, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts };
   const server = Bun.serve({
     hostname: HOST,
     port: config.port,
@@ -221,10 +238,12 @@ export function startServer(config: Config, driver: AgentDriver = driverFor(conf
     },
   });
   const port = server.port ?? config.port;
+  transcriptSync.start();
   return {
     port,
     url: `http://${HOST}:${port}`,
     async stop() {
+      await transcriptSync.stop();
       await sessions.stop();
       await server.stop(true);
     },
