@@ -1,0 +1,132 @@
+/* The snip overlay: one window over a whole display. The frozen screen, a dim over all of it but
+   the selection, the selection's hairline, its size, and the prompt box beside it. Layout only:
+   every colour, size, radius and border is a token or a component of base.css (docs/design.md). */
+html, body { overflow: hidden; }
+body.snip {
+  position: relative;
+  background: var(--sunken);
+  cursor: crosshair;
+  user-select: none;
+}
+
+.frozen {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* The dim: the dark scheme's back surface at a little under half. snip.js cuts the selection out
+   of it with a clip-path, so the selection shows the screen as it is. */
+.shade {
+  position: fixed;
+  inset: 0;
+  background: var(--sunken);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+/* The selection's edge: a hairline outside it, so every selected pixel shows as it is. */
+.selection {
+  position: fixed;
+  outline: var(--hairline) solid var(--accent);
+  outline-offset: 0;
+  pointer-events: none;
+}
+
+/* Its size in device pixels, small, at its top left corner. */
+.size {
+  position: fixed;
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-s);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: var(--text-xs);
+  line-height: var(--leading);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* What to do, until the first press. */
+.hint {
+  position: fixed;
+  top: var(--space-5);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.hint[data-kind="error"] { border-color: var(--danger); }
+
+/* The prompt box: it floats above the screen, so it has the shadow. snip.js places it. */
+.box {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  width: calc(var(--space-6) * 10);
+  max-width: calc(100vw - var(--space-2) * 2);
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  cursor: auto;
+  user-select: text;
+  overflow: hidden;
+}
+.task {
+  display: block;
+  width: 100%;
+  min-height: calc(var(--text-m) * var(--leading) + var(--space-3) * 2);
+  max-height: calc(var(--text-m) * var(--leading) * 5 + var(--space-3) * 2);
+  padding: var(--space-3);
+  border: 0;
+  background: transparent;
+  resize: none;
+  overflow-y: auto;
+  line-height: var(--leading);
+  caret-color: var(--accent);
+}
+.task::placeholder { color: var(--muted); }
+.task:focus-visible { outline: none; }
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: calc(var(--control-s) + var(--space-1) * 2 + var(--hairline));
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
+  border-top: var(--hairline) solid var(--line);
+  background: var(--sunken);
+}
+/* The workspace: one chip. Tab and Alt+1..9 switch it; so does a click. */
+button.chip {
+  flex: none;
+  max-width: 50%;
+  gap: var(--space-2);
+  padding: 0 var(--space-1) 0 var(--space-2);
+  background: var(--selected);
+  color: var(--text);
+}
+button.chip:hover { background: var(--hover); }
+.chip span { overflow: hidden; text-overflow: ellipsis; }
+.chip kbd { height: calc(var(--control-s) - var(--space-1)); }
+.status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.status[data-kind="error"] { color: var(--danger); }
+.keys { flex: none; display: flex; align-items: center; gap: var(--space-1); white-space: nowrap; font-size: var(--text-xs); }
+.keys span { margin-right: var(--space-1); }

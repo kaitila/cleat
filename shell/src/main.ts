@@ -1,19 +1,20 @@
 // The Windows shell: Electron's main process. It lives in the tray, opens the pop-up on the global
-// hotkey with the clipboard captured, shows the runner's pages in small windows, and keeps the dock
-// at the top of the screen.
+// hotkey with the clipboard captured, freezes the screens for a snip on the second hotkey, shows the
+// runner's pages in small windows, and keeps the dock at the top of the screen.
 // Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
 import { spawn } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, session, Tray } from "electron";
+import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, Notification, screen, session, shell, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
 import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, takesMouse, watchMs } from "./dock";
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, loginItem, type LoginResult } from "./login";
-import { chatUrl, dockUrl, promptUrl, sameOrigin, windowTarget } from "./origin";
+import { chatUrl, dockUrl, externalLink, promptUrl, sameOrigin, windowTarget } from "./origin";
 import type { SelfTestResult } from "./result";
 import { loadSettings, PID_FILE, saveDock, SETTINGS_FILE, type Settings } from "./settings";
+import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
 import { RUNNER_START_MS, runnerCommand } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
@@ -21,7 +22,8 @@ const CHAT = { width: 1100, height: 720 };
 const ICON_SIZE = 32;
 /** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
 const SELF_TEST_HOTKEY = "Control+Alt+Shift+F11";
-/** Pages get no Node and their own sandboxed process. Only the dock adds a preload, for its one-function bridge. */
+const SELF_TEST_SNIP_HOTKEY = "Control+Alt+Shift+F10";
+/** Pages get no Node and their own sandboxed process. Only the dock and the snip overlays add a preload, each for its own small bridge. */
 const WEB_PREFERENCES = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } as const;
 
 const args = parseArgs(process.argv);
@@ -79,7 +81,10 @@ function ensureRunner(): Promise<boolean> {
   })()
     .then((up) => {
       // The runner is there, perhaps because the shell just started it: the dock comes with it.
-      if (up && !args.selfTest) void showDock();
+      if (up && !args.selfTest) {
+        void showDock();
+        if (snipKeepWarm) void warmSnip();
+      }
       return up;
     })
     .finally(() => {
@@ -177,7 +182,12 @@ function guard(): void {
     const stay = (event: { preventDefault(): void; url: string }) => {
       if (!sameOrigin(event.url, settings.runnerUrl)) event.preventDefault();
     };
-    contents.on("will-navigate", stay);
+    // A link followed in the page to http:, https: or mailto: elsewhere goes to the default browser. A redirect never does.
+    contents.on("will-navigate", (event) => {
+      if (sameOrigin(event.url, settings.runnerUrl)) return;
+      event.preventDefault();
+      openExternal(event.url);
+    });
     contents.on("will-redirect", stay);
     contents.on("will-attach-webview", (event) => event.preventDefault());
     contents.setWindowOpenHandler(({ url }) => {
@@ -186,6 +196,7 @@ function guard(): void {
       const target = windowTarget(url, settings.runnerUrl, dock !== null && !dock.isDestroyed() && contents === dock.webContents);
       if (target?.kind === "chat") void openChat(target.session, Boolean(args.selfTest));
       else if (target?.kind === "prompt") args.selfTest ? void openPopup(true) : newTask();
+      else openExternal(url);
       return { action: "deny" };
     });
   });
@@ -193,6 +204,17 @@ function guard(): void {
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
     callback(permission === "clipboard-sanitized-write" && sameOrigin(contents.getURL(), settings.runnerUrl));
   });
+}
+
+/** What the self-test would have handed to the default browser: it opens nothing on the person's screen. */
+const externalOpened: string[] = [];
+
+/** Hands a link to the default browser when externalLink lets it through; anything else is dropped. */
+function openExternal(url: string): void {
+  const link = externalLink(url, settings.runnerUrl);
+  if (link === null) return;
+  if (args.selfTest) externalOpened.push(link);
+  else void shell.openExternal(link).catch((e) => console.error("opening a link in the browser failed", e));
 }
 
 /** Opens the pop-up on the display under the cursor, or focuses it when it is already up. */
@@ -239,7 +261,12 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
     }
     const win = popup;
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-    win.setBounds({ ...centred(area, POPUP.width, POPUP.height), ...POPUP });
+    const bounds = { ...centred(area, POPUP.width, POPUP.height), ...POPUP };
+    win.setBounds(bounds);
+    // A window moved onto a display with another scale comes out sized by the scale it left: placed
+    // again from there, it is right (seen on this machine with a display at 200% beside two at 100%).
+    // Its content, not its outer bounds: at 200% those read a pixel taller than what was set.
+    if (!sameArea(win.getContentBounds(), bounds)) win.setBounds(bounds);
     // Loaded afresh each time, so the page starts empty and reads the new capture.
     await win.loadURL(promptUrl(settings.runnerUrl));
     if (win.isDestroyed()) return null;
@@ -306,6 +333,7 @@ function trayMenu(): Menu {
   }
   return Menu.buildFromTemplate([
     { label: "New task", click: newTask },
+    { label: "Snip", click: () => void snip() },
     { label: "Open chat", click: () => void openChat() },
     { type: "separator" },
     { label: "Show dock", type: "checkbox", checked: settings.dock, click: (item) => setDock(item.checked) },
@@ -334,6 +362,272 @@ function createTray(): Tray {
   t.setContextMenu(trayMenu());
   t.on("double-click", () => void openChat());
   return t;
+}
+
+// --- Snip ---
+
+/**
+ * One overlay: its window, the display it covers, and that display's frozen capture. The capture
+ * is a promise the page's getCapture() waits on: the windows are made and loaded ahead of the key,
+ * hidden, and the key only captures, hands the images over and shows them.
+ */
+interface Overlay {
+  win: BrowserWindow;
+  display: Electron.Display;
+  capture: Promise<NativeImage | null>;
+  give: (image: NativeImage | null) => void;
+  /** The capture as the page shows it, encoded once. */
+  view: string | null;
+}
+/** The overlays, one per display: loaded and hidden while waiting for the key, shown during a snip. Empty when there are none. */
+let overlays: Overlay[] = [];
+/** True from the key until the overlays close. */
+let snipShown = false;
+/** The displays the overlays were made for, to know when they no longer fit. */
+let overlaysFor = "";
+let warming: Promise<boolean> | null = null;
+let snipOpening: Promise<SnipOpened | null> | null = null;
+/** False in the self-test until it asks: the overlays are made ahead only for a running shell. */
+let snipKeepWarm = false;
+
+/** What opening a snip did, for the self-test: its overlays, how long until all were shown, whether every display was captured, and when each part was done. */
+interface SnipOpened { overlays: Overlay[]; ms: number; captured: boolean; phases: Record<string, number> }
+
+const displaysKey = (displays: Electron.Display[]) => JSON.stringify(displays.map((d) => [d.id, d.bounds, d.scaleFactor]));
+
+/** Every display at its native resolution, one image each, by display. An image that came back empty is null. */
+async function captureDisplays(displays: Electron.Display[]): Promise<(NativeImage | null)[]> {
+  const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: captureSize(displays) });
+  const which = matchSources(displays.map((d) => d.id), sources.map((s) => s.display_id));
+  return which.map((i) => {
+    const image = i >= 0 ? sources[i]!.thumbnail : null;
+    return image && !image.isEmpty() ? image : null;
+  });
+}
+
+/** Destroys every overlay window, shown or waiting. */
+function dropOverlays(): void {
+  const all = overlays;
+  overlays = [];
+  overlaysFor = "";
+  snipShown = false;
+  for (const o of all) if (!o.win.isDestroyed()) o.win.destroy();
+}
+
+/** Closes the snip: every overlay at once. New ones are made ahead for the next key. */
+function closeSnip(): void {
+  const wasShown = snipShown;
+  dropOverlays();
+  if (wasShown && snipKeepWarm) void warmSnip();
+}
+
+function overlayWindow(display: Electron.Display): BrowserWindow {
+  const win = new BrowserWindow({
+    ...display.bounds,
+    show: false,
+    frame: false,
+    hasShadow: false,
+    thickFrame: false,
+    roundedCorners: false,
+    movable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    enableLargerThanScreen: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    backgroundColor: "#0f0f11",
+    title: "intuition snip",
+    // Not throttled while hidden: the page waits, loaded, for the key, and must draw at once.
+    webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) },
+  });
+  // Above the taskbar too.
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.on("will-resize", (event) => event.preventDefault());
+  // One overlay going away (Esc, a crash, the page closing it) takes all of them.
+  win.on("closed", () => {
+    if (overlays.some((o) => o.win === win)) closeSnip();
+  });
+  win.webContents.on("render-process-gone", () => closeSnip());
+  // Esc closes everything even when the page does not answer.
+  win.webContents.on("before-input-event", (event, input) => {
+    if (input.type === "keyDown" && input.key === "Escape") {
+      event.preventDefault();
+      closeSnip();
+    }
+  });
+  return win;
+}
+
+/**
+ * Makes one hidden overlay per display and loads the page in each, unless loaded ones that fit the
+ * displays are already there. True when they are ready for the key. Calls at the same moment share one.
+ */
+function warmSnip(): Promise<boolean> {
+  warming ??= (async () => {
+    const displays = screen.getAllDisplays();
+    if (overlays.length && overlaysFor === displaysKey(displays)) return true;
+    if (snipShown) return false;
+    dropOverlays();
+    const mine = displays.map((display): Overlay => {
+      let give: (image: NativeImage | null) => void = () => {};
+      const capture = new Promise<NativeImage | null>((resolve) => (give = resolve));
+      return { win: overlayWindow(display), display, capture, give, view: null };
+    });
+    overlays = mine;
+    overlaysFor = displaysKey(displays);
+    try {
+      await Promise.all(mine.map((o) => o.win.loadURL(snipUrl(settings.runnerUrl))));
+      return overlays === mine;
+    } catch (e) {
+      // The runner is not there: the key makes them again once it is.
+      console.error("loading the snip overlays failed", e);
+      if (overlays === mine) dropOverlays();
+      return false;
+    }
+  })().finally(() => {
+    warming = null;
+  });
+  return warming;
+}
+
+/** Makes the overlays again for a display added, removed or changed, unless a snip is up. */
+function rewarmSnip(): void {
+  if (snipShown) return;
+  dropOverlays();
+  if (snipKeepWarm) void warmSnip();
+}
+
+/** Resolves once the page says its frozen image is drawn, or after SNIP_SHOW_MS whatever it says. */
+function pageReady(win: BrowserWindow): Promise<unknown> {
+  return Promise.race([win.webContents.executeJavaScript("window.snipReady ?? null", true).catch(() => null), sleep(SNIP_SHOW_MS)]);
+}
+
+/**
+ * The snip hotkey and the tray's Snip: captures every display, then covers each with an overlay
+ * showing its own frozen capture, the one under the cursor focused. A second press while it is up
+ * focuses it again. `inactive`: without taking the focus (the self-test).
+ */
+function snip(inactive = false): Promise<SnipOpened | null> {
+  if (snipShown && !snipOpening) {
+    const under = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const o = overlays.find((x) => x.display.id === under.id) ?? overlays[0];
+    if (!inactive && o && !o.win.isDestroyed()) o.win.focus();
+    return Promise.resolve(o ? { overlays, ms: 0, captured: true, phases: {} } : null);
+  }
+  snipOpening ??= openSnip(inactive).finally(() => {
+    snipOpening = null;
+  });
+  return snipOpening;
+}
+
+async function openSnip(inactive: boolean): Promise<SnipOpened | null> {
+  const started = performance.now();
+  const phases: Record<string, number> = {};
+  const mark = (name: string) => (phases[name] = Math.round(performance.now() - started));
+  const displays = screen.getAllDisplays();
+  // The capture first, before any window of ours is on screen.
+  const capturing = captureDisplays(displays)
+    .catch((e) => {
+      console.error("capturing the screens failed", e);
+      return displays.map(() => null);
+    })
+    .finally(() => mark("captured"));
+  const warm = overlays.length > 0 && overlaysFor === displaysKey(displays) && !warming;
+  phases.warm = warm ? 1 : 0;
+  try {
+    // Waiting overlays were loaded from a runner that answered: they show at once, and the runner is
+    // checked (and started, if it has gone) meanwhile, by the time the task is sent.
+    if (warm) void ensureRunner();
+    else {
+      if (!(await ensureRunner())) {
+        dropOverlays();
+        runnerDown();
+        return null;
+      }
+      if (!(await warmSnip())) throw new Error("the overlays did not load");
+      mark("loaded");
+    }
+    const mine = overlays;
+    snipShown = true;
+    const images = await capturing;
+    mine.forEach((o) => o.give(images[displays.findIndex((d) => d.id === o.display.id)] ?? null));
+    await Promise.all(mine.map((o) => pageReady(o.win)));
+    mark("drawn");
+    if (overlays !== mine) return null;
+    const under = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    for (const o of mine) {
+      if (o.win.isDestroyed()) continue;
+      if (inactive || o.display.id !== under.id) o.win.showInactive();
+      else {
+        o.win.show();
+        o.win.focus();
+      }
+      // Again once shown: on Windows a window placed on a display with another scale can come out sized for the first.
+      if (!sameArea(o.win.getContentBounds(), o.display.bounds)) o.win.setContentBounds(o.display.bounds);
+    }
+    return { overlays: mine, ms: Math.round(performance.now() - started), captured: images.every((image) => image !== null), phases };
+  } catch (e) {
+    console.error("opening the snip failed", e);
+    dropOverlays();
+    return null;
+  }
+}
+
+const sameArea = (a: Electron.Rectangle, b: Electron.Rectangle) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+
+/** The overlay a bridge call came from, when the main process answers it: one of the shell's overlay windows, its main frame, on the snip page. */
+function overlayOf(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): Overlay | null {
+  const o = overlays.find((x) => !x.win.isDestroyed() && x.win.webContents === event.sender) ?? null;
+  const frame = event.senderFrame;
+  const ok = acceptedSender({ fromOverlay: o !== null, mainFrame: frame !== null && frame.parent === null, url: frame?.url ?? null }, settings.runnerUrl);
+  return ok ? o : null;
+}
+
+/** getCapture(): the page's own display, frozen, as a data URL, once the key has been pressed. Null when it came back empty or the call is refused. */
+async function onSnipCapture(event: Electron.IpcMainInvokeEvent): Promise<string | null> {
+  const o = overlayOf(event);
+  if (!o) return null;
+  const image = await o.capture;
+  if (!image) return null;
+  o.view ??= `data:image/jpeg;base64,${image.toJPEG(SNIP_VIEW_QUALITY).toString("base64")}`;
+  return o.view;
+}
+
+/** crop(rect): the selection cut from the full capture at device pixels, saved as %TEMP%\intuition\snip-<time>.png. */
+async function onSnipCrop(event: Electron.IpcMainInvokeEvent, value: unknown): Promise<{ path: string } | { error: string }> {
+  const o = overlayOf(event);
+  if (!o || !snipShown) return { error: "refused" };
+  const bounds = o.display.bounds;
+  const rect = acceptedRect(value, bounds);
+  if (!rect) return { error: "not a rectangle inside the display" };
+  const image = await o.capture;
+  if (!image) return { error: "nothing was captured" };
+  try {
+    const plan = cropPlan(rect, bounds, o.display.scaleFactor, image.getSize());
+    let cut = image.crop(plan.source);
+    const got = cut.getSize();
+    if (got.width !== plan.output.width || got.height !== plan.output.height) cut = cut.resize({ ...plan.output, quality: "best" });
+    // The one place a snip is written: under the Windows temp folder, named from the clock, never from the page.
+    return { path: saveClip(join(app.getPath("temp"), "intuition"), cut.toPNG(), new Date(), "snip") };
+  } catch (e) {
+    console.error("saving the snip failed", e);
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** close(): every overlay, from any of them, while a snip is up. */
+function onSnipClose(event: Electron.IpcMainEvent): void {
+  if (overlayOf(event) && snipShown) closeSnip();
+}
+
+function snipEvents(): void {
+  ipcMain.handle(SNIP_CAPTURE, onSnipCapture);
+  ipcMain.handle(SNIP_CROP, onSnipCrop);
+  ipcMain.on(SNIP_CLOSE, onSnipClose);
+  screen.on("display-metrics-changed", rewarmSnip);
+  screen.on("display-added", rewarmSnip);
+  screen.on("display-removed", rewarmSnip);
 }
 
 // --- Dock ---
@@ -592,7 +886,10 @@ async function selfTest(): Promise<SelfTestResult> {
     dockOpenBounds: null, dockOpenFocusable: null, dockMouseOnOpenIsland: false, dockOtherValueIgnored: false,
     dockBackBounds: null, dockBackFocusable: null, dockForeignOriginIgnored: false, dockOpenedChatUrl: null, dockOpenedPromptUrl: null,
     dockOtherWindowRefused: false, dockIgnoresMouseUnreported: false, dockIgnoresMouseAfterCrash: false,
-    dockHiddenWithoutRunner: false, dockShownAgain: false, errors: [],
+    dockHiddenWithoutRunner: false, dockShownAgain: false,
+    snipHotkeyRegistered: false, snipDisplays: null, snipOverlayBounds: null, snipOverlaysShown: false, snipUrl: null, snipMs: null, snipPhases: null,
+    snipCaptured: null, snipBridge: null, snipCropRect: null, snipCropPath: null, snipBadRectsRefused: false, snipClosed: false, snipEscClosed: false,
+    externalLinks: [], errors: [],
   };
   const step = async (name: string, run: () => Promise<void>) => {
     try {
@@ -645,7 +942,8 @@ async function selfTest(): Promise<SelfTestResult> {
     const win = await openPopup(true);
     if (!win) throw new Error("the pop-up did not open");
     r.popupCreated = true;
-    const bounds = win.getBounds();
+    // The content: at 200% the outer bounds read a pixel taller than the window that was set.
+    const bounds = win.getContentBounds();
     r.popupWidth = bounds.width;
     r.popupHeight = bounds.height;
     r.popupUrl = win.webContents.getURL();
@@ -657,7 +955,9 @@ async function selfTest(): Promise<SelfTestResult> {
     // localhost is the same stub runner under another origin: it would load if the guard let it.
     const foreign = promptUrl(settings.runnerUrl.replace("127.0.0.1", "localhost"));
     const windows = BrowserWindow.getAllWindows().length;
-    await win.webContents.executeJavaScript(`window.open(${JSON.stringify(foreign)}); location.href = ${JSON.stringify(foreign)}; 0`, true);
+    // Links elsewhere: http(s) and mailto would go to the browser (the self-test only notes them), the rest nowhere.
+    const elsewhere = ["file:///C:/Windows/win.ini", "javascript:void 0", "mailto:someone@example.invalid", "ftp://example.invalid/"];
+    await win.webContents.executeJavaScript(`for (const u of ${JSON.stringify(elsewhere)}) window.open(u); window.open(${JSON.stringify(foreign)}); location.href = ${JSON.stringify(foreign)}; 0`, true);
     await sleep(700);
     r.foreignNavigationRefused = win.webContents.getURL() === r.popupUrl;
     r.foreignWindowRefused = BrowserWindow.getAllWindows().length === windows;
@@ -805,6 +1105,52 @@ async function selfTest(): Promise<SelfTestResult> {
       settings = { ...settings, runnerUrl: real };
     }
   });
+  await step("snip", async () => {
+    r.snipHotkeyRegistered = globalShortcut.register(SELF_TEST_SNIP_HOTKEY, () => {}) && globalShortcut.isRegistered(SELF_TEST_SNIP_HOTKEY);
+    globalShortcut.unregister(SELF_TEST_SNIP_HOTKEY);
+    // As a running shell does: the overlays made and loaded ahead, so the key only captures and shows.
+    snipKeepWarm = true;
+    if (!(await warmSnip())) throw new Error("the snip overlays did not load");
+    const opened = await snip(true);
+    if (!opened) throw new Error("the snip did not open");
+    r.snipMs = opened.ms;
+    r.snipPhases = opened.phases;
+    r.snipCaptured = opened.captured;
+    r.snipDisplays = opened.overlays.map((o) => ({ bounds: o.display.bounds, scaleFactor: o.display.scaleFactor }));
+    r.snipOverlayBounds = opened.overlays.map((o) => o.win.getContentBounds());
+    r.snipOverlaysShown = opened.overlays.length > 0 && opened.overlays.every((o) => o.win.isVisible() && o.win.isAlwaysOnTop());
+    const first = opened.overlays[0]!;
+    r.snipUrl = first.win.webContents.getURL();
+    const run = (code: string) => first.win.webContents.executeJavaScript(code, true);
+    r.snipBridge = String(await run("typeof window.intuitionSnip + ':' + Object.keys(window.intuitionSnip ?? {}).sort().join(',') + ':' + typeof window.require + ':' + typeof window.process"));
+    // A known rectangle: the PNG's size is checked in WSL.
+    const { width, height } = first.display.bounds;
+    r.snipCropRect = SELF_TEST_CROP;
+    if (opened.captured) r.snipCropPath = String(await run(`window.intuitionSnip.crop(${JSON.stringify(r.snipCropRect)})`));
+    // Anything but a rectangle of finite numbers inside the display is refused, whatever the capture.
+    const bad = [
+      "{ x: -1, y: 0, width: 10, height: 10 }", `{ x: 0, y: 0, width: ${width + 1}, height: 10 }`, `{ x: 0, y: ${height - 5}, width: 10, height: 10 }`,
+      "{ x: NaN, y: 0, width: 10, height: 10 }", "{ x: 0, y: 0, width: Infinity, height: 10 }", '{ x: "0", y: 0, width: 10, height: 10 }',
+      "{ x: 0, y: 0, width: 0.5, height: 10 }", "{ x: 0, y: 0, width: 10, height: 10, path: 'C:/x.png' }", "null", "[0, 0, 10, 10]", "'C:/Windows/x.png'",
+    ];
+    const answers = await run(`Promise.all([${bad.join(", ")}].map((rect) => window.intuitionSnip.crop(rect).then(() => "saved", () => "refused")))`);
+    r.snipBadRectsRefused = Array.isArray(answers) && answers.length === bad.length && answers.every((a) => a === "refused");
+    // The page's close() takes every overlay.
+    void run("window.intuitionSnip.close(); 0").catch(() => {});
+    for (let i = 0; i < 30 && opened.overlays.some((o) => !o.win.isDestroyed()); i++) await sleep(100);
+    // New overlays are made at once for the next key, hidden: the ones that were up are gone.
+    r.snipClosed = !snipShown && opened.overlays.every((o) => o.win.isDestroyed()) && overlays.every((o) => !o.win.isVisible());
+    // Esc, as a key the window receives.
+    const again = await snip(true);
+    if (!again) throw new Error("the snip did not open a second time");
+    again.overlays[0]!.win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    for (let i = 0; i < 30 && again.overlays.some((o) => !o.win.isDestroyed()); i++) await sleep(100);
+    r.snipEscClosed = !snipShown && again.overlays.every((o) => o.win.isDestroyed());
+    snipKeepWarm = false;
+    await warming;
+    dropOverlays();
+  });
+  r.externalLinks = [...externalOpened];
   return r;
 }
 
@@ -816,6 +1162,7 @@ function start(): void {
   Menu.setApplicationMenu(null);
   guard();
   dockEvents();
+  snipEvents();
 
   if (args.selfTest) {
     const file = args.selfTest;
@@ -823,7 +1170,7 @@ function start(): void {
       writeFileSync(file, JSON.stringify(result, null, 2));
       app.exit(0);
     };
-    setTimeout(() => done({ errors: ["the self-test did not finish in 40 seconds"] }), 40_000);
+    setTimeout(() => done({ errors: ["the self-test did not finish in 60 seconds"] }), 60_000);
     void selfTest().then(done, (e) => done({ errors: [String(e)] }));
     return;
   }
@@ -837,8 +1184,12 @@ function start(): void {
   }
 
   tray = createTray();
+  snipKeepWarm = true;
   if (!globalShortcut.register(settings.hotkey, newTask)) {
     notify("intuition: the hotkey is taken", `${settings.hotkey} could not be registered. Change "hotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
+  }
+  if (!globalShortcut.register(settings.snipHotkey, () => void snip())) {
+    notify("intuition: the snip hotkey is taken", `${settings.snipHotkey} could not be registered. Change "snipHotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
   }
   // The runner is started here when it is not up: after a login, nobody has started it yet.
   if (args.session) void openChat(args.session);

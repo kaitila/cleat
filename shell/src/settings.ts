@@ -8,13 +8,15 @@ export interface Settings {
   runnerUrl: string;
   /** An Electron accelerator: opens the pop-up with the clipboard attached. */
   hotkey: string;
+  /** An Electron accelerator: freezes the screens for a snip, with the task typed right beside it. */
+  snipHotkey: string;
   /** Whether the dock is shown at the top of the screen. The tray's "Show dock" checkbox writes it. */
   dock: boolean;
   /** Where the runner lives in WSL, so the shell can start it. Absent until `shell install` has written it. */
   wsl?: WslSettings;
 }
 
-export const DEFAULT_SETTINGS: Settings = { runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", dock: true };
+export const DEFAULT_SETTINGS: Settings = { runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true };
 export const SETTINGS_FILE = "settings.json";
 /** The running shell's Windows pid, beside the settings: `up` waits for that process to end before it installs over it. */
 export const PID_FILE = "shell.pid";
@@ -41,6 +43,7 @@ export function parseSettings(text: string): Settings {
   return {
     runnerUrl: httpUrl(o.runnerUrl) ?? DEFAULT_SETTINGS.runnerUrl,
     hotkey: typeof o.hotkey === "string" && o.hotkey.trim() ? o.hotkey.trim() : DEFAULT_SETTINGS.hotkey,
+    snipHotkey: typeof o.snipHotkey === "string" && o.snipHotkey.trim() ? o.snipHotkey.trim() : DEFAULT_SETTINGS.snipHotkey,
     dock: typeof o.dock === "boolean" ? o.dock : DEFAULT_SETTINGS.dock,
     ...(parseWsl(o.wsl) ? { wsl: parseWsl(o.wsl) } : {}),
   };

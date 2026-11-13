@@ -1,6 +1,6 @@
 # The Windows shell
 
-An Electron app in TypeScript (`shell/src/`) that lives in the tray. It does what a web page can't: the global hotkey, the clipboard capture, the tray icon, the dock at the top of the screen, and small windows on the runner's pages. Why Electron: [D0001](decisions/D0001-runner-web-shell.md). What it sends the runner: [protocol](protocol.md).
+An Electron app in TypeScript (`shell/src/`) that lives in the tray. It does what a web page can't: the global hotkeys, the clipboard capture, the snip (a frozen screen to draw an area on), the tray icon, the dock at the top of the screen, and small windows on the runner's pages. Why Electron: [D0001](decisions/D0001-runner-web-shell.md). What it sends the runner: [protocol](protocol.md).
 
 It is installed and started from WSL. Nothing is built or run with the Node on the Windows side.
 
@@ -10,7 +10,7 @@ The commands below are written `intuition …`. That command exists once `bun sr
 | Command | What it does |
 |---|---|
 | `intuition up` | The one command: starts the runner (`intuition start`), installs the shell if it is not installed, writes the `wsl` settings below, and starts the shell. When the installed bundle differs from what `shell install` would write now (after a pull that changed `shell/src/`, or an install from before the dock), it asks the running shell to quit, waits up to ten seconds for its process to end (the shell keeps its pid in `shell.pid` beside its settings), installs and starts it. A runner older than the repo is restarted first, or kept while sessions run ([D0011](decisions/D0011-stale-runner-and-shell.md)); a kept runner does not stop the shell's update, and `up` exits 3. |
-| `intuition shell install` | Bundles `shell/src/main.ts` into one file, `main.cjs`, and the dock's preload script into another, `dock-preload.cjs`, and copies them with `shell/package.json` to `%LOCALAPPDATA%\intuition\shell`. The first time, it also installs Electron there for Windows (npm and node from WSL, with `npm_config_platform=win32` and `npm_config_arch=x64`): a download of about 130 MB. Later installs only replace the bundle, unless `shell/package.json` pins another Electron version. It also writes where the runner lives into the shell's settings (`wsl`, below). |
+| `intuition shell install` | Bundles `shell/src/main.ts` into one file, `main.cjs`, and the preload scripts of the dock and the snip into `dock-preload.cjs` and `snip-preload.cjs`, and copies them with `shell/package.json` to `%LOCALAPPDATA%\intuition\shell`. The first time, it also installs Electron there for Windows (npm and node from WSL, with `npm_config_platform=win32` and `npm_config_arch=x64`): a download of about 130 MB. Later installs only replace the bundle, unless `shell/package.json` pins another Electron version. It also writes where the runner lives into the shell's settings (`wsl`, below). |
 | `intuition shell start` | Starts `electron.exe` on that folder and leaves it running. If the shell already runs, this opens its chat window instead. |
 | `intuition shell stop` | Asks the running shell to quit. Does nothing when none runs. |
 | `intuition shell login on` | Start the shell when you log in to Windows. `off` turns that off, `status` says which it is. See "Start on login" below. |
@@ -25,6 +25,7 @@ After installing again, stop and start the shell: a running one keeps the old bu
 {
   "runnerUrl": "http://127.0.0.1:4777",
   "hotkey": "Control+Alt+Space",
+  "snipHotkey": "Control+Alt+S",
   "dock": true,
   "wsl": {
     "distro": "Ubuntu",
@@ -36,19 +37,22 @@ After installing again, stop and start the shell: a running one keeps the old bu
 
 - `runnerUrl`: where the runner listens. The shell's windows load this origin and nothing else.
 - `hotkey`: an [Electron accelerator](https://www.electronjs.org/docs/latest/api/accelerator). If another program holds it, the shell says so in a notification at start.
+- `snipHotkey`: an Electron accelerator for the snip (below). It too is said in a notification at start when another program holds it ("the snip hotkey is taken"). Empty or not a string counts as missing.
 - `dock`: whether the dock is shown. The tray's "Show dock" checkbox changes it at once and writes it here, keeping everything else in the file. Anything but `false` counts as `true`.
 - `wsl`: where the runner lives, so the shell can start it. Not in the defaults: `shell install` and `up` write it, from `WSL_DISTRO_NAME`, the repo the command was run from and the bun that ran it, and keep everything else in the file. `distro` is letters, digits, `.`, `_` and `-`; `repo` and `bun` are absolute WSL paths. Run from a git worktree, the command writes that worktree's path.
 
 A value that is missing or malformed falls back to its default; a `wsl` with any part missing or malformed counts as absent, and the shell then starts no runner.
 
 ## What it does
-- **Tray**: an icon with a menu: New task, Open chat, a "Show dock" checkbox, a "Start on login" checkbox, Quit. A double-click opens the chat. There is no window at start.
+- **Tray**: an icon with a menu: New task, Snip, Open chat, a "Show dock" checkbox, a "Start on login" checkbox, Quit. A double-click opens the chat. There is no window at start.
 - **Hotkey, and New task**: captures the clipboard and opens the pop-up, both at once. The pop-up is a frameless 560x380 window, always on top, on the runner's `/prompt`, in the middle of the display the cursor is on. Esc or a click elsewhere hides it. Pressing the hotkey while it is up focuses it. The page closes it with `window.close()`.
 - **Clipboard capture**: an image is saved as `%TEMP%\intuition\clip-<time>.png` (the newest 20 are kept) and its Windows path posted to `/api/clipboard` as `{ imagePath }`. Otherwise the text, cut to 20,000 characters, as `{ text }`. An empty clipboard posts `{}`. When the clipboard holds both an image and text, the image wins.
+- **Snip hotkey, and Snip**: freezes every display and lets the person drag an area and type the task right beside it. See "The snip" below.
+- **Links elsewhere**: a link from one of the runner's pages to `http:`, `https:` or `mailto:` on another origin opens in the default browser (`shell.openExternal`), from a new window or a link followed in the page. Anything else (`file:`, `javascript:`, other protocols, a URL with a user name or password, a redirect) opens nothing.
 - **Open chat**: a 1100x720 window on `/`, or `/?session=<id>` (`electron.exe <app> --session <id>`, and a link to `/?session=<id>` that a page, the dock among them, opens in a new window). Focused if already open.
 - **Runner not running**: when `GET /health` does not answer within 1.5 seconds, the shell starts the runner itself: at its own start, on the hotkey and New task, and on Open chat (the dock's links to the pop-up and the chat among them). It runs `wsl.exe -d <distro> --exec <bun> <repo>/src/cli.ts start --login-env` from its `wsl` settings, with no window, and asks `/health` again for up to ten seconds. The pop-up or the chat then opens as if the runner had been there; the clipboard was read when the key was pressed and is posted once the runner answers. If nothing answers after ten seconds, or there are no `wsl` settings, no window opens and a notification says the runner is not running. See "Starting the runner" below.
 - **Dock**: a clear window on the runner's `/dock` page at the top centre of the primary display, in which the page draws an island that grows when something happens or the pointer rests on it. It shows what the sessions are doing, in place of the Windows toasts the shell used to show. See "The dock" below.
-- **Notifications**: only for the shell's own trouble: the runner is not running, the runner is older than the shell (it answers but has no dock), the hotkey is taken, start on login could not be changed. Never for a session.
+- **Notifications**: only for the shell's own trouble: the runner is not running, the runner is older than the shell (it answers but has no dock), the hotkey or the snip hotkey is taken, start on login could not be changed. Never for a session.
 - **One instance**: a second copy hands its command line to the first and exits. That is how `shell stop` works (`--quit`).
 
 ## Starting the runner
@@ -86,11 +90,23 @@ The decisions are [D0008](decisions/D0008-dock.md), which replaces the shell's h
 - **The display's bounds, not the work area.** The island belongs on the very top edge, also over a maximised window's title bar.
 - **Two misses before hiding.** One slow `/health` (the runner busy starting a session) would otherwise blink the dock away and reload its page.
 
+## The snip
+The snip hotkey (`snipHotkey`, `Control+Alt+S` by default) or the tray's Snip. Like Windows' Win+Shift+S, but the task is typed right where the area was drawn. Why it is built this way: [D0014](decisions/D0014-snip.md).
+
+- **The windows.** One overlay per display: frameless, always on top (above the taskbar), not in the taskbar, covering the display's bounds, on the runner's `/assets/snip.html`. They are made and loaded ahead, hidden, once the runner answers, and again right after each snip and whenever a display is added, removed or changed. If none are ready (the runner was down), the key makes them then and starts the runner as the hotkey does.
+- **The key.** The shell captures every display with one `desktopCapturer` call, sized to the largest display at its native resolution, hands each overlay's page its own display's image (`getCapture()`, a JPEG data URL), waits until each page says its image is drawn (1.5 seconds at most), and shows them all. The one under the cursor takes the focus. Pressing the key while a snip is up focuses it again.
+- **The page.** The frozen screen, slightly dimmed, with a crosshair. A drag draws the selection: undimmed, a hairline in the accent colour, and its size in device pixels small at its top left corner. A click without dragging (under 4 pixels) selects the whole display. On release a compact box appears below the selection, left edges lined up (above it when there is no room below; inside it, at its bottom and centred, when there is room on neither side), with the focus in it. The box has the task (one line, growing to five), the workspace as a chip (the last one used; Tab and Shift+Tab, Alt+1..9 or a click switch it), and a status line. Dragging again replaces the selection and keeps the text. A press on another display moves the selection there; the text typed on the first stays in its own box.
+- **Enter.** The page asks the shell to crop (`crop(rect)`, in CSS pixels of the overlay, which are the display's DIPs). The main process checks the rectangle, cuts it from the capture at the display's device pixels (edges rounded outwards), saves it as `%TEMP%\intuition\snip-<time>.png` and answers its Windows path. The snips are pruned with the clipboard's clips: the newest 20 of both, together. The page then starts the session with `POST /api/sessions { workspace, prompt, imagePath }`, and all overlays close. An error (a refused crop, an unreachable runner, a 400) shows in the box's status line, and the text stays to send again. A failed send does not save the same selection twice.
+- **Esc** closes every overlay, from the page or, if the page does not answer, from the main process (`before-input-event`). An overlay that closes or crashes closes them all.
+- **The bridge.** `shell/src/snip-preload.ts`, given only to the overlay windows, puts `window.intuitionSnip` in the page with `getCapture()`, `crop(rect)` and `close()`, and nothing else. The main process answers only one of its own overlay windows, from its main frame, on the runner's `/assets/snip.html`. `crop` takes an object with exactly `x`, `y`, `width` and `height`, finite numbers, at least one pixel, inside the display (`acceptedRect` in `shell/src/snip.ts`), and nothing else. The file is written by the main process alone, under `<temp>\intuition`, named from the clock.
+- **Locked.** With Windows on its lock screen the capture comes back empty: the page says nothing was captured, and Esc closes it.
+- **The time.** On this machine (three displays, one at 200%) the overlays were up 570 to 640 ms after the call, about 430 ms of that the capture itself. The spec aims for 300 ms. The self-test prints the time.
+
 ## What pages can do
-The windows are sandboxed, with context isolation and no Node integration. Only the dock's window has a preload script, which gives its page `window.intuitionDock.setState` and nothing else (see "The dock"). Navigation or a redirect to any origin but the runner's is refused, and so is every new window but two: a link to the runner's own chat view opens in the chat window, and the dock's link to `/prompt` opens the pop-up. Pages get no permissions (camera, location, notifications and the rest) except writing to the clipboard. There is no application menu, so no reload or developer-tools shortcuts.
+The windows are sandboxed, with context isolation and no Node integration. Two have a preload script: the dock's, which gives its page `window.intuitionDock.setState` and nothing else (see "The dock"), and the snip overlays', which gives theirs `window.intuitionSnip` with `getCapture`, `crop` and `close` (see "The snip"). Navigation or a redirect to any origin but the runner's is refused, and so is every new window but two: a link to the runner's own chat view opens in the chat window, and the dock's link to `/prompt` opens the pop-up. A link to `http:`, `https:` or `mailto:` elsewhere goes to the default browser instead (see "Links elsewhere" above). Pages get no permissions (camera, location, notifications and the rest) except writing to the clipboard. There is no application menu, so no reload or developer-tools shortcuts.
 
 ## Self-test
-`bun src/shell/selftest-run.ts` runs on this machine only (it prints `skipped` and exits 0 when `CI` is set or there is no `/mnt/c`). It installs the shell, starts a stub runner on a free port, runs `electron.exe <app> --self-test <result file> --runner-url <stub>`, and checks the JSON the shell writes. The self-test uses its own user data folder and its own hotkey (`Control+Alt+Shift+F11`), so it runs beside a running shell. It puts text and then a small image on the clipboard, then puts back what was there (text or an image; other kinds, such as copied files, are not put back). The pop-up flashes on screen for about a second, without taking focus, and so does the chat window. The dock's window is up for some seconds at the top of the screen, with nothing to see in it: the stub's dock page draws no island. The self-test crashes that page's process once, on purpose. Run with Windows on its lock screen, the clipboard steps fail, because nothing can use the clipboard there; the runner says so in a note.
+`bun src/shell/selftest-run.ts` runs on this machine only (it prints `skipped` and exits 0 when `CI` is set or there is no `/mnt/c`). It installs the shell, starts a stub runner on a free port, runs `electron.exe <app> --self-test <result file> --runner-url <stub>`, and checks the JSON the shell writes. The self-test uses its own user data folder and its own hotkeys (`Control+Alt+Shift+F11`, and `Control+Alt+Shift+F10` for the snip), so it runs beside a running shell. It opens no browser: the links it tries are only noted. It puts text and then a small image on the clipboard, then puts back what was there (text or an image; other kinds, such as copied files, are not put back). The pop-up flashes on screen for about a second, without taking focus, and so does the chat window. The dock's window is up for some seconds at the top of the screen, with nothing to see in it: the stub's dock page draws no island. The self-test crashes that page's process once, on purpose. At the end every display shows the snip's frozen overlay twice, for under a second each. Run with Windows on its lock screen, the clipboard steps fail, because nothing can use the clipboard there; the runner says so in a note.
 
 What it covers, on the real Windows desktop:
 - a global hotkey registers;
@@ -98,8 +114,8 @@ What it covers, on the real Windows desktop:
 - a text clipboard is captured and posted, and the stub runner received it;
 - an image clipboard is captured, saved as a PNG under `%TEMP%\intuition`, and its path posted; the file exists under `/mnt/c` and starts with the PNG signature (the test then deletes it);
 - Windows says notifications are supported;
-- the pop-up is created at 560x380, loads `/prompt`, is visible, and is centred on the display under the cursor;
-- a navigation and a new window to another origin are both refused;
+- the pop-up is created at 560x380 (a pixel either way: on a display at 200% left of the primary one Electron reads it back as 559x380), loads `/prompt`, is visible, and is centred on the display under the cursor;
+- a navigation and a new window to another origin are both refused as windows; the links the pages try that the shell would hand to the browser are exactly the `http`, `https` and `mailto` ones, and `file:`, `javascript:` and `ftp:` are not among them;
 - `window.close()` from the page closes the pop-up;
 - with no runner answering, no window opens (the self-test has no `wsl` settings and never starts a runner);
 - start on login can be read (`app.getLoginItemSettings`). The result's `openAtLogin` says which it is on this machine, and either passes. The self-test never sets it;
@@ -113,7 +129,15 @@ What it covers, on the real Windows desktop:
   - a page that loads and never calls `setState` leaves the window ignoring the mouse; and when the page's process is crashed the window hides and ignores the mouse;
   - a call from a page on an origin that is not the runner's changes nothing. (The shell is told for that moment that its runner is at `localhost`, so the same page at `127.0.0.1` is the foreign one. No second server is involved.);
   - the page's new-window link to `/?session=self-test-session` opens the chat window on it, its link to `/prompt` opens the pop-up, and links to another of the runner's paths and to another site open nothing;
-  - with no runner answering, the dock is still there after one check and hidden after the second; with the runner back, the next check loads the page and shows it, idle.
+  - with no runner answering, the dock is still there after one check and hidden after the second; with the runner back, the next check loads the page and shows it, idle;
+- the snip, against the real `/assets/snip.html` (the stub serves `src/web`'s files):
+  - its own snip hotkey registers;
+  - with the overlays made ahead, as in a running shell, opening it puts one overlay on each display, its content exactly at the display's bounds, shown and on top, on `/assets/snip.html`. The time from the call is printed, with when the capture and the drawing were done; only more than 3 seconds fails;
+  - the page sees `window.intuitionSnip` with `close`, `crop` and `getCapture`, and no `require` or `process`;
+  - `crop` of a known rectangle (10.5, 20.25, 101x49.5 DIPs) saves `<temp>\intuition\snip-<time>.png`, and its PNG header has the size that rectangle has at the first display's scale (the test then deletes it);
+  - `crop` with a negative or too large rectangle, `NaN`, `Infinity`, a string, a zero width, an extra key, `null`, an array or a path is refused, every time;
+  - the page's `close()` closes every overlay, and so does Esc sent to one as a key;
+  - when the capture comes back empty (a locked desktop) it fails with one line that says so, and does not judge the crop.
 
 What nobody has seen. The self-test cannot press keys, click or look at the screen, and the shell was written from WSL:
 - the hotkey being pressed: only that it registers. Pressing it, and pressing it again to focus the pop-up, are untested;
@@ -124,14 +148,16 @@ What nobody has seen. The self-test cannot press keys, click or look at the scre
 - any notification on screen: not "the runner is not running", not "the hotkey is taken". Windows may hold back notifications from an app that has no Start-menu shortcut;
 - the dock's links being clicked by a person, and "Show dock" in the tray being ticked and unticked;
 - a clipboard image copied by a real program (a screenshot, a browser), as opposed to the PNG the self-test writes itself;
-- more than one display, and displays with different scaling;
+- more than one display, and displays with different scaling, for the pop-up and the dock. (The snip's self-test ran on three displays, one at 200%, but saw no window, as below.);
+- **the snip on screen. Nobody has seen it.** The self-test opened it on this machine's three displays and checked bounds, the bridge, the crop's size and the closing, and `test/web/snip-ui.ts` drove the page in headless Chromium with a stand-in bridge. Unseen: whether the frozen image lines up with the real screen pixel for pixel on each display (at 200% and at 100% beside it); whether the overlays cover the taskbar; whether the focus lands on the display under the cursor and typing goes into the box at once; whether a drag that crosses from one display to the next behaves; whether the key, pressed while a full-screen program or a game is up, opens it; whether anything flashes before the frozen image is drawn; how long it takes from a real key press; the PNG it saves being looked at by Claude in a real session;
+- a link from a page opening in the default browser;
 - the shell starting the runner: its `wsl.exe` command was run from WSL by `scripts/smoke-start.ts`, never by the shell itself, and never after a real login;
 - start on login being on. `intuition shell login status` was run on 2026-11-13 and said off. Nobody has turned it on, by the checkbox or by the command, so the checkbox, the registry value and a login with it on are all unseen.
 
 `shell start` and `shell stop` were run once by hand on 2026-11-12: the process list showed the shell running after start, still one shell after a second start, and none after stop.
 
 ## Hand-test checklist
-Steps 10 to 18 are the dock, step 9 is the shell starting the runner, and steps 20 to 23 are start on login: nobody has seen any of them yet. The dock steps need a runner that serves the dock's page (`/dock`): with an older runner, step 10 shows no dock at all, and that is right.
+Steps 10 to 18 are the dock, step 9 is the shell starting the runner, steps 20 to 23 are start on login, and steps 24 to 31 are the snip: nobody has seen any of them yet. The dock steps need a runner that serves the dock's page (`/dock`): with an older runner, step 10 shows no dock at all, and that is right.
 
 1. In WSL: `intuition shell install`, then `intuition up`. **See**: a line `intuition runner on http://127.0.0.1:4777 …`, and a small blue-violet disc in the tray (maybe under the `^` arrow), with the tooltip "intuition". No window but the dock (step 10).
 2. Copy some text anywhere, then press Ctrl+Alt+Space. **See**: a small window without a title bar in the middle of the screen the mouse is on, above other windows, with the keyboard focus in it. In WSL, `curl http://127.0.0.1:4777/api/clipboard` shows the text.
@@ -156,6 +182,15 @@ Steps 10 to 18 are the dock, step 9 is the shell starting the runner, and steps 
 21. From the tray: start the shell, untick "Start on login". **See**: `intuition shell login status` says off, and the entry is gone from Startup apps. Tick it again.
 22. `intuition stop` and `intuition shell stop`, then sign out of Windows and in again (or restart). Touch nothing in WSL. **See**: the tray icon within a minute, no console window, the dock once the runner is up, and after some seconds the hotkey opens the pop-up. If a notification said the runner is not running first, note it: ten seconds was too short for WSL to boot.
 23. `intuition shell login off` if you don't want it. **See**: `start on login is off`.
+24. The snip, one display. With only one display connected (or on the primary one), open something recognisable and press Ctrl+Alt+S. **See**: within about half a second the screen goes slightly darker and freezes: a video stops, the clock doesn't tick; the taskbar is dimmed too; a crosshair; a small dark line at the top, "Drag an area, or click for the whole screen". Nothing flashes first.
+25. Drag an area around something. **See**: the area at full brightness with a thin blue edge, its size in pixels small above its top left corner (at 150% scaling, 1.5 times the CSS size you'd expect), and on release a small box just below it with a blinking caret, the workspace you last used in a chip. Type at once, without clicking. **See**: the letters in the box. Drag another area. **See**: the box follows, your text still in it.
+26. Switch the workspace: Tab, Shift+Tab, Alt+2, and a click on the chip. **See**: the chip's name changes each time, the caret stays in the box. Shift+Enter. **See**: a new line, the box grows.
+27. Enter. **See**: the overlay gone at once, the screen live again; in the chat view a new session in that workspace, your text, and the image attached, which Claude reads (it may ask to read the file: allow it). In `%TEMP%\intuition` a `snip-<time>.png` showing exactly the area, sharp, at the screen's own pixels.
+28. Press the key again and press Esc. **See**: gone, nothing started. Press the key again, click once without dragging. **See**: the whole screen selected, the box at its bottom in the middle. Type and press Enter. **See**: a session with the whole screen as its image.
+29. A selection near the bottom of the screen, and one in a corner. **See**: the box above the selection, then kept on the screen at the corner, never off it.
+30. A second display with another scaling (say 100% beside 150% or 200%). Press the key with the mouse on each in turn. **See**: both frozen, each sharp and lined up with what was there; the box on the display under the mouse takes the typing. Select on the second display and send. **See**: the PNG at that display's own pixels. Drag on one display, then on the other. **See**: the first one's selection goes away.
+31. Stop the runner (`intuition stop`) and press the key. **See**: as with the hotkey, no console window; the runner starts within about ten seconds, then the overlays. If not, a notification that the runner is not running.
 
 ## Not built yet
-A Start-menu shortcut for the app id: without one, Windows may hold back the shell's own notifications (the runner is not running, the hotkey is taken).
+- The snip's selection can't be moved or resized once drawn: a new drag replaces it. Nothing can be drawn on it (arrows, boxes).
+- A Start-menu shortcut for the app id: without one, Windows may hold back the shell's own notifications (the runner is not running, the hotkey is taken).
