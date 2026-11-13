@@ -83,7 +83,7 @@ export class Store {
     return session;
   }
 
-  update(id: string, patch: Partial<Pick<SessionMeta, "status" | "claudeSessionId" | "title">>): SessionMeta {
+  update(id: string, patch: Partial<Pick<SessionMeta, "status" | "claudeSessionId" | "title" | "permissionMode">>): SessionMeta {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`no session ${id}`);
     Object.assign(session, patch, { updatedAt: new Date().toISOString() });

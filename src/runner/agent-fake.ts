@@ -1,7 +1,11 @@
 // The fake agent, used when INTUITION_FAKE_AGENT=1 (tests and CI, which have no Claude Code login).
 // It never starts Claude Code and never touches the workspace. One turn is scripted from the prompt:
 //
-//   1. It reports a made-up Claude Code session id, `fake-<uuid>` (or the id it was asked to resume).
+//   1. It reports a made-up Claude Code session id, `fake-<uuid>` (or the id it was asked to resume),
+//      then the permission mode in effect: the one it was asked for, or "default" when the prompt
+//      contains "no auto mode" (as Claude Code does where auto mode is unavailable).
+//   1b. A prompt containing "auto deny" gets a `tool_use` (Bash, `rm -rf fake`) and an `auto_denied`
+//      for it, as the auto-mode classifier denies a call without asking, then its denied `tool_result`.
 //   2. A prompt containing "use tool" gets a `tool_use` (Bash, `echo fake`) and its `tool_result` ("fake").
 //   3. A prompt containing "needs approval" gets a `tool_use` (Write, fake.txt in the workspace) that
 //      asks for approval and waits for the answer, as a real call that would prompt does. Allowed,
@@ -34,6 +38,9 @@ export function fakeFirst(firstPrompt: string): string {
 }
 
 export const NEEDS_APPROVAL = "needs approval";
+export const NO_AUTO_MODE = "no auto mode";
+export const AUTO_DENY = "auto deny";
+export const FAKE_CLASSIFIER = "the fake classifier blocks deletions";
 export const FAKE_REASON = "the fake agent asks before it writes";
 
 export function fakeDecided(decision: ApprovalDecision): string {
@@ -51,7 +58,16 @@ export function fakeDriver(stepMs = 5): AgentDriver {
       const prompts = conversations.get(id) ?? [];
       conversations.set(id, prompts);
       prompts.push(input.prompt);
-      const steps: AgentOutput[] = [{ type: "session_id", id }];
+      const mode = input.prompt.includes(NO_AUTO_MODE) ? "default" : input.permissionMode;
+      const steps: AgentOutput[] = [{ type: "session_id", id }, { type: "permission_mode", mode }];
+      if (input.prompt.includes(AUTO_DENY)) {
+        const toolUseId = `fake-tool-${crypto.randomUUID()}`;
+        steps.push(
+          { type: "event", event: { kind: "tool_use", toolUseId, name: "Bash", input: { command: "rm -rf fake" } } },
+          { type: "event", event: { kind: "auto_denied", toolUseId, toolName: "Bash", input: "rm -rf fake", reason: FAKE_CLASSIFIER } },
+          { type: "event", event: { kind: "tool_result", toolUseId, content: FAKE_CLASSIFIER, isError: true } },
+        );
+      }
       if (input.prompt.includes("use tool")) {
         const toolUseId = `fake-tool-${crypto.randomUUID()}`;
         steps.push(

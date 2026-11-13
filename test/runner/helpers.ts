@@ -18,8 +18,11 @@ export interface TestRunner extends Runner {
   startSession(prompt: string): Promise<SessionMeta>;
 }
 
-/** `dir` reuses an earlier runner's folders, as a restart does. `mounts` stands in for /mnt, which CI lacks. */
-export function testRunner(options: { dir?: string; driver?: AgentDriver; mounts?: string } = {}): TestRunner {
+/**
+ * `dir` reuses an earlier runner's folders, as a restart does. `mounts` stands in for /mnt, which CI lacks.
+ * `permissionMode` goes in the config file at the top, `workMode` on the "work" workspace.
+ */
+export function testRunner(options: { dir?: string; driver?: AgentDriver; mounts?: string; permissionMode?: string; workMode?: string } = {}): TestRunner {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), "intuition-runner-"));
   const workspace = join(dir, "work");
   mkdirSync(workspace, { recursive: true });
@@ -31,7 +34,10 @@ export function testRunner(options: { dir?: string; driver?: AgentDriver; mounts
   };
   writeFileSync(
     env.INTUITION_CONFIG,
-    JSON.stringify({ workspaces: [{ name: "work", path: workspace }, { name: "gone", path: join(dir, "gone") }] }),
+    JSON.stringify({
+      ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
+      workspaces: [{ name: "work", path: workspace, ...(options.workMode ? { permissionMode: options.workMode } : {}) }, { name: "gone", path: join(dir, "gone") }],
+    }),
   );
   const config = loadConfig(env);
   const runner = startServer(config, options.driver, options.mounts);

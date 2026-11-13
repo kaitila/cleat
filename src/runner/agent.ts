@@ -1,6 +1,6 @@
 // The agent driver: what runs one turn of a session. Two implementations: Claude Code through the
 // Agent SDK (agent-claude.ts) and a scripted fake for tests and CI (agent-fake.ts).
-import type { ApprovalDecision, SessionEvent } from "../shared/protocol";
+import type { ApprovalDecision, PermissionMode, SessionEvent } from "../shared/protocol";
 import type { Config } from "./config";
 import { claudeDriver } from "./agent-claude";
 import { fakeDriver } from "./agent-fake";
@@ -23,6 +23,8 @@ export interface TurnInput {
   cwd: string;
   /** Claude Code's session id to continue, or null for a new conversation. */
   resume: string | null;
+  /** The permission mode to ask Claude Code for (config `permissionMode`). It may run in another: see the `permission_mode` output. */
+  permissionMode: PermissionMode;
   /** Aborted when the runner stops: the driver ends the turn without more output. */
   signal: AbortSignal;
   /**
@@ -39,6 +41,8 @@ export type AgentOutput =
   | { type: "session_id"; id: string }
   /** A piece of assistant text as it streams. Not stored. */
   | { type: "delta"; text: string }
+  /** The permission mode Claude Code runs the turn in, as it reports it (at the start, and whenever it changes). */
+  | { type: "permission_mode"; mode: string }
   | { type: "event"; event: NewEvent };
 
 export interface AgentDriver {

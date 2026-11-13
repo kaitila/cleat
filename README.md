@@ -34,6 +34,8 @@ A file, `~/.config/intuition/config.json`, written with these defaults on first 
 }
 ```
 
+`permissionMode` (optional, at the top or on a workspace, which then overrides the top) is `"auto"` (the default) or `"default"`. In `auto`, Claude Code's classifier allows or denies each tool call itself and only the calls it can't decide come to you as Allow / Deny cards; calls it denies show as a note in the chat. In `default`, every call that would prompt waits for you. No other value is accepted. Where auto mode is unavailable Claude Code runs the session in `default`, and the chat says so once. See [D0012](docs/decisions/D0012-auto-mode.md).
+
 A workspace whose folder is missing is listed but can't be picked. Sessions and their events are stored in `~/.local/share/intuition`, and so are the background runner's `runner.pid`, `runner.url` and `runner.log`. `INTUITION_CONFIG`, `INTUITION_DATA_DIR` and `INTUITION_PORT` move the config file, that folder and the port, for the runner and for every command above.
 
 ## Commands
