@@ -289,8 +289,11 @@ export class Sync implements TurnWatcher {
     this.send({ type: "session", session });
   }
 
-  /** Stores the entries after the cursor as events. Returns the messages stored, or null when a runner turn started meanwhile. */
-  private async readNew(id: string, tracked: Tracked): Promise<SessionMessage[] | null> {
+  /**
+   * Stores the entries after the cursor as events. Returns the messages stored, or null when a runner
+   * turn started meanwhile. `live`: they were written just now, so the session is running first.
+   */
+  private async readNew(id: string, tracked: Tracked, live = false): Promise<SessionMessage[] | null> {
     const session = this.store.get(id)!;
     const gen = this.generation.get(id) ?? 0;
     const messages = await this.options.transcripts.messages(session.claudeSessionId!, session.cwd);
@@ -298,6 +301,7 @@ export class Sync implements TurnWatcher {
     const at = tracked.cursor === null ? -1 : messages.findIndex((m) => m.uuid === tracked.cursor);
     // A cursor that is gone (the transcript was compacted or rewritten): nothing can be told new, start over from its end.
     const fresh = tracked.cursor !== null && at === -1 ? [] : messages.slice(at + 1);
+    if (live && fresh.length) this.grew(id, fresh.at(-1)!.type === "assistant");
     for (const message of fresh) {
       for (const event of eventsOf(message)) this.sessions.record(id, event, undefined, timeOf(message));
     }
@@ -320,11 +324,10 @@ export class Sync implements TurnWatcher {
       return;
     }
     if (mtime <= tracked.mtime) return;
-    const fresh = await this.readNew(id, tracked);
+    const fresh = await this.readNew(id, tracked, true);
     if (fresh === null) return;
     tracked.mtime = mtime;
     this.save();
-    if (fresh.length) this.grew(id, fresh.at(-1)!.type === "assistant");
   }
 
   /** True while what the transcript gets is the runner's own turn's. */

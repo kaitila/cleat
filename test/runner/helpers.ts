@@ -7,6 +7,7 @@ import type { ServerMessage, SessionMeta } from "../../src/shared/protocol";
 import type { AgentDriver } from "../../src/runner/agent";
 import { loadConfig, type Config } from "../../src/runner/config";
 import { startServer, type Runner } from "../../src/runner/server";
+import type { SyncOptions } from "../../src/runner/sync";
 
 export interface TestRunner extends Runner {
   dir: string;
@@ -20,9 +21,12 @@ export interface TestRunner extends Runner {
 
 /**
  * `dir` reuses an earlier runner's folders, as a restart does. `mounts` stands in for /mnt, which CI lacks.
- * `permissionMode` goes in the config file at the top, `workMode` on the "work" workspace.
+ * `permissionMode` goes in the config file at the top, `workMode` on the "work" workspace. `sync`
+ * replaces the transcript sync's reader and timings (with the fake agent it reads no transcripts).
  */
-export function testRunner(options: { dir?: string; driver?: AgentDriver; mounts?: string; permissionMode?: string; workMode?: string } = {}): TestRunner {
+export function testRunner(
+  options: { dir?: string; driver?: AgentDriver; mounts?: string; permissionMode?: string; workMode?: string; sync?: Partial<SyncOptions> } = {},
+): TestRunner {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), "intuition-runner-"));
   const workspace = join(dir, "work");
   mkdirSync(workspace, { recursive: true });
@@ -40,7 +44,7 @@ export function testRunner(options: { dir?: string; driver?: AgentDriver; mounts
     }),
   );
   const config = loadConfig(env);
-  const runner = startServer(config, options.driver, options.mounts);
+  const runner = startServer(config, options.driver, options.mounts, options.sync);
   const get = (path: string) => fetch(runner.url + path);
   const post = (path: string, body: unknown) =>
     fetch(runner.url + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
