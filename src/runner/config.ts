@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { DEFAULT_PORT, type PermissionMode, type Workspace } from "../shared/protocol";
 
-/** Only these two: bypassPermissions, acceptEdits and the rest are refused when the config is read. */
+/** Only these two: every other SDK mode (the ones that allow calls without the classifier or the person) is refused when the config is read. */
 const Mode = z.enum(["auto", "default"]);
 
 export const DEFAULT_PERMISSION_MODE: PermissionMode = "auto";

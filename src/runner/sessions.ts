@@ -131,9 +131,9 @@ export class Sessions {
   }
 
   /**
-   * The mode Claude Code reports for the turn: stored on the session, and logged when it changes. A session that asked
-   * for auto and runs in another mode gets one `permission_mode` event, the first time, so the
-   * person knows why calls come to them.
+   * The mode Claude Code reports for the turn: stored on the session, and logged when it changes.
+   * A session that asked for auto and runs in another mode gets one `permission_mode` event, the
+   * first time, so the person knows why calls come to them.
    */
   private modeInEffect(id: string, requested: PermissionMode, mode: string): void {
     const before = this.store.get(id)!.permissionMode;
