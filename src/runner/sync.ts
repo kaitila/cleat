@@ -339,7 +339,9 @@ export class Sync implements TurnWatcher {
   private grew(id: string, assistant: boolean): void {
     this.live.set(id, { at: this.options.now(), assistant });
     const session = this.store.get(id)!;
-    if (session.status !== "running") this.send({ type: "session", session: this.store.update(id, { status: "running" }) });
+    if (session.status !== "running" || !session.terminalTurn) {
+      this.send({ type: "session", session: this.store.update(id, { status: "running", terminalTurn: true }) });
+    }
   }
 
   private settle(id: string): void {

@@ -281,6 +281,15 @@ export async function restart(env: Env = process.env, log: Log = console.log, op
   return start(env, log, options);
 }
 
+/** The URL of the runner that answers: the one this data folder recorded, else the configured port's. Null when none does. */
+export async function runnerUrl(env: Env = process.env): Promise<string | null> {
+  const f = files(env);
+  const running = recorded(f);
+  if (running && (await answers(running.url))) return running.url;
+  const configured = configuredUrl(f.config);
+  return configured && (await answers(configured)) ? configured : null;
+}
+
 /** Says whether the runner runs. Returns 0 when it answers, 1 when not. */
 export async function status(env: Env = process.env, log: Log = console.log): Promise<number> {
   const f = files(env);

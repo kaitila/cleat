@@ -84,10 +84,14 @@ export class Store {
     return session;
   }
 
-  /** updatedAt is now unless the patch gives one (an imported session's: when its transcript was written). */
-  update(id: string, patch: Partial<Pick<SessionMeta, "status" | "claudeSessionId" | "title" | "permissionMode" | "updatedAt">>): SessionMeta {
+  /**
+   * updatedAt is now unless the patch gives one (an imported session's: when its transcript was written).
+   * A patch that sets the status without terminalTurn ends it: only the sync's own update sets it.
+   */
+  update(id: string, patch: Partial<Pick<SessionMeta, "status" | "claudeSessionId" | "title" | "permissionMode" | "updatedAt" | "terminalTurn">>): SessionMeta {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`no session ${id}`);
+    if (patch.status !== undefined && patch.terminalTurn === undefined) delete session.terminalTurn;
     Object.assign(session, { updatedAt: new Date().toISOString() }, patch);
     this.save();
     return session;

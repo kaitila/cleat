@@ -37,6 +37,11 @@ export interface SessionMeta {
   /** Where the session came from. The runner always sends it; a session stored before it existed reads as "intuition". */
   source?: SessionSource;
   status: SessionStatus;
+  /**
+   * True while the session is running only because its transcript grows: a turn arriving from a
+   * terminal (or any other Claude Code), not one the runner runs. Absent otherwise.
+   */
+  terminalTurn?: true;
   createdAt: string;
   updatedAt: string;
   /** seq of the session's newest stored event. */

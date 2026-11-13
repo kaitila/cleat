@@ -9,6 +9,7 @@ import { Store } from "../../src/runner/store";
 import { startServer, type Runner } from "../../src/runner/server";
 import { testRunner } from "../runner/helpers";
 import { MARKDOWN_EXPECTED, markdownProblems, seedMarkdown } from "./markdown-sample";
+import { assistantEntry, MemoryTranscripts, userEntry } from "./chat-transcripts";
 
 const PLAYWRIGHT = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
 /** Markup that would run if any of it reached the page as HTML. */
@@ -180,6 +181,75 @@ try {
   check(await page.evaluate(() => document.activeElement?.id === "reply-text"), "and has the focus back");
   check((await page.locator(".msg.user").count()) === 2 && (await page.locator(".msg.assistant").count()) === 2, "each message is on the page once");
 
+  check(await page.locator("#head .resume").isVisible(), "a session with a Claude Code session id offers 'Continue in terminal'");
+
+  // ---- a session from the terminal: its mark, a turn arriving from it, Send anyway, Continue in terminal ----
+  {
+    const transcripts = new MemoryTranscripts();
+    const term = testRunner({ sync: { transcripts, pollMs: 50, idleMs: 400 } });
+    try {
+      const work = term.config.workspaces.find((w) => w.name === "work")!.path;
+      const first = "started in a terminal";
+      // Written five minutes ago: imported idle, and not taken as open in a terminal.
+      transcripts.write("term-1", work, [userEntry(first), assistantEntry("hello from the terminal")], Date.now() - 5 * 60_000);
+      await term.startSession("one of the runner's own");
+      await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: term.url });
+      await page.goto(`${term.url}/`);
+      const termRow = page.locator(".session", { hasText: first });
+      await termRow.waitFor();
+      check((await page.locator(".session .terminal-mark").count()) === 1, "only the session from the terminal has the terminal mark");
+      const mark = termRow.locator(".terminal-mark");
+      check((await mark.getAttribute("title")) === "started in the terminal" && (await mark.textContent()) === ">_", "a quiet glyph whose tooltip says 'started in the terminal'");
+      await termRow.click();
+      await page.locator(".msg.assistant", { hasText: "hello from the terminal" }).waitFor();
+      check(true, "its history is read from the transcript");
+      const resumeButton = page.locator("#head .resume");
+      check((await resumeButton.textContent()) === "Continue in terminal", "the head offers 'Continue in terminal'");
+      await resumeButton.click();
+      await page.locator("#head .resume", { hasText: "Copied" }).waitFor();
+      const copied = await page.evaluate(() => navigator.clipboard.readText());
+      check(copied === `cd ${work} && claude --resume term-1`, `it copies the command that continues it (${copied})`);
+      check(true, "and says Copied");
+      await page.locator("#head .resume", { hasText: "Continue in terminal" }).waitFor({ timeout: 3000 });
+      check(true, "then its label comes back");
+      // A turn arrives from the terminal: the transcript grows while the runner runs nothing.
+      const typedThere = "typed in the terminal";
+      transcripts.write("term-1", work, [userEntry(typedThere)]);
+      await page.locator("#status", { hasText: "in terminal" }).waitFor();
+      check((await page.locator("#dot").getAttribute("data-status")) === "running", "a turn arriving from the terminal: the head says 'in terminal' beside the running dot");
+      await page.locator(".msg.user .user-text", { hasText: typedThere }).waitFor();
+      check(true, "and its prompt streams in");
+      check(!(await page.locator("#reply-text").isDisabled()) && (await page.locator("#reply-hint").textContent()) !== "Working. You can reply when this turn ends.", "the reply box stays on, without the usual running hint");
+      await shot("chat-terminal-turn-light");
+      const replyBox = page.locator("#reply-text");
+      const here = "and this from intuition";
+      await replyBox.fill(here);
+      await replyBox.press("Enter");
+      const anyway = page.locator("#reply-hint button", { hasText: "Send anyway" });
+      await anyway.waitFor();
+      check((await page.locator("#reply-hint").textContent())?.startsWith("It looks open in a terminal."), "a reply answered 409 'open in a terminal' says so inline");
+      check((await replyBox.inputValue()) === here, "and the typed text is kept");
+      check((await page.locator(".msg.user").count()) === 2, "and nothing was added to the stream");
+      await shot("chat-send-anyway-light");
+      await page.emulateMedia({ colorScheme: "dark" });
+      await shot("chat-send-anyway-dark");
+      await page.emulateMedia({ colorScheme: "light" });
+      const bodies: unknown[] = [];
+      page.on("request", (req: Any) => {
+        if (req.method() === "POST" && req.url().endsWith("/messages")) bodies.push(req.postDataJSON());
+      });
+      await anyway.click();
+      await page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${here}` }).waitFor();
+      check(JSON.stringify(bodies) === JSON.stringify([{ prompt: here, force: true }]), "'Send anyway' repeats the request with force: true, and it goes through");
+      await page.locator("#reply-text:not([disabled])").waitFor();
+      check((await replyBox.inputValue()) === "" && (await page.locator("#reply-hint button").count()) === 0, "then the box is empty and the offer gone");
+      await page.locator("#status", { hasText: "idle" }).waitFor();
+      check(true, "and the head no longer says 'in terminal'");
+    } finally {
+      await term.stop();
+    }
+  }
+
   // ---- a tool call that needs approval ----
   const needs = "this one needs approval";
   const waiting = await api.startSession(needs);
@@ -245,6 +315,7 @@ try {
   await page.goto(`${runner.url}/?session=${hostileId}`);
   await page.locator(".note", { hasText: "Done · 4.2 s · $0.031" }).waitFor();
   check((await page.locator('.session[aria-current="true"] .session-title').textContent()) === HOSTILE, "/?session=<id> opens that session");
+  check(await page.locator("#head .resume").isHidden(), "a session with no Claude Code session id has no 'Continue in terminal'");
   check((await page.locator(".session-time").last().textContent()) === "3h", "the sidebar shows a short relative time, oldest activity last");
   check((await page.locator("body img, body script").count()) === 0 && (await page.evaluate(() => (window as Any).__xss)) === undefined, "markup in a title, a prompt, an answer and a tool result made no element and ran nothing");
   const bad = page.locator("details.tool");
@@ -341,7 +412,7 @@ try {
 
   const elsewhere = requested.filter((u) => !/^(?:data|blob|about):/.test(u) && new URL(u).hostname !== "127.0.0.1");
   check(requested.length > 0 && elsewhere.length === 0, `no request left 127.0.0.1 (${elsewhere.join(" ") || "none did"})`);
-  check(pageErrors.length === 0 || pageErrors.every((e) => /WebSocket|ERR_CONNECTION_REFUSED|404/.test(e)), `the page logged no errors of its own (${pageErrors.join(" | ") || "none"})`);
+  check(pageErrors.length === 0 || pageErrors.every((e) => /WebSocket|ERR_CONNECTION_REFUSED|404|409/.test(e)), `the page logged no errors of its own (${pageErrors.join(" | ") || "none"})`);
   console.log(`chat-ui: passed (${passed.length} checks)`);
 } catch (e) {
   failed = true;

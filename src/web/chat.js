@@ -8,14 +8,19 @@ import {
   cutResult,
   decidedLabel,
   inputText,
+  isOpenInTerminal,
+  OPEN_IN_TERMINAL_HINT,
   pickSession,
   relativeTime,
   replyState,
   resultLine,
-  statusLabel,
+  sessionStatus,
+  startedInTerminal,
+  TERMINAL_MARK_TITLE,
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
+import { resumeControl } from "./chat-resume.js";
 import { renderMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
@@ -34,7 +39,10 @@ const els = {
   reply: $("reply"),
   text: $("reply-text"),
   hint: $("reply-hint"),
+  meta: $("meta"),
 };
+const resume = resumeControl(document);
+els.meta.append(resume.el);
 
 /** An element with a class and text. The text is set as textContent, so it is never parsed. */
 function h(tag, className, text) {
@@ -67,6 +75,8 @@ let loadErrorEl = null;
 const typed = new Map();
 let sending = false;
 let replyError = "";
+/** The session whose last reply was refused as open in a terminal: its hint offers "Send anyway". */
+let openElsewhere = null;
 let wantFocus = true;
 /** True while the person is at the bottom of the stream: new events keep it there. */
 let stick = true;
@@ -359,15 +369,27 @@ function renderSidebar() {
         e.preventDefault();
         select(session.id, true);
       });
-      row = { item, link, dot: h("span", "dot"), title: h("span", "session-title"), time: h("time", "session-time muted small"), workspace: h("span", "session-workspace muted small") };
+      row = {
+        item,
+        link,
+        dot: h("span", "dot"),
+        title: h("span", "session-title"),
+        time: h("time", "session-time muted small"),
+        workspace: h("span", "session-workspace muted small"),
+        place: h("span"),
+        mark: terminalMark(),
+      };
       link.append(row.dot, row.title, row.time, row.workspace);
       item.append(link);
       rows.set(session.id, row);
     }
     row.dot.dataset.status = session.status;
-    row.dot.title = statusLabel(session.status);
+    row.dot.title = sessionStatus(session);
     row.title.textContent = session.title || "Untitled";
-    row.workspace.textContent = session.workspace;
+    row.place.textContent = session.workspace;
+    // The mark is in the line only for a session started in the terminal.
+    const parts = startedInTerminal(session) ? [row.mark, row.place] : [row.place];
+    if (row.workspace.childNodes.length !== parts.length) row.workspace.replaceChildren(...parts);
     row.time.dateTime = session.updatedAt;
     row.time.textContent = relativeTime(session.updatedAt, now);
     if (session.id === selected) row.link.setAttribute("aria-current", "true");
@@ -380,6 +402,15 @@ function renderSidebar() {
   els.stream.hidden = sessions.size === 0;
 }
 
+/** The quiet glyph of a session started in the terminal, with its words as the tooltip. */
+function terminalMark() {
+  const mark = h("span", "terminal-mark mono", ">_");
+  mark.title = TERMINAL_MARK_TITLE;
+  mark.setAttribute("aria-label", TERMINAL_MARK_TITLE);
+  mark.setAttribute("role", "img");
+  return mark;
+}
+
 function renderHead() {
   const session = selected ? sessions.get(selected) : undefined;
   els.head.hidden = !session;
@@ -388,7 +419,8 @@ function renderHead() {
   els.title.textContent = session.title || "Untitled";
   els.dot.dataset.status = session.status;
   els.workspace.textContent = session.workspace;
-  els.status.textContent = statusLabel(session.status);
+  els.status.textContent = sessionStatus(session);
+  resume.show(session);
 }
 
 // ---------- the reply box ----------
@@ -405,7 +437,15 @@ function renderReply() {
   const enabled = state.enabled && !sending;
   if (!enabled && document.activeElement === els.text) wantFocus = true;
   els.text.disabled = !enabled;
-  els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : sending ? "Sending." : state.hint;
+  if (!sending && openElsewhere === selected && selected) {
+    // Refused as open in a terminal: say so, and offer to send it all the same.
+    const anyway = h("button", "send-anyway quiet small", "Send anyway");
+    anyway.type = "button";
+    anyway.addEventListener("click", () => void send(true));
+    els.hint.replaceChildren(`${OPEN_IN_TERMINAL_HINT} `, anyway);
+  } else {
+    els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : sending ? "Sending." : state.hint;
+  }
   // Back to the box once, at the start and after a turn, unless the person has moved on to something else.
   if (enabled) {
     const active = document.activeElement;
@@ -414,21 +454,31 @@ function renderReply() {
   }
 }
 
-async function send() {
+/** Sends the typed reply. `force`: even though the session looks open in a terminal ("Send anyway"). */
+async function send(force = false) {
   const id = selected;
   const prompt = els.text.value;
   if (!id || sending || !prompt.trim() || !replyState(sessions.get(id)).enabled) return;
   sending = true;
   replyError = "";
+  openElsewhere = null;
   wantFocus = true;
   renderReply();
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify(force ? { prompt, force: true } : { prompt }),
     });
-    if (!res.ok) throw new Error(await errorText(res));
+    if (!res.ok) {
+      const error = await errorText(res);
+      // The typed text stays in the box for "Send anyway".
+      if (isOpenInTerminal(res.status, error)) {
+        openElsewhere = id;
+        return;
+      }
+      throw new Error(error);
+    }
     // The reply itself arrives as a user event on the WebSocket, like everything else in the stream.
     typed.delete(id);
     if (selected === id) {
@@ -477,6 +527,7 @@ function select(id, push = false) {
   els.stream.replaceChildren();
   stick = true;
   replyError = "";
+  openElsewhere = null;
   els.text.value = (id && typed.get(id)) || "";
   renderSidebar();
   renderHead();

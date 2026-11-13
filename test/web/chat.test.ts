@@ -14,13 +14,19 @@ import {
   cutResult,
   decidedLabel,
   inputText,
+  isOpenInTerminal,
   pickSession,
   relativeTime,
   replyState,
   resultLine,
+  resumeCommand,
+  sessionStatus,
+  shellWord,
+  startedInTerminal,
   toolSummary,
   unknownNote,
 } from "../../src/web/chat-format.js";
+import { OPEN_IN_TERMINAL } from "../../src/shared/protocol";
 import { testRunner } from "../runner/helpers";
 
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
@@ -52,7 +58,8 @@ describe("served by the runner", () => {
 
   test("every module chat.js imports is one the runner serves", async () => {
     const imports = [...source("chat.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports).toEqual(["chat-format.js", "markdown.js"]);
+    expect(imports).toEqual(["chat-format.js", "chat-resume.js", "markdown.js"]);
+    expect([...source("chat-resume.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     for (const file of imports) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
   });
 });
@@ -162,6 +169,32 @@ describe("the rest of the helpers", () => {
     expect(replyState(s("a", "", "idle")).enabled).toBe(true);
     expect(replyState(s("a", "", "error")).enabled).toBe(true);
   });
+  test("a turn arriving from the terminal: 'in terminal', and the reply box stays on (the runner asks for force)", () => {
+    const live = { ...s("a", "", "running"), terminalTurn: true };
+    expect(sessionStatus(live)).toBe("in terminal");
+    expect(sessionStatus(s("a", "", "running"))).toBe("working");
+    expect(sessionStatus({ ...s("a", "", "idle"), terminalTurn: true })).toBe("idle");
+    expect(replyState(live).enabled).toBe(true);
+    expect(replyState(live).hint).not.toBe(replyState(s("a", "", "running")).hint);
+  });
+  test("the terminal mark is for sessions whose source is terminal", () => {
+    expect(startedInTerminal({ source: "terminal" })).toBe(true);
+    expect(startedInTerminal({ source: "intuition" })).toBe(false);
+    expect(startedInTerminal({})).toBe(false);
+  });
+  test("the runner's OPEN_IN_TERMINAL 409 is told apart from other refusals", () => {
+    expect(isOpenInTerminal(409, OPEN_IN_TERMINAL)).toBe(true);
+    expect(isOpenInTerminal(409, "a turn is running: wait for it to finish")).toBe(false);
+    expect(isOpenInTerminal(400, OPEN_IN_TERMINAL)).toBe(false);
+    expect(isOpenInTerminal(409, undefined)).toBe(false);
+  });
+  test("resumeCommand: cd to the folder, then claude --resume, quoted for the shell", () => {
+    expect(resumeCommand({ claudeSessionId: null, cwd: "/home/a/w" })).toBeNull();
+    expect(resumeCommand(undefined)).toBeNull();
+    expect(resumeCommand({ claudeSessionId: "abc-123", cwd: "/home/a/w" })).toBe("cd /home/a/w && claude --resume abc-123");
+    expect(resumeCommand({ claudeSessionId: "abc", cwd: "/home/a/my work" })).toBe("cd '/home/a/my work' && claude --resume abc");
+    expect(shellWord("it's $here")).toBe(`'it'\\''s $here'`);
+  });
   test("resultLine", () => {
     expect(resultLine({ ok: true })).toBe("Done");
     expect(resultLine({ ok: true, durationMs: 4210, costUsd: 0.0312 })).toBe("Done · 4.2 s · $0.031");
@@ -185,7 +218,7 @@ describe("the sources", () => {
     expect(code).not.toMatch(/\b(document|window|navigator|location|fetch|WebSocket)\b/);
   });
   test("no script of the page builds markup from text", () => {
-    for (const file of ["chat.js", "chat-format.js"]) {
+    for (const file of ["chat.js", "chat-format.js", "chat-resume.js"]) {
       expect(source(file)).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|document\.write|DOMParser|createContextualFragment|setHTML/);
     }
     expect(source("chat.html")).not.toMatch(/\son[a-z]+\s*=/i);

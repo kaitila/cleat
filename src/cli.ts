@@ -2,6 +2,7 @@
 // The app's own commands: `intuition <command>` once `bun src/cli.ts link` has put it on the PATH, or `bun src/cli.ts <command>`.
 import { pick } from "./cli/command";
 import { link, unlink } from "./cli/link";
+import { resume } from "./cli/resume";
 import * as runner from "./cli/runner";
 import { parseLogin } from "../shell/src/login";
 import { install, isCurrent, isInstalled, login, pidFile, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
@@ -18,6 +19,9 @@ const USAGE = `usage: intuition <command>     (no command: intuition up)
   stop            stop the runner
   status          say whether the runner runs (exit code 0 when it does, 1 when not)
   logs            print the end of the runner's log
+  resume [id]     continue a session in this terminal, in Claude Code itself: runs claude --resume in its folder.
+                  No id: the newest session. An id may be the runner's or Claude Code's, or the start of one;
+                  one that matches no session, or several, prints them
 
   shell install   bundle the Windows shell and install it, with Electron, under the Windows user's AppData\\Local\\intuition
   shell start     start the Windows shell (tray icon, hotkey and dock)
@@ -53,6 +57,7 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
   stop: () => runner.stop(),
   status: () => runner.status(),
   logs: () => runner.logs(),
+  resume: (rest) => resume(rest[0]),
   up: async () => {
     // A runner kept because sessions are in the way still serves: the shell is brought up to date, and the exit code says so.
     const code = await runner.start();
@@ -100,7 +105,7 @@ const picked = pick(process.argv.slice(2), Object.keys(commands));
 if (!picked) usageError();
 const { name, rest } = picked;
 /** How many words each command takes after its name; the others take none. */
-const takes: Record<string, number> = { start: 1, restart: 1, "shell login": 1, link: 1, unlink: 1 };
+const takes: Record<string, number> = { start: 1, restart: 1, resume: 1, "shell login": 1, link: 1, unlink: 1 };
 if (rest.length > (takes[name] ?? 0)) usageError();
 try {
   const code = await commands[name]!(rest);
