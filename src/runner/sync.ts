@@ -361,11 +361,17 @@ export class Sync implements TurnWatcher {
     const tracked = this.file.sessions[id];
     if (!tracked || tracked.loaded) return Promise.resolve();
     return this.lock(id, async () => {
-      if (tracked.loaded || !this.store.get(id)?.claudeSessionId) return;
-      const info = await this.options.transcripts.info(this.store.get(id)!.claudeSessionId!, this.store.get(id)!.cwd);
-      if ((await this.readNew(id, tracked)) === null) return;
-      if (info) tracked.mtime = Math.max(tracked.mtime, info.lastModified);
-      this.save();
+      const session = this.store.get(id);
+      if (tracked.loaded || !session?.claudeSessionId) return;
+      try {
+        const info = await this.options.transcripts.info(session.claudeSessionId, session.cwd);
+        if ((await this.readNew(id, tracked)) === null) return;
+        if (info) tracked.mtime = Math.max(tracked.mtime, info.lastModified);
+        this.save();
+      } catch (e) {
+        // Left unread: the next request tries again.
+        this.log(`sync: reading ${session.claudeSessionId} failed: ${(e as Error).message}`);
+      }
     });
   }
 
@@ -378,9 +384,15 @@ export class Sync implements TurnWatcher {
     await this.load(id);
     const session = this.store.get(id);
     if (!session?.claudeSessionId) return { openElsewhere: false };
-    const info = await this.options.transcripts.info(session.claudeSessionId, session.cwd);
+    let info: SDKSessionInfo | undefined;
+    try {
+      info = await this.options.transcripts.info(session.claudeSessionId, session.cwd);
+      if (info) await this.lock(id, () => this.grow(id, info!.lastModified));
+    } catch (e) {
+      // The transcript can't be read: the reply resumes it all the same, as before the sync.
+      this.log(`sync: reading ${session.claudeSessionId} before a reply failed: ${(e as Error).message}`);
+    }
     if (!info) return { openElsewhere: false };
-    await this.lock(id, () => this.grow(id, info.lastModified));
     const ownWrite = this.file.sessions[id]?.ownWrite ?? 0;
     const now = this.options.now();
     return { openElsewhere: now - info.lastModified < OPEN_MS && info.lastModified > ownWrite + OWN_SLACK_MS };

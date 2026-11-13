@@ -316,3 +316,22 @@ describe("replying to a session open in a terminal", () => {
     expect(((await res.json()) as { error: string }).error).toBe(BUSY);
   });
 });
+
+describe("a transcript that can't be read", () => {
+  test("its events stay unread and a reply still resumes it, instead of failing the request", async () => {
+    const t = new FakeTranscripts();
+    const r = runner(t, { driver: writingDriver(t) });
+    t.write("term-1", workPath(r), [user("hello"), assistant("hi")], Date.now() - OPEN_MS - 10_000);
+    const session = await terminalSession(r);
+    t.messages = async () => {
+      throw new Error("unreadable");
+    };
+    t.info = async () => {
+      throw new Error("unreadable");
+    };
+    const events = await r.get(`/api/sessions/${session.id}/events`);
+    expect(events.status).toBe(200);
+    expect(((await events.json()) as EventsResponse).events).toEqual([]);
+    expect((await r.post(`/api/sessions/${session.id}/messages`, { prompt: "still there?" })).status).toBe(202);
+  });
+});
