@@ -536,8 +536,10 @@ async function openSnip(inactive: boolean): Promise<SnipOpened | null> {
   const warm = overlays.length > 0 && overlaysFor === displaysKey(displays) && !warming;
   phases.warm = warm ? 1 : 0;
   try {
-    // Waiting overlays were loaded from a runner that answered; the runner is checked only when they have to be made now.
-    if (!warm) {
+    // Waiting overlays were loaded from a runner that answered: they show at once, and the runner is
+    // checked (and started, if it has gone) meanwhile, by the time the task is sent.
+    if (warm) void ensureRunner();
+    else {
       if (!(await ensureRunner())) {
         dropOverlays();
         runnerDown();
