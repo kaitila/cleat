@@ -2,7 +2,13 @@
    hairline, one quiet line. Layout only: every colour, size, radius and border is a token or a
    component of base.css (docs/design.md). */
 body { overflow: hidden; }
-.prompt { height: 100%; display: flex; flex-direction: column; }
+/* The window's contents rise into place on the gentle spring as it opens. */
+.prompt {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  animation: page-in var(--dur-gentle) var(--ease-gentle) backwards, fade-in var(--dur-fade) var(--ease) backwards;
+}
 
 /* Workspaces: real radio buttons (Tab and the arrow keys work), drawn as chips with their key. */
 .workspaces {
@@ -13,8 +19,22 @@ body { overflow: hidden; }
   min-height: calc(var(--control) + var(--space-3) * 2 + var(--hairline));
   padding: var(--space-3);
   border-bottom: var(--hairline) solid var(--line);
+  position: relative;
 }
-.workspace { position: relative; display: inline-flex; }
+.workspace { position: relative; z-index: 1; display: inline-flex; }
+/* The chosen workspace's background: one mark behind the chips that prompt.js moves to the chip
+   chosen, with a transform only, on the bouncy spring, so the choice slides across. */
+.workspace-mark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: var(--control);
+  border-radius: var(--radius-s);
+  background: var(--selected);
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.workspace-mark[data-moving] { transition: transform var(--dur-bouncy) var(--ease-bouncy); }
 .workspace input {
   position: absolute;
   inset: 0;
@@ -35,7 +55,9 @@ body { overflow: hidden; }
   transition: background-color var(--motion) var(--ease), color var(--motion) var(--ease);
 }
 .workspace input:hover:not(:disabled) + span { background: var(--hover); }
-.workspace input:checked + span { background: var(--selected); color: var(--text); }
+.workspace input:checked + span { color: var(--text); }
+/* Until the mark is placed (or without script) the chip carries the background itself. */
+.workspaces:not([data-mark]) .workspace input:checked + span { background: var(--selected); }
 .workspace input:checked + span kbd { border-color: var(--muted); color: var(--text); }
 .workspace input:focus-visible + span { outline: var(--ring) solid var(--accent); outline-offset: var(--hairline); }
 .workspace input:disabled { cursor: default; }
@@ -70,6 +92,8 @@ body { overflow: hidden; }
   margin: 0 var(--space-3) var(--space-3);
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
 }
+/* It arrives (data-in) with a little spring, up from below. */
+.clipboard[data-in] { transform-origin: 50% 100%; animation: pop-in var(--dur-bouncy) var(--ease-bouncy) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
 .clip-label { flex: none; }
 .clip-text {
   flex: 1;
@@ -111,3 +135,12 @@ body { overflow: hidden; }
 .keys { flex: none; display: flex; align-items: center; gap: var(--space-1); white-space: nowrap; font-size: var(--text-xs); }
 .keys span { margin-right: var(--space-2); }
 .keys span:last-child { margin-right: 0; }
+
+@keyframes page-in { from { transform: translateY(calc(var(--rise) / 2)); } }
+@keyframes pop-in { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
+@keyframes fade-in { from { opacity: 0; } }
+
+/* Reduced motion: base.css stops every animation; the fades come back, plain. The mark jumps. */
+@media (prefers-reduced-motion: reduce) {
+  .prompt, .clipboard[data-in] { animation: fade-in var(--dur-fade) linear backwards !important; }
+}

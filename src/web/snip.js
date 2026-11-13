@@ -1,10 +1,13 @@
 // The snip overlay (/assets/snip.html): the shell opens one per display on the snip hotkey, each on
 // its own frozen capture. Drag an area (a click takes the whole display), and a prompt box appears
-// beside it with the focus in it: type the task, Enter starts the session with the area attached.
+// under it, centred, with the focus in it: type the task, Enter starts the session with the area attached.
 // Tab or Alt+1..9 switches the workspace, Shift+Enter is a new line, Esc closes every overlay.
 // The shell's half is window.intuitionSnip (shell/src/snip-preload.ts): getCapture(), crop(rect)
 // and close(). The runner's half is POST /api/sessions (docs/protocol.md).
 import { altDigit, anchorBox, anchorLabel, devicePixels, errorText, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, UNREACHABLE, wholeDisplay } from "./snip-geometry.js";
+
+/** A selection narrower or shorter than this, in CSS pixels, shows no corner marks: they would cover it. */
+const SMALL = 32;
 
 /** Fetches JSON from the runner. Throws an Error whose message is the line to show. */
 async function api(path, init) {
@@ -70,20 +73,30 @@ function start() {
     if (workspace === null) say("no workspace folder exists: check the config file", "error");
   }
 
-  /** The shade with the selection cut out of it, the hairline round it, and its size. */
+  /**
+   * The shade with the selection cut out of it, the hairline round it, and its size. The edge is
+   * drawn on the device pixels the crop takes (devicePixels), one device pixel wide, so it is crisp
+   * at any display scale and what is inside it is what is saved. Drawn at once on every move: the
+   * selection follows the pointer with no easing.
+   */
   function drawSelection() {
     if (sel === null) {
       shade.style.clipPath = "";
       selection.hidden = true;
+      delete selection.dataset.settle;
       size.hidden = true;
       return;
     }
+    const ratio = window.devicePixelRatio || 1;
+    document.documentElement.style.setProperty("--device-px", `${1 / ratio}px`);
     const { width: w, height: h } = viewport();
-    const { x, y, width, height } = sel;
+    const px = devicePixels(sel, ratio, viewport());
+    const [x, y, width, height] = [px.x / ratio, px.y / ratio, px.width / ratio, px.height / ratio];
     shade.style.clipPath = `path(evenodd, "M0 0H${w}V${h}H0Z M${x} ${y}H${x + width}V${y + height}H${x}Z")`;
     Object.assign(selection.style, { left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px` });
-    selection.hidden = width < 1 && height < 1;
-    size.textContent = sizeText(devicePixels(sel, window.devicePixelRatio || 1, viewport()));
+    selection.hidden = sel.width < 1 && sel.height < 1;
+    selection.toggleAttribute("data-small", width < SMALL || height < SMALL);
+    size.textContent = sizeText(px);
     size.hidden = selection.hidden;
     placeLabel();
   }
@@ -109,19 +122,31 @@ function start() {
     placeLabel(at.placement);
   }
 
+  /** Starts a CSS animation over: the attribute off, a style read so the browser sees it gone, on again. */
+  function replay(el, name) {
+    el.removeAttribute(name);
+    void el.offsetWidth;
+    el.setAttribute(name, "");
+  }
+
   function showBox() {
     box.hidden = false;
     fit();
+    // The focus first, so typing never waits for the spring.
     task.focus();
+    replay(box, "data-in");
+    replay(selection, "data-settle");
   }
 
   function onDown(e) {
-    if (e.button !== 0 || box.contains(e.target) || busy) return;
+    if (e.button !== 0 || box.contains(e.target) || busy || closing) return;
     e.preventDefault();
     press = { x: e.clientX, y: e.clientY };
     sel = selectionOf(press, press, viewport());
     hint.hidden = true;
     box.hidden = true;
+    delete box.dataset.in;
+    delete selection.dataset.settle;
     drawSelection();
     document.documentElement.setPointerCapture?.(e.pointerId);
   }
@@ -171,7 +196,7 @@ function start() {
         body: JSON.stringify(sessionBody(workspace, prompt, imagePath)),
       });
       say("Started");
-      bridge.close();
+      close();
     } catch (e) {
       // The task stays in the box, to send again.
       say(e.message, "error");
@@ -181,9 +206,10 @@ function start() {
   }
 
   function onKey(e) {
+    if (closing) return e.preventDefault();
     if (e.key === "Escape") {
       e.preventDefault();
-      bridge?.close();
+      close();
       return;
     }
     if (box.hidden) return;
@@ -207,6 +233,16 @@ function start() {
       workspace = w.name;
       drawWorkspace();
     }
+  }
+
+  /** Closes every overlay, after the marks have faded back to the frozen screen (--dur-out). */
+  let closing = false;
+  function close() {
+    if (!bridge || closing) return;
+    closing = true;
+    document.body.dataset.closing = "";
+    const ms = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--dur-out")) || 0;
+    setTimeout(() => bridge.close(), ms);
   }
 
   if (!bridge) {
@@ -253,6 +289,8 @@ function start() {
     }
     frozen.src = url;
     await frozen.decode().catch(() => {});
+    // The dim fades in over the frozen screen (snip.css).
+    document.body.dataset.ready = "";
     return true;
   })();
 }

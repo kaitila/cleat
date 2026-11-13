@@ -95,8 +95,15 @@ describe("the selection", () => {
 describe("where the prompt box goes", () => {
   const inside = (at: { x: number; y: number }) => at.x >= 0 && at.y >= 0 && at.x + box.width <= screen.width && at.y + box.height <= screen.height;
 
-  test("below the selection, left edges lined up, in the middle of the screen", () => {
-    expect(anchorBox({ x: 500, y: 300, width: 600, height: 200 }, box, screen)).toEqual({ placement: "below", x: 500, y: 500 + GAP });
+  test("below the selection, centred on it, in the middle of the screen", () => {
+    expect(anchorBox({ x: 500, y: 300, width: 600, height: 200 }, box, screen)).toEqual({ placement: "below", x: 800 - box.width / 2, y: 500 + GAP });
+    // A selection narrower than the box: the box still centres on it, wider on both sides.
+    const narrow = anchorBox({ x: 900, y: 300, width: 40, height: 40 }, box, screen);
+    expect(narrow.x + box.width / 2).toBe(920);
+  });
+
+  test("an odd half pixel is rounded, so the box sits on whole pixels", () => {
+    expect(Number.isInteger(anchorBox({ x: 501, y: 300, width: 601, height: 200 }, box, screen).x)).toBe(true);
   });
 
   test("at each edge and corner it stays on the screen", () => {
@@ -121,11 +128,13 @@ describe("where the prompt box goes", () => {
     }
   });
 
-  test("above and below it lines up with the selection unless that would leave the screen", () => {
+  test("above and below it centres on the selection unless that would leave the screen", () => {
     const right = anchorBox({ x: 1700, y: 100, width: 220, height: 100 }, box, screen);
     expect(right.x).toBe(screen.width - box.width - GAP);
+    const left = anchorBox({ x: 10, y: 100, width: 60, height: 100 }, box, screen);
+    expect(left.x).toBe(GAP);
     const above = anchorBox({ x: 600, y: 900, width: 300, height: 180 }, box, screen);
-    expect(above).toEqual({ placement: "above", x: 600, y: 900 - GAP - box.height });
+    expect(above).toEqual({ placement: "above", x: 750 - box.width / 2, y: 900 - GAP - box.height });
   });
 
   test("inside, it sits at the selection's bottom, centred", () => {

@@ -96,6 +96,13 @@ function start() {
   /** capturedAt of the capture that was removed: a later poll doesn't bring it back. */
   let removed = null;
 
+  /** The chosen workspace's background, behind the chips (prompt.css). */
+  const mark = document.createElement("span");
+  mark.className = "workspace-mark";
+  mark.setAttribute("aria-hidden", "true");
+  /** Where the mark was last put, for the slide from there. */
+  let markAt = null;
+
   const say = (text, kind = "") => {
     status.textContent = text;
     status.dataset.kind = kind;
@@ -127,7 +134,10 @@ function start() {
         label.append(radio, chip);
         return label;
       }),
+      mark,
     );
+    markAt = null;
+    placeMark();
     loaded = true;
     if (selected === null) say("no workspace folder exists: check the config file", "error");
   }
@@ -138,6 +148,33 @@ function start() {
     } catch (e) {
       say(e.message, "error");
     }
+  }
+
+  /**
+   * Puts the mark behind the chosen chip. From where it was, it slides: it is set at once to the new
+   * chip's width and place, drawn where it was with a transform, then let go to the new place on
+   * the transition (FLIP), so only the transform animates.
+   */
+  function placeMark() {
+    const span = row.querySelector("input:checked + span");
+    mark.hidden = span === null;
+    if (span === null) return row.removeAttribute("data-mark");
+    const to = { x: span.offsetLeft + span.parentElement.offsetLeft, y: span.offsetTop + span.parentElement.offsetTop, width: span.offsetWidth };
+    const from = markAt;
+    markAt = to;
+    mark.style.width = `${to.width}px`;
+    row.setAttribute("data-mark", "");
+    const at = (p, scale) => `translate(${p.x}px, ${p.y}px) scaleX(${scale})`;
+    if (from === null || (from.x === to.x && from.y === to.y && from.width === to.width)) {
+      delete mark.dataset.moving;
+      mark.style.transform = at(to, 1);
+      return;
+    }
+    delete mark.dataset.moving;
+    mark.style.transform = at(from, from.width / to.width);
+    void mark.offsetWidth;
+    mark.dataset.moving = "";
+    mark.style.transform = at(to, 1);
   }
 
   function drawAttachment() {
@@ -166,6 +203,10 @@ function start() {
     remove.setAttribute("aria-keyshortcuts", "Alt+Backspace");
     remove.addEventListener("click", removeAttachment);
     clip.replaceChildren(label, what, remove);
+    // It springs in each time a capture arrives (prompt.css).
+    clip.removeAttribute("data-in");
+    void clip.offsetWidth;
+    clip.setAttribute("data-in", "");
   }
 
   function removeAttachment() {
@@ -234,6 +275,7 @@ function start() {
 
   form.addEventListener("submit", (e) => e.preventDefault());
   // A click on a workspace goes back to typing. Keyboard changes (arrows) keep their focus.
+  row.addEventListener("change", placeMark);
   row.addEventListener("click", (e) => {
     if (e.detail > 0) task.focus();
   });
@@ -259,9 +301,19 @@ function start() {
     if (position === null) return;
     e.preventDefault();
     const radio = radios()[position];
-    if (radio && !radio.disabled) radio.checked = true;
+    if (radio && !radio.disabled) {
+      radio.checked = true;
+      placeMark();
+    }
   });
 
+  // Chip widths change when Inter has loaded, or the window does: the mark goes there at once.
+  const replaceMark = () => {
+    markAt = null;
+    placeMark();
+  };
+  void document.fonts?.ready.then(replaceMark);
+  window.addEventListener("resize", replaceMark);
   task.focus();
   void load();
   for (const ms of CLIPBOARD_POLLS) setTimeout(() => void pollClipboard(), ms);
