@@ -10,3 +10,4 @@ One file per decision. Add a row when you add one.
 | [D0004](D0004-approvals.md) | A tool call waits for the person: only the approvals route allows, everything else denies | 2026-11-13 | Active |
 | [D0005](D0005-toasts.md) | Notifications are kept in memory and polled; the shell's first poll shows nothing | 2026-11-13 | Active |
 | [D0006](D0006-start-stop-and-login.md) | Start, stop and status keep a pid file; the shell starts the runner with `wsl.exe --exec`; start on login is Electron's login item | 2026-11-13 | Active |
+| [D0007](D0007-design-system.md) | The design system: Inter and JetBrains Mono served by the runner, hairlines of one device pixel, raw values only in `base.css` | 2026-11-13 | Active |
