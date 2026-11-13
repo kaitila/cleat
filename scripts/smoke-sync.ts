@@ -119,8 +119,12 @@ async function picker(want: string): Promise<{ shown: boolean; text: string }> {
   const reader = proc.stdout.getReader();
   const decoder = new TextDecoder();
   let shown = false;
+  // One read at a time: a read that loses the race to the timer is kept for the next round, not dropped.
+  let pending: ReturnType<typeof reader.read> | null = null;
   while (Date.now() < deadline) {
-    const chunk = await Promise.race([reader.read(), Bun.sleep(500).then(() => null)]);
+    pending ??= reader.read();
+    const chunk = await Promise.race([pending, Bun.sleep(500).then(() => null)]);
+    if (chunk) pending = null;
     if (chunk?.done) break;
     if (chunk?.value) text += decoder.decode(chunk.value, { stream: true });
     const now = flat(text);
