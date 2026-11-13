@@ -1,3 +1,5 @@
+import type { Area } from "./geometry";
+
 // What the self-test writes. Shared with src/shell/selftest-run.ts, which asserts every field.
 export interface SelfTestResult {
   /** The self-test's own hotkey registered as a global shortcut. */
@@ -28,24 +30,45 @@ export interface SelfTestResult {
   /** With no runner answering /health, no pop-up was opened. */
   noWindowWithoutRunner: boolean;
   clipboardRestored: boolean;
-  /** Toasts created by the first poll of /api/notifications (the stub runner had two older ones): 0. */
-  toastsOnFirstPoll: number;
-  /** Toasts created after the second poll, by which the stub runner had recorded one more: 1. */
-  toastsCreated: number;
-  toastTitle: string | null;
-  toastBody: string | null;
-  /** Windows answered show() with the toast's `show` event. Nobody saw it. */
-  toastShown: boolean;
-  /** What came instead of `show`: `failed: <error>`, or `nothing` within three seconds. */
-  toastError: string | null;
-  /** The chat window's URL after the toast's click handler ran. */
-  toastOpenedUrl: string | null;
-  /** The session "Open last session" opens. */
-  lastSession: string | null;
   /** app.getLoginItemSettings answered. The self-test only reads start on login; it never sets it. */
   loginItemRead: boolean;
   /** What it answered: whether the shell starts on login on this machine. Reported, not judged. */
   openAtLogin: boolean | null;
+  /** With "dock": false in the settings, no dock window was created. */
+  dockOffNoWindow: boolean;
+  dockCreated: boolean;
+  /** The URL the dock had loaded. */
+  dockUrl: string | null;
+  /** Shown (without being activated). Nobody saw it. */
+  dockVisible: boolean;
+  /** What the page sees of the bridge: `typeof intuitionDock : its keys : typeof require : typeof process`. */
+  dockBridge: string | null;
+  /** The primary display's bounds, which the dock's are checked against. */
+  primaryDisplay: Area | null;
+  /** The dock's window as first shown: the idle bounds, not focusable, not focused. */
+  dockIdleBounds: Area | null;
+  dockIdleFocusable: boolean | null;
+  dockIdleFocused: boolean | null;
+  /** After the page called setState("open"). */
+  dockOpenBounds: Area | null;
+  dockOpenFocusable: boolean | null;
+  /** setState with a value that is not a state changed nothing: still open, still focusable. */
+  dockOtherValueIgnored: boolean;
+  /** After the page called setState("idle"). */
+  dockBackBounds: Area | null;
+  dockBackFocusable: boolean | null;
+  /** setState from a page whose origin is not the runner's changed nothing. */
+  dockForeignOriginIgnored: boolean;
+  /** The chat window's URL after the dock's page opened /?session=<id> in a new window. */
+  dockOpenedChatUrl: string | null;
+  /** The pop-up's URL after the dock's page opened /prompt in a new window. */
+  dockOpenedPromptUrl: string | null;
+  /** New windows from the dock to another of the runner's paths and to another origin opened nothing. */
+  dockOtherWindowRefused: boolean;
+  /** With no runner answering, the dock stayed for one check and was hidden by the second. */
+  dockHiddenWithoutRunner: boolean;
+  /** The runner answering again, the next check loaded the page and showed the dock, idle. */
+  dockShownAgain: boolean;
   /** Anything that threw on the way. Empty on a clean run. */
   errors: string[];
 }

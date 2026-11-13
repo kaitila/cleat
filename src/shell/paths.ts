@@ -17,6 +17,19 @@ function run(cmd: string[], cwd?: string): string {
   return p.stdout.toString().trim();
 }
 
+/**
+ * True when Windows shows its lock or sign-in screen (LogonUI.exe runs then). Programs cannot use the
+ * clipboard behind it, so the self-test's clipboard steps fail there. False when it cannot be told.
+ */
+export function desktopLocked(): boolean {
+  try {
+    const p = Bun.spawnSync(["/mnt/c/Windows/System32/tasklist.exe", "/NH", "/FI", "IMAGENAME eq LogonUI.exe"], { cwd: "/mnt/c", stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    return p.exitCode === 0 && p.stdout.toString().includes("LogonUI.exe");
+  } catch {
+    return false;
+  }
+}
+
 export function toWsl(windowsPath: string): string {
   return run(["wslpath", "-u", windowsPath]);
 }

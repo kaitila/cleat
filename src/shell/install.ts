@@ -1,6 +1,7 @@
 // Installing, starting and stopping the Windows shell from WSL.
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { DOCK_PRELOAD } from "../../shell/src/dock";
 import type { LoginResult } from "../../shell/src/login";
 import { withWsl } from "../../shell/src/settings";
 import { parseWsl, type WslSettings } from "../../shell/src/wsl";
@@ -10,20 +11,29 @@ export const BUNDLE = "main.cjs";
 /** Electron is fetched for Windows although npm and node run in WSL. */
 const FOR_WINDOWS = { npm_config_platform: "win32", npm_config_arch: "x64" };
 
-/** Bundles shell/src/main.ts into one CommonJS file in outDir. Electron stays a require(). */
-export async function buildShell(outDir: string): Promise<string> {
+/** One entry point bundled into one CommonJS file in outDir. Electron stays a require(). */
+async function bundle(entry: string, outDir: string, name: string): Promise<string> {
   const result = await Bun.build({
-    entrypoints: [join(SHELL_SRC, "src", "main.ts")],
+    entrypoints: [join(SHELL_SRC, "src", entry)],
     target: "node",
     format: "cjs",
     external: ["electron"],
   });
   const output = result.outputs[0];
-  if (!result.success || !output) throw new Error(`bundling the shell failed:\n${result.logs.join("\n")}`);
+  if (!result.success || !output) throw new Error(`bundling ${entry} failed:\n${result.logs.join("\n")}`);
   mkdirSync(outDir, { recursive: true });
-  const file = join(outDir, BUNDLE);
+  const file = join(outDir, name);
   await Bun.write(file, await output.text());
   return file;
+}
+
+/**
+ * Bundles the shell into outDir: main.ts as main.cjs, and the dock's preload script as its own
+ * file beside it, since Electron loads a preload by path. Returns main.cjs's path.
+ */
+export async function buildShell(outDir: string): Promise<string> {
+  await bundle("dock-preload.ts", outDir, DOCK_PRELOAD);
+  return bundle("main.ts", outDir, BUNDLE);
 }
 
 /** The Electron version shell/package.json pins. */
@@ -53,7 +63,7 @@ export async function install(paths = shellPaths(), log: (line: string) => void 
   mkdirSync(paths.app, { recursive: true });
   await buildShell(paths.app);
   copyFileSync(join(SHELL_SRC, "package.json"), join(paths.app, "package.json"));
-  log(`bundle: ${join(paths.app, BUNDLE)}`);
+  log(`bundle: ${join(paths.app, BUNDLE)} and ${DOCK_PRELOAD}`);
   const wanted = wantedElectron();
   if (installedElectron(paths) === wanted) {
     log(`Electron ${wanted} is already installed`);
@@ -67,9 +77,9 @@ export async function install(paths = shellPaths(), log: (line: string) => void 
   log(`Electron ${wanted}: ${paths.electronExe}`);
 }
 
-/** True when Electron and the bundle are in the app folder. */
+/** True when Electron and both bundles are in the app folder. An install from before the dock lacks the preload, and counts as not installed. */
 export function isInstalled(paths: ShellPaths): boolean {
-  return existsSync(paths.electronExe) && existsSync(join(paths.app, BUNDLE));
+  return existsSync(paths.electronExe) && existsSync(join(paths.app, BUNDLE)) && existsSync(join(paths.app, DOCK_PRELOAD));
 }
 
 function needInstalled(paths: ShellPaths): void {

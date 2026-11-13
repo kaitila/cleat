@@ -13,7 +13,7 @@ const USAGE = `usage: bun src/cli.ts <command>
   logs            print the end of the runner's log
 
   shell install   bundle the Windows shell and install it, with Electron, under the Windows user's AppData\\Local\\intuition
-  shell start     start the Windows shell (tray icon and hotkey)
+  shell start     start the Windows shell (tray icon, hotkey and dock)
   shell stop      quit the Windows shell
   shell login on|off|status
                   start the shell when you log in to Windows: turn it on, turn it off, or say which it is

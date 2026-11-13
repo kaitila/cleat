@@ -1,20 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, DOCK_SIZES, DOCK_STATES, dockBounds, dockFocusable, isDockState } from "../../shell/src/dock";
 import { centred, iconBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
-import { chatUrl, promptUrl, sameOrigin, sessionOf } from "../../shell/src/origin";
-import { MAX_TOASTS, parseResponse, POLL_MS, POLL_TIMEOUT_MS, pollUrl, START, step, toastOf, type PollState } from "../../shell/src/poller";
-import type { Notification } from "../../src/shared/protocol";
+import { chatUrl, dockUrl, promptUrl, sameOrigin, sessionOf, windowTarget } from "../../shell/src/origin";
 import type { SelfTestResult } from "../../shell/src/result";
-import { DEFAULT_SETTINGS, loadSettings, parseSettings, withWsl } from "../../shell/src/settings";
+import { DEFAULT_SETTINGS, loadSettings, parseSettings, saveDock, withDock, withWsl } from "../../shell/src/settings";
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
-import { buildShell, BUNDLE, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
+import { buildShell, BUNDLE, isInstalled, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
-import { problems, selfTestRun, STUB_BODY, STUB_SESSION, STUB_TITLE, stubRunner } from "../../src/shell/selftest-run";
+import { problems, selfTestRun, STUB_SESSION, stubRunner } from "../../src/shell/selftest-run";
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
@@ -30,36 +29,70 @@ describe("bundle", () => {
     expect(code.length).toBeLessThan(200_000);
   });
 
+  test("the dock's preload is its own small file beside it, and exposes setState and nothing else", async () => {
+    const out = join(dir, "bundle-preload");
+    await buildShell(out);
+    expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, BUNDLE].sort());
+    const code = readFileSync(join(out, DOCK_PRELOAD), "utf8");
+    expect(code).toContain('require("electron")');
+    expect(code).not.toMatch(/^\s*(import|export)\s/m);
+    expect(code).toContain(DOCK_CHANNEL);
+    // A sandboxed preload can require electron and nothing else.
+    expect(code.match(/require\("[^"]+"\)/g)).toEqual(['require("electron")']);
+    expect(code.length).toBeLessThan(5_000);
+
+    const src = readFileSync(join(REPO, "shell", "src", "dock-preload.ts"), "utf8");
+    expect(src.match(/exposeInMainWorld\(/g)).toHaveLength(1);
+    expect(src).toContain('contextBridge.exposeInMainWorld("intuitionDock", {\n  setState: (state: unknown): void => {\n    ipcRenderer.send(DOCK_CHANNEL, state);\n  },\n});');
+    // One way out of the page: a send on the dock's channel. Nothing comes back in.
+    expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send"]);
+  });
+
+  test("an install without the preload counts as not installed, so `up` installs again", () => {
+    const app = join(dir, "installed");
+    const paths = { home: dir, app, electronExe: join(app, "electron.exe") };
+    mkdirSync(app, { recursive: true });
+    writeFileSync(paths.electronExe, "");
+    writeFileSync(join(app, BUNDLE), "");
+    expect(isInstalled(paths)).toBe(false);
+    writeFileSync(join(app, DOCK_PRELOAD), "");
+    expect(isInstalled(paths)).toBe(true);
+  });
+
   test("the shell pins the Electron the repo has types for", () => {
     const root = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8"));
     expect(wantedElectron()).toBe(root.devDependencies.electron);
   });
 
-  test("only main.ts imports electron, and its windows are sandboxed without Node", () => {
+  test("only main.ts and the preload import electron, and the windows are sandboxed without Node; only the dock has a preload", () => {
     const src = join(REPO, "shell", "src");
     for (const name of readdirSync(src)) {
       const imports = /from "electron"|require\("electron"\)/.test(readFileSync(join(src, name), "utf8"));
-      expect(`${name}: ${imports}`).toBe(`${name}: ${name === "main.ts"}`);
+      expect(`${name}: ${imports}`).toBe(`${name}: ${name === "main.ts" || name === "dock-preload.ts"}`);
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
     expect(main).toContain("sandbox: true, contextIsolation: true, nodeIntegration: false");
-    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(2);
+    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(3);
+    // The pop-up and the chat window: no preload. The dock: the same preferences, plus its preload.
     expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(2);
-    expect(main).not.toMatch(/preload\s*:/);
+    expect(main.match(/webPreferences:/g)).toHaveLength(3);
+    expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) }");
+    expect(main.match(/preload\s*:/g)).toHaveLength(1);
+    expect(main).not.toMatch(/nodeIntegration: true|sandbox: false|contextIsolation: false|webSecurity: false/);
   });
 });
 
 describe("settings", () => {
   test("a first start writes the defaults", () => {
     const file = join(dir, "data", "settings.json");
-    expect(loadSettings(file)).toEqual({ runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space" });
+    expect(loadSettings(file)).toEqual({ runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", dock: true });
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(DEFAULT_SETTINGS);
   });
 
   test("a changed file is read, and is not overwritten", () => {
     const file = join(dir, "changed.json");
     writeFileSync(file, JSON.stringify({ runnerUrl: "http://localhost:5000/", hotkey: " Alt+F9 " }));
-    expect(loadSettings(file)).toEqual({ runnerUrl: "http://localhost:5000", hotkey: "Alt+F9" });
+    expect(loadSettings(file)).toEqual({ runnerUrl: "http://localhost:5000", hotkey: "Alt+F9", dock: true });
     expect(JSON.parse(readFileSync(file, "utf8")).hotkey).toBe(" Alt+F9 ");
   });
 
@@ -69,6 +102,22 @@ describe("settings", () => {
     expect(parseSettings('{"hotkey":"Alt+F9"}')).toEqual({ ...DEFAULT_SETTINGS, hotkey: "Alt+F9" });
     expect(parseSettings('{"runnerUrl":"file:///c:/x","hotkey":7}')).toEqual(DEFAULT_SETTINGS);
     expect(parseSettings('{"runnerUrl":"javascript:alert(1)"}')).toEqual(DEFAULT_SETTINGS);
+  });
+
+  test("the dock is on unless the file says false, and the tray's checkbox is written keeping the rest", () => {
+    expect(DEFAULT_SETTINGS.dock).toBe(true);
+    expect(parseSettings('{"dock":false}').dock).toBe(false);
+    expect(parseSettings('{"dock":true}').dock).toBe(true);
+    for (const odd of ['"no"', "0", "null", "{}"]) expect(parseSettings(`{"dock":${odd}}`).dock).toBe(true);
+
+    const file = join(dir, "dock", "settings.json");
+    saveDock(file, false);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...DEFAULT_SETTINGS, dock: false });
+    writeFileSync(file, JSON.stringify({ hotkey: "Alt+F9", mine: true, dock: false }));
+    saveDock(file, true);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ hotkey: "Alt+F9", mine: true, dock: true });
+    expect(loadSettings(file)).toMatchObject({ hotkey: "Alt+F9", dock: true });
+    expect(JSON.parse(withDock("not json", false))).toEqual({ ...DEFAULT_SETTINGS, dock: false });
   });
 });
 
@@ -145,6 +194,20 @@ describe("origin", () => {
     expect(chatUrl(RUNNER, "a b&c")).toBe("http://127.0.0.1:4777/?session=a+b%26c");
     expect(sessionOf(chatUrl(RUNNER, "a b&c"))).toBe("a b&c");
     expect(sessionOf(chatUrl(RUNNER))).toBeUndefined();
+    expect(dockUrl(RUNNER)).toBe("http://127.0.0.1:4777/dock");
+  });
+
+  test("new windows: the chat view from any page, the pop-up from the dock only, nothing else", () => {
+    for (const fromDock of [true, false]) {
+      expect(windowTarget("http://127.0.0.1:4777/?session=a+b%26c", RUNNER, fromDock)).toEqual({ kind: "chat", session: "a b&c" });
+      expect(windowTarget("http://127.0.0.1:4777/", RUNNER, fromDock)).toEqual({ kind: "chat", session: undefined });
+      for (const url of ["http://127.0.0.1:4777/dock", "http://127.0.0.1:4777/assets/base.css", "http://127.0.0.1:4777/prompt/x", "http://127.0.0.1:4777/api/sessions", "http://localhost:4777/prompt", "http://localhost:4777/?session=x", "https://example.com/", "file:///C:/x", "javascript:alert(1)", "about:blank", ""]) {
+        expect(`${url} ${windowTarget(url, RUNNER, fromDock)}`).toBe(`${url} null`);
+      }
+    }
+    expect(windowTarget("http://127.0.0.1:4777/prompt", RUNNER, true)).toEqual({ kind: "prompt" });
+    expect(windowTarget("http://127.0.0.1:4777/prompt?x=1", RUNNER, true)).toEqual({ kind: "prompt" });
+    expect(windowTarget("http://127.0.0.1:4777/prompt", RUNNER, false)).toBeNull();
   });
 });
 
@@ -171,102 +234,138 @@ describe("geometry and arguments", () => {
   });
 });
 
-describe("the toast poller", () => {
-  const note = (seq: number, sessionId = `s${seq}`): Notification => ({ seq, ts: "2026-11-13T10:00:00.000Z", kind: "finished", sessionId, title: `title ${seq}`, body: `body ${seq}` });
-  const answer = (latest: number, ...seqs: number[]) => ({ latest, notifications: seqs.map((s) => note(s)) });
+describe("the dock", () => {
+  const display = { x: 0, y: 0, width: 1920, height: 1080 };
+  const sender = { fromDock: true, mainFrame: true, url: "http://127.0.0.1:4777/dock" };
 
-  test("the first poll sends no `after`, shows nothing and only takes `latest`", () => {
-    expect(pollUrl(RUNNER, START)).toBe("http://127.0.0.1:4777/api/notifications");
-    // The runner answers a poll without `after` with everything it has kept.
-    const first = step(START, answer(7, 5, 6, 7));
-    expect(first.show).toEqual([]);
-    expect(first.state).toEqual({ after: 7, lastSession: null });
-    expect(pollUrl(RUNNER, first.state)).toBe("http://127.0.0.1:4777/api/notifications?after=7");
-    // The same notifications again are still not shown.
-    expect(step(first.state, answer(7, 5, 6, 7)).show).toEqual([]);
-    // A runner with none yet: the next poll asks after 0 and its first notification is shown.
-    const empty = step(START, answer(0));
-    expect(empty).toEqual({ state: { after: 0, lastSession: null }, show: [] });
-    expect(pollUrl(RUNNER, empty.state)).toBe("http://127.0.0.1:4777/api/notifications?after=0");
-    expect(step(empty.state, answer(1, 1)).show.map((n) => n.seq)).toEqual([1]);
+  test("three states, each an exact size", () => {
+    expect([...DOCK_STATES]).toEqual(["idle", "peek", "open"]);
+    expect(DOCK_SIZES).toEqual({ idle: { width: 280, height: 40 }, peek: { width: 420, height: 76 }, open: { width: 460, height: 600 } });
   });
 
-  test("later polls show what is new, oldest first, and ask after the newest", () => {
-    const state: PollState = { after: 7, lastSession: null };
-    expect(step(state, answer(7))).toEqual({ state, show: [] });
-    const next = step(state, answer(9, 9, 8));
-    expect(next.show.map((n) => n.seq)).toEqual([8, 9]);
-    expect(next.state).toEqual({ after: 9, lastSession: "s9" });
-    // Nothing new: the last session stays.
-    expect(step(next.state, answer(9)).state).toEqual({ after: 9, lastSession: "s9" });
-    // One the runner should not have sent is not shown twice.
-    expect(step(next.state, answer(10, 9, 10)).show.map((n) => n.seq)).toEqual([10]);
+  test("the bounds in each state: the top edge of the display, centred", () => {
+    expect(dockBounds(display, "idle")).toEqual({ x: 820, y: 0, width: 280, height: 40 });
+    expect(dockBounds(display, "peek")).toEqual({ x: 750, y: 0, width: 420, height: 76 });
+    expect(dockBounds(display, "open")).toEqual({ x: 730, y: 0, width: 460, height: 600 });
   });
 
-  test("a failed poll is silent and the same `after` is asked again", () => {
-    const state: PollState = { after: 4, lastSession: "s4" };
-    expect(step(state, null)).toEqual({ state, show: [] });
-    expect(step(START, null)).toEqual({ state: START, show: [] });
-    // Still the first poll afterwards: nothing replays once the runner answers.
-    expect(step(step(START, null).state, answer(3, 1, 2, 3)).show).toEqual([]);
-  });
-
-  test("a runner that restarted counts from 1 again: what it recorded since is shown", () => {
-    const state: PollState = { after: 50, lastSession: "s50" };
-    const reset = step(state, answer(2));
-    expect(reset).toEqual({ state: { after: 0, lastSession: "s50" }, show: [] });
-    const next = step(reset.state, answer(2, 1, 2));
-    expect(next.show.map((n) => n.seq)).toEqual([1, 2]);
-    expect(next.state).toEqual({ after: 2, lastSession: "s2" });
-  });
-
-  test("a backlog shows only its newest five", () => {
-    const next = step({ after: 0, lastSession: null }, answer(30, ...Array.from({ length: 30 }, (_, i) => i + 1)));
-    expect(MAX_TOASTS).toBe(5);
-    expect(next.show.map((n) => n.seq)).toEqual([26, 27, 28, 29, 30]);
-    expect(next.state).toEqual({ after: 30, lastSession: "s30" });
-  });
-
-  test("the toast: 'intuition: <session title>' and the body", () => {
-    expect(toastOf(note(3))).toEqual({ title: "intuition: title 3", body: "body 3" });
-    expect(toastOf({ title: "  ", body: "b" })).toEqual({ title: "intuition", body: "b" });
-  });
-
-  test("an answer that is not the runner's is no answer, and malformed notifications are left out", () => {
-    for (const bad of [null, "x", [], {}, { latest: "3", notifications: [] }, { latest: 3 }, { latest: -1, notifications: [] }, { latest: 1.5, notifications: [] }, { error: "not found" }]) {
-      expect(`${JSON.stringify(bad)} ${parseResponse(bad)}`).toBe(`${JSON.stringify(bad)} null`);
+  test("on a primary display that does not start at 0,0, of an odd width, or smaller than the dock", () => {
+    expect(dockBounds({ x: -1280, y: 200, width: 1280, height: 1024 }, "idle")).toEqual({ x: -780, y: 200, width: 280, height: 40 });
+    // An odd width: whole pixels, and the same middle in every state to within one.
+    const odd = { x: 0, y: 0, width: 1367, height: 768 };
+    for (const state of DOCK_STATES) {
+      const b = dockBounds(odd, state);
+      expect(Number.isInteger(b.x)).toBe(true);
+      expect(Math.abs(b.x + b.width / 2 - 1367 / 2)).toBeLessThanOrEqual(0.5);
+      expect(b.y).toBe(0);
     }
-    const parsed = parseResponse({ latest: 4, notifications: [note(3), null, { ...note(4), seq: "4" }, { ...note(4), sessionId: "" }, { ...note(4), kind: "other" }, { ...note(4), title: 7 }, note(4)] });
-    expect(parsed).toEqual({ latest: 4, notifications: [note(3), note(4)] });
+    // The size never gives way: the contract says exactly this size.
+    expect(dockBounds({ x: 0, y: 0, width: 400, height: 300 }, "open")).toEqual({ x: -30, y: 0, width: 460, height: 600 });
   });
 
-  test("every two seconds, with a timeout shorter than that", () => {
-    expect(POLL_MS).toBe(2000);
-    expect(POLL_TIMEOUT_MS).toBeLessThan(POLL_MS);
+  test("only open can take the keyboard", () => {
+    expect(DOCK_STATES.map(dockFocusable)).toEqual([false, false, true]);
   });
 
-  test("main.ts shows toasts through the poller, sets an app id and has 'Open last session'", () => {
+  test("setState is taken from the dock's main frame on the runner's origin, with one of the three values", () => {
+    for (const state of DOCK_STATES) expect(acceptedState(sender, RUNNER, state)).toBe(state);
+    expect(acceptedState({ ...sender, url: "http://127.0.0.1:4777/dock?x#y" }, RUNNER, "peek")).toBe("peek");
+  });
+
+  test("any other value is refused", () => {
+    for (const bad of ["Open", "OPEN", " open", "open ", "closed", "huge", "", "idle,open", 0, 1, true, null, undefined, {}, [], ["open"], { state: "open" }, { toString: () => "open" }]) {
+      expect(`${JSON.stringify(bad)} ${acceptedState(sender, RUNNER, bad)}`).toBe(`${JSON.stringify(bad)} null`);
+      expect(isDockState(bad)).toBe(false);
+    }
+    // A name every object has is not a state.
+    for (const inherited of ["constructor", "toString", "__proto__", "length"]) expect(acceptedState(sender, RUNNER, inherited)).toBeNull();
+  });
+
+  test("another window, a frame inside the page, another origin or a frame that is gone: refused", () => {
+    expect(acceptedState({ ...sender, fromDock: false }, RUNNER, "open")).toBeNull();
+    expect(acceptedState({ ...sender, mainFrame: false }, RUNNER, "open")).toBeNull();
+    expect(acceptedState({ ...sender, url: null }, RUNNER, "open")).toBeNull();
+    for (const url of ["http://localhost:4777/dock", "http://127.0.0.1:4778/dock", "https://127.0.0.1:4777/dock", "http://127.0.0.1.evil.test:4777/dock", "https://evil.test/dock", "file:///C:/dock.html", "about:blank", "data:text/html,x", ""]) {
+      expect(`${url} ${acceptedState({ ...sender, url }, RUNNER, "open")}`).toBe(`${url} null`);
+    }
+  });
+
+  test("the runner is asked every few seconds, and has to miss twice before the dock hides", () => {
+    expect(DOCK_CHECK_MS).toBeGreaterThanOrEqual(2000);
+    expect(DOCK_CHECK_MS).toBeLessThanOrEqual(5000);
+    expect(DOCK_MISSES).toBe(2);
+  });
+
+  test("main.ts: the window is frameless, clear, on top, out of the taskbar, never activated, and placed from the display's bounds", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    const create = main.slice(main.indexOf("function createDock()"), main.indexOf("async function loadDock()"));
+    for (const option of ["frame: false", "transparent: true", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
+    expect(create).toContain('win.on("will-resize", (event) => event.preventDefault());');
+    const dockCode = main.slice(main.indexOf("// --- Dock ---"), main.indexOf("// --- Self-test ---"));
+    // Shown without activating, and never focused by the shell.
+    expect(dockCode).toContain("win.showInactive();");
+    expect(dockCode).not.toMatch(/\.show\(\)|\.focus\(\)/);
+    // The primary display's bounds, not its work area.
+    expect(dockCode.match(/screen\.getPrimaryDisplay\(\)\.bounds/g)).toHaveLength(2);
+    expect(dockCode).not.toContain("workArea");
+    for (const event of ["display-metrics-changed", "display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", placeDock);`);
+  });
+
+  test("main.ts: one listener on the dock's channel, and it resizes only through the validation", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main.match(/ipcMain\.\w+\(/g)).toEqual(["ipcMain.on("]);
+    expect(main).toContain("ipcMain.on(DOCK_CHANNEL, onDockState);");
+    const handler = main.slice(main.indexOf("function onDockState("), main.indexOf("/** Listens for the page's setState"));
+    expect(handler).toContain("event.sender === dock.webContents");
+    expect(handler).toContain("frame.parent === null");
+    expect(handler).toContain("acceptedState(");
+    expect(handler).toContain("if (state) setDockState(state);");
+  });
+
+  test("main.ts: a page that fails to load, a 404 or a crashed page hides the dock; 'Show dock' is in the tray", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main).toContain("if (dockStatus < 200 || dockStatus >= 300) throw");
+    expect(main).toContain('win.webContents.on("render-process-gone", () => hideDock());');
+    expect(main).toContain("if (isMainFrame && code !== -3) hideDock();");
+    expect(main).toContain('{ label: "Show dock", type: "checkbox", checked: settings.dock, click: (item) => setDock(item.checked) }');
+  });
+});
+
+describe("no toasts for sessions", () => {
+  test("the poller is gone: nothing in the shell asks for notifications or shows one for a session", () => {
+    const src = join(REPO, "shell", "src");
+    expect(readdirSync(src)).not.toContain("poller.ts");
+    for (const name of readdirSync(src)) {
+      const code = readFileSync(join(src, name), "utf8");
+      expect(`${name}: ${/api\/notifications|toastOf|pollOnce|Open last session|lastSession/.test(code)}`).toBe(`${name}: false`);
+    }
+    const main = readFileSync(join(src, "main.ts"), "utf8");
+    // The one Notification left is notify(): the runner is not running, the hotkey is taken, start on login failed.
+    expect(main.match(/new Notification\(/g)).toHaveLength(1);
+    expect(main.match(/\bnotify\(/g)).toHaveLength(4);
+    for (const title of ["intuition: the runner is not running", "intuition: the hotkey is taken", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
     expect(main).toContain("app.setAppUserModelId(");
-    expect(main).toContain('label: "Open last session"');
-    expect(main).toContain("new Notification({ ...toastOf(n)");
-    expect(main).toContain("openChat(n.sessionId");
   });
 });
 
 describe("self-test runner", () => {
   const imagePath = "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-20261112-090507-042.png";
+  const display = { x: 0, y: 0, width: 2560, height: 1440 };
   const good: SelfTestResult = {
     hotkeyRegistered: true, trayCreated: true, textCaptured: true, textPosted: true, imageCaptured: true, imagePosted: true, imagePath,
     notificationsSupported: true, popupCreated: true, popupWidth: 560, popupHeight: 380, popupUrl: "http://127.0.0.1:5000/prompt",
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
-    noWindowWithoutRunner: true, clipboardRestored: true, toastsOnFirstPoll: 0, toastsCreated: 1, toastTitle: `intuition: ${STUB_TITLE}`,
-    toastBody: STUB_BODY, toastShown: true, toastError: null, toastOpenedUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, lastSession: STUB_SESSION, loginItemRead: true, openAtLogin: false, errors: [],
+    noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
+    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock", dockVisible: true, dockBridge: "object:setState:undefined:undefined",
+    primaryDisplay: display, dockIdleBounds: { x: 1140, y: 0, width: 280, height: 40 }, dockIdleFocusable: false, dockIdleFocused: false,
+    dockOpenBounds: { x: 1050, y: 0, width: 460, height: 600 }, dockOpenFocusable: true, dockOtherValueIgnored: true,
+    dockBackBounds: { x: 1140, y: 0, width: 280, height: 40 }, dockBackFocusable: false, dockForeignOriginIgnored: true,
+    dockOpenedChatUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, dockOpenedPromptUrl: "http://127.0.0.1:5000/prompt",
+    dockOtherWindowRefused: true, dockHiddenWithoutRunner: true, dockShownAgain: true, errors: [],
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
   const png = () => Buffer.concat([PNG_SIGNATURE, Buffer.alloc(8)]);
-  const polls: (string | null)[] = [null, "2"];
-  const check = (r: Partial<SelfTestResult>, p = posts, read: () => Uint8Array | null = png, asked = polls) => problems(r, { posts: p, polls: asked }, "http://127.0.0.1:5000", read);
+  const check = (r: Partial<SelfTestResult>, p = posts, read: () => Uint8Array | null = png) => problems(r, { posts: p }, "http://127.0.0.1:5000", read);
 
   test("a clean result has no problems", () => {
     expect(check(good)).toEqual([]);
@@ -274,10 +373,31 @@ describe("self-test runner", () => {
 
   test("every field is asserted", () => {
     for (const key of Object.keys(good) as (keyof SelfTestResult)[]) {
-      const broken = { ...good, [key]: key === "errors" ? ["boom"] : typeof good[key] === "number" ? 381 : typeof good[key] === "string" || key === "toastError" || key === "openAtLogin" ? "C:\\elsewhere" : false };
+      const value = good[key];
+      // Flipped, moved or replaced, by the field's kind. A display moved sideways moves where the dock should be.
+      const broken = {
+        ...good,
+        [key]: key === "errors" ? ["boom"] : typeof value === "number" ? 381 : typeof value === "string" || key === "openAtLogin" ? "C:\\elsewhere"
+          : typeof value === "boolean" ? !value : value && typeof value === "object" ? { ...value, x: (value as { x: number }).x + 2 } : false,
+      };
       expect(`${key}: ${check(broken).length > 0}`).toBe(`${key}: true`);
     }
     expect(check({}).length).toBeGreaterThan(10);
+  });
+
+  test("the dock's bounds are judged against the display the shell reported", () => {
+    // The same dock on another display is in the wrong place three times: at first, open, and back.
+    expect(check({ ...good, primaryDisplay: { ...display, width: 1920 } })).toHaveLength(3);
+    // On the display's top edge, wherever that is.
+    const lower = { ...display, y: 300 };
+    expect(check({ ...good, primaryDisplay: lower })).toHaveLength(3);
+    expect(check({ ...good, primaryDisplay: lower, dockIdleBounds: { ...good.dockIdleBounds!, y: 300 }, dockOpenBounds: { ...good.dockOpenBounds!, y: 300 }, dockBackBounds: { ...good.dockBackBounds!, y: 300 } })).toEqual([]);
+    for (const bad of [null, {}, { x: 0, y: 0, width: 0, height: 0 }, { x: "0", y: 0, width: 100, height: 100 }]) expect(check({ ...good, primaryDisplay: bad as never }).length).toBeGreaterThanOrEqual(4);
+    // One pixel off, or one pixel too tall, is a failure: the contract says exactly.
+    expect(check({ ...good, dockOpenBounds: { ...good.dockOpenBounds!, height: 601 } })).toHaveLength(1);
+    expect(check({ ...good, dockBackBounds: good.dockOpenBounds })).toHaveLength(1);
+    // The bridge with anything more on it, or Node in the page.
+    for (const bridge of ["object:setState,resize:undefined:undefined", "undefined::undefined:undefined", "object:setState:function:undefined", "object:setState:undefined:object"]) expect(check({ ...good, dockBridge: bridge })).toHaveLength(1);
   });
 
   test("start on login is reported, on or off: either passes, and only an unread one fails", () => {
@@ -291,28 +411,6 @@ describe("self-test runner", () => {
     expect(check(good, [{ text: "intuition self-test 1" }])).toHaveLength(1);
     expect(check(good, posts, () => null)).toHaveLength(2);
     expect(check(good, posts, () => Buffer.from("BM not a png at all"))).toHaveLength(1);
-    // The polls: the first without `after`, the second after the first's `latest`.
-    for (const asked of [[], [null], ["0", "2"], [null, "0"], [null, "2", "3"]]) expect(`${JSON.stringify(asked)} ${check(good, posts, png, asked).length}`).toBe(`${JSON.stringify(asked)} 1`);
-  });
-
-  test("the stub runner has two old notifications and records one more after its first poll", async () => {
-    const runner = stubRunner();
-    try {
-      const poll = async (query = "") => parseResponse(await (await fetch(`${runner.url}/api/notifications${query}`)).json())!;
-      const first = await poll();
-      expect(first.latest).toBe(2);
-      expect(first.notifications.map((n) => n.seq)).toEqual([1, 2]);
-      const second = await poll("?after=2");
-      expect(second).toMatchObject({ latest: 3, notifications: [{ seq: 3, sessionId: STUB_SESSION, title: STUB_TITLE, body: STUB_BODY }] });
-      expect(await poll("?after=3")).toEqual({ notifications: [], latest: 3 });
-      expect(runner.polls).toEqual([null, "2", "3"]);
-      // The shell's own logic over the same answers: nothing on the first, one toast on the second.
-      const a = step(START, first);
-      expect(a.show).toEqual([]);
-      expect(step(a.state, second).show.map(toastOf)).toEqual([{ title: `intuition: ${STUB_TITLE}`, body: STUB_BODY }]);
-    } finally {
-      await runner.stop();
-    }
   });
 
   test("the stub runner answers what the shell asks and records the clipboard posts", async () => {
@@ -320,6 +418,12 @@ describe("self-test runner", () => {
     try {
       expect(await (await fetch(`${runner.url}/health`)).json()).toMatchObject({ ok: true });
       expect((await fetch(`${runner.url}/prompt`)).headers.get("content-type")).toContain("text/html");
+      // The dock page calls setState when the bridge is there, and has a clear background.
+      const dockPage = await (await fetch(`${runner.url}/dock`)).text();
+      expect(dockPage).toContain('window.intuitionDock?.setState("idle")');
+      expect(dockPage).toContain("background: transparent");
+      // Notifications are the real runner's; the shell no longer asks for them.
+      expect((await fetch(`${runner.url}/api/notifications`)).status).toBe(404);
       const res = await fetch(`${runner.url}/api/clipboard`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "hi" }) });
       expect(res.status).toBe(200);
       expect(runner.posts).toEqual([{ text: "hi" }]);
