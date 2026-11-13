@@ -10,7 +10,7 @@ import type { NewEvent } from "./agent";
 
 export const RESTARTED = "the runner restarted";
 
-function readJson<T>(path: string, fallback: T): T {
+export function readJson<T>(path: string, fallback: T): T {
   if (!existsSync(path)) return fallback;
   try {
     return JSON.parse(readFileSync(path, "utf8")) as T;
@@ -20,7 +20,7 @@ function readJson<T>(path: string, fallback: T): T {
 }
 
 /** Writes through a temporary file, so a crash never leaves half a file. */
-function writeJson(path: string, value: unknown): void {
+export function writeJson(path: string, value: unknown): void {
   const tmp = `${path}.tmp`;
   writeFileSync(tmp, JSON.stringify(value, null, 2) + "\n");
   renameSync(tmp, path);
@@ -38,7 +38,8 @@ export class Store {
     this.statePath = join(dataDir, "state.json");
     this.eventsDir = join(dataDir, "events");
     mkdirSync(this.eventsDir, { recursive: true });
-    for (const s of readJson<SessionMeta[]>(this.sessionsPath, [])) this.sessions.set(s.id, s);
+    // Sessions stored before `source` existed are all the runner's own.
+    for (const s of readJson<SessionMeta[]>(this.sessionsPath, [])) this.sessions.set(s.id, { ...s, source: s.source ?? "intuition" });
     this.state = { lastWorkspace: readJson<{ lastWorkspace?: string | null }>(this.statePath, {}).lastWorkspace ?? null };
     this.recover();
   }
@@ -68,9 +69,9 @@ export class Store {
     writeJson(this.sessionsPath, [...this.sessions.values()]);
   }
 
-  /** Newest first. */
+  /** Newest first, by createdAt: an imported session takes its place by when it started, not when it was imported. */
   list(): SessionMeta[] {
-    return [...this.sessions.values()].reverse();
+    return [...this.sessions.values()].reverse().sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
   }
 
   get(id: string): SessionMeta | undefined {
@@ -83,23 +84,23 @@ export class Store {
     return session;
   }
 
-  update(id: string, patch: Partial<Pick<SessionMeta, "status" | "claudeSessionId" | "title" | "permissionMode">>): SessionMeta {
+  /** updatedAt is now unless the patch gives one (an imported session's: when its transcript was written). */
+  update(id: string, patch: Partial<Pick<SessionMeta, "status" | "claudeSessionId" | "title" | "permissionMode" | "updatedAt">>): SessionMeta {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`no session ${id}`);
-    Object.assign(session, patch, { updatedAt: new Date().toISOString() });
+    Object.assign(session, { updatedAt: new Date().toISOString() }, patch);
     this.save();
     return session;
   }
 
-  /** Stores an event with the session's next seq. */
-  append(id: string, event: NewEvent): SessionEvent {
+  /** Stores an event with the session's next seq, at `ts` (now by default: an imported event keeps its transcript's time). */
+  append(id: string, event: NewEvent, ts = new Date().toISOString()): SessionEvent {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`no session ${id}`);
-    const ts = new Date().toISOString();
     const stored = { seq: session.lastSeq + 1, ts, ...event } as SessionEvent;
     appendFileSync(join(this.eventsDir, `${id}.jsonl`), JSON.stringify(stored) + "\n");
     session.lastSeq = stored.seq;
-    session.updatedAt = ts;
+    if (ts > session.updatedAt) session.updatedAt = ts;
     this.save();
     return stored;
   }

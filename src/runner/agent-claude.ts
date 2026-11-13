@@ -24,6 +24,19 @@ export function canUseToolFor(input: TurnInput): CanUseTool {
   };
 }
 
+/**
+ * The entrypoint Claude Code records in the runner's transcripts (D0015). The SDK would record an
+ * SDK one ("sdk-ts", or "sdk-cli"), and Claude Code's own resume picker (`claude --resume`, /resume)
+ * hides every transcript that starts with one of those. Any other name keeps the session in the
+ * picker; "cli" itself can't be used, as Claude Code turns it into "sdk-cli" when it runs headless.
+ */
+export const ENTRYPOINT = "intuition";
+
+/** The environment Claude Code runs in: the runner's, with ENTRYPOINT. */
+export function claudeEnv(env: Record<string, string | undefined> = process.env): Record<string, string | undefined> {
+  return { ...env, CLAUDE_CODE_ENTRYPOINT: ENTRYPOINT };
+}
+
 /** An auto_denied event's input summary is cut to this many characters. */
 export const MAX_DENIED_INPUT = 200;
 
@@ -32,7 +45,8 @@ export const MAX_DENIED_INPUT = 200;
  * two config.ts accepts), and settingSources is left out so the workspace's own settings (user,
  * project and local) load, as in the CLI. In auto mode the SDK's classifier allows or denies a call
  * itself and asks through canUseTool only when it can't decide; a call that reaches canUseTool waits
- * for the person, in either mode. The runner itself never approves anything.
+ * for the person, in either mode. The runner itself never approves anything. env names the runner
+ * as the entrypoint (ENTRYPOINT), and a new conversation gets the session's title.
  */
 export function claudeOptions(input: TurnInput, abortController: AbortController, stderr: (data: string) => void): Options {
   return {
@@ -42,7 +56,9 @@ export function claudeOptions(input: TurnInput, abortController: AbortController
     canUseTool: canUseToolFor(input),
     abortController,
     stderr,
-    ...(input.resume ? { resume: input.resume } : {}),
+    env: claudeEnv(),
+    // A resumed conversation keeps the title it has; a new one gets the session's.
+    ...(input.resume ? { resume: input.resume } : input.title ? { title: input.title } : {}),
   };
 }
 
@@ -51,7 +67,7 @@ export function cut(text: string, max = MAX_TOOL_RESULT): string {
 }
 
 /** A tool_result block's content (a string, or text and other blocks) as one string. */
-function resultText(content: unknown): string {
+export function resultText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return content === undefined || content === null ? "" : JSON.stringify(content);
   return content

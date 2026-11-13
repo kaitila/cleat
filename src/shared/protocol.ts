@@ -19,15 +19,23 @@ export interface Workspace {
   exists: boolean;
 }
 
+/**
+ * intuition: started by the runner. terminal: a Claude Code session the runner found in a workspace's
+ * transcripts (started in a terminal, or anywhere else) and imported. See docs/protocol.md, "Terminal sessions".
+ */
+export type SessionSource = "intuition" | "terminal";
+
 export interface SessionMeta {
-  /** The runner's id for the session (a UUID). Stable across turns. */
+  /** The runner's id for the session (a UUID). Stable across turns, and across restarts for imported ones. */
   id: string;
   /** Claude Code's session id, known after the first turn starts. Used to resume. */
   claudeSessionId: string | null;
   workspace: string;
   cwd: string;
-  /** First line of the first prompt, cut to 80 characters. */
+  /** First line of the first prompt, cut to 80 characters. An imported session's: its custom title, else summary, else first prompt. */
   title: string;
+  /** Where the session came from. The runner always sends it; a session stored before it existed reads as "intuition". */
+  source?: SessionSource;
   status: SessionStatus;
   createdAt: string;
   updatedAt: string;
@@ -99,7 +107,10 @@ export interface HealthResponse { ok: true; version: string; build: string }
 export interface WorkspacesResponse { workspaces: Workspace[]; lastUsed: string | null }
 export interface SessionsResponse { sessions: SessionMeta[] }
 export interface StartSessionRequest { workspace: string; prompt: string; imagePath?: string }
-export interface ReplyRequest { prompt: string; imagePath?: string }
+/** force: reply even when another process wrote to the transcript in the last two minutes (else 409, OPEN_IN_TERMINAL). */
+export interface ReplyRequest { prompt: string; imagePath?: string; force?: boolean }
+/** The 409 error for a reply to a session another process is writing to, without force. */
+export const OPEN_IN_TERMINAL = "it looks open in a terminal: reply with force to continue it here anyway";
 export interface SessionResponse { session: SessionMeta }
 export interface EventsResponse { events: SessionEvent[] }
 export interface ApprovalRequest { decision: ApprovalDecision }
