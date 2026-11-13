@@ -35,6 +35,24 @@ export function sessionOf(url: string): string | undefined {
   }
 }
 
+/**
+ * The address to hand to the default browser for a link a page followed or opened, or null when it
+ * is refused: only http:, https: and mailto:, not on the runner's own origin (those are the shell's
+ * windows or nothing), and with no user name or password in it.
+ */
+export function externalLink(url: string, runnerUrl: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.protocol === "mailto:") return u.pathname.trim() || u.search ? u.href : null;
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (!u.hostname || u.username || u.password || sameOrigin(u.href, runnerUrl)) return null;
+  return u.href;
+}
+
 /** What a link that a page opens in a new window leads to. */
 export type WindowTarget = { kind: "chat"; session?: string } | { kind: "prompt" };
 

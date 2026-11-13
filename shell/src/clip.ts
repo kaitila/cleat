@@ -17,26 +17,34 @@ export function isPng(data: Uint8Array): boolean {
 
 const two = (n: number) => String(n).padStart(2, "0");
 
-/** clip-<time>.png, in local time down to the millisecond, so names sort by age. */
-export function clipFileName(at: Date): string {
+/** What a saved PNG is: a clipboard image (clip-<time>.png) or a snip (snip-<time>.png). */
+export type CaptureKind = "clip" | "snip";
+const SAVED = /^(?:clip|snip)-([\d-]+)\.png$/;
+
+/** clip-<time>.png (or snip-<time>.png), in local time down to the millisecond, so names sort by age. */
+export function clipFileName(at: Date, kind: CaptureKind = "clip"): string {
   const day = `${at.getFullYear()}${two(at.getMonth() + 1)}${two(at.getDate())}`;
   const time = `${two(at.getHours())}${two(at.getMinutes())}${two(at.getSeconds())}`;
-  return `clip-${day}-${time}-${String(at.getMilliseconds()).padStart(3, "0")}.png`;
+  return `${kind}-${day}-${time}-${String(at.getMilliseconds()).padStart(3, "0")}.png`;
 }
 
-/** Of a folder's file names, the clips to delete so that only the newest `keep` stay. Other files are left alone. */
+/**
+ * Of a folder's file names, the clips and snips to delete so that only the newest `keep` of them,
+ * together and by their time, stay. Other files are left alone.
+ */
 export function clipsToPrune(names: string[], keep = KEEP_CLIPS): string[] {
+  const time = (n: string) => SAVED.exec(n)![1]!;
   return names
-    .filter((n) => /^clip-[\d-]+\.png$/.test(n))
-    .sort()
+    .filter((n) => SAVED.test(n))
+    .sort((a, b) => (time(a) === time(b) ? (a < b ? -1 : 1) : time(a) < time(b) ? -1 : 1))
     .reverse()
     .slice(keep);
 }
 
-/** Saves a PNG as a new clip in `dir`, deletes the clips beyond the newest KEEP_CLIPS, and returns the new path. */
-export function saveClip(dir: string, png: Uint8Array, at = new Date()): string {
+/** Saves a PNG as a new clip (or snip) in `dir`, deletes the clips and snips beyond the newest KEEP_CLIPS, and returns the new path. */
+export function saveClip(dir: string, png: Uint8Array, at = new Date(), kind: CaptureKind = "clip"): string {
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, clipFileName(at));
+  const file = join(dir, clipFileName(at, kind));
   writeFileSync(file, png);
   for (const old of clipsToPrune(readdirSync(dir))) rmSync(join(dir, old), { force: true });
   return file;

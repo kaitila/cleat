@@ -90,6 +90,35 @@ export interface SelfTestResult {
   dockHiddenWithoutRunner: boolean;
   /** The runner answering again, the next check loaded the page and showed the dock, idle. */
   dockShownAgain: boolean;
+  /** The self-test's own snip hotkey registered as a global shortcut. */
+  snipHotkeyRegistered: boolean;
+  /** The displays the snip covered, in its order: bounds (DIPs) and scale. */
+  snipDisplays: { bounds: Area; scaleFactor: number }[] | null;
+  /** Each overlay's bounds once shown, in the same order. */
+  snipOverlayBounds: Area[] | null;
+  /** Every overlay was shown (without being activated) and is always on top. */
+  snipOverlaysShown: boolean;
+  /** The URL the first overlay loaded. */
+  snipUrl: string | null;
+  /** From the call to the last overlay shown, in ms. Printed; only a very slow one (SNIP_SLOW_MS in selftest-run.ts) fails. */
+  snipMs: number | null;
+  /** When each part of opening it was done, in ms from the call: captured, runner, loaded, drawn. Reported, not judged. */
+  snipPhases: Record<string, number> | null;
+  /** Every display's capture came back with pixels. False on a locked desktop. */
+  snipCaptured: boolean | null;
+  /** What the page sees of the bridge: `typeof intuitionSnip : its keys, sorted : typeof require : typeof process`. */
+  snipBridge: string | null;
+  /** The rectangle the page asked to crop, in the first display's DIPs, and the Windows path it was saved as. */
+  snipCropRect: Area | null;
+  snipCropPath: string | null;
+  /** crop() with anything but a rectangle of finite numbers inside the display was refused, every time. */
+  snipBadRectsRefused: boolean;
+  /** The page's close() closed every overlay. */
+  snipClosed: boolean;
+  /** Esc, sent to the first overlay as a key, closed every overlay. */
+  snipEscClosed: boolean;
+  /** What the shell would have handed to the default browser (the self-test opens none). */
+  externalLinks: string[];
   /** Anything that threw on the way. Empty on a clean run. */
   errors: string[];
 }

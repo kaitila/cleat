@@ -4,16 +4,17 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
+import { acceptedRect, acceptedSender, captureSize, cropPlan, isSnipPage, matchSources, SELF_TEST_CROP, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PATH, SNIP_PRELOAD, snipUrl, toPixels } from "../../shell/src/snip";
 import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
 import { centred, iconBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
-import { chatUrl, dockUrl, promptUrl, sameOrigin, sessionOf, windowTarget } from "../../shell/src/origin";
+import { chatUrl, dockUrl, externalLink, promptUrl, sameOrigin, sessionOf, windowTarget } from "../../shell/src/origin";
 import type { SelfTestResult } from "../../shell/src/result";
 import { DEFAULT_SETTINGS, loadSettings, parseSettings, PID_FILE, saveDock, SETTINGS_FILE, withDock, withWsl } from "../../shell/src/settings";
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
 import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
-import { problems, selfTestRun, STUB_SESSION, stubRunner } from "../../src/shell/selftest-run";
+import { expectedExternal, pngSize, problems, selfTestRun, SNIP_SLOW_MS, STUB_SESSION, stubRunner } from "../../src/shell/selftest-run";
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
@@ -32,7 +33,7 @@ describe("bundle", () => {
   test("the dock's preload is its own small file beside it, and exposes setState and nothing else", async () => {
     const out = join(dir, "bundle-preload");
     await buildShell(out);
-    expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, BUNDLE].sort());
+    expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, SNIP_PRELOAD, BUNDLE].sort());
     const code = readFileSync(join(out, DOCK_PRELOAD), "utf8");
     expect(code).toContain('require("electron")');
     expect(code).not.toMatch(/^\s*(import|export)\s/m);
@@ -48,6 +49,24 @@ describe("bundle", () => {
     expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send"]);
   });
 
+  test("the snip's preload is its own small file, and exposes getCapture, crop and close and nothing else", async () => {
+    const out = join(dir, "bundle-snip-preload");
+    await buildShell(out);
+    const code = readFileSync(join(out, SNIP_PRELOAD), "utf8");
+    expect(code.match(/require\("[^"]+"\)/g)).toEqual(['require("electron")']);
+    expect(code).not.toMatch(/^\s*(import|export)\s/m);
+    for (const channel of [SNIP_CAPTURE, SNIP_CROP, SNIP_CLOSE]) expect(code).toContain(channel);
+    expect(code.length).toBeLessThan(5_000);
+
+    const src = readFileSync(join(REPO, "shell", "src", "snip-preload.ts"), "utf8");
+    expect(src.match(/exposeInMainWorld\(/g)).toHaveLength(1);
+    expect(src).toContain('contextBridge.exposeInMainWorld("intuitionSnip", {');
+    // Three keys, each one call on its own channel. The page hands over a value; it never names a channel.
+    const bridge = src.slice(src.indexOf("exposeInMainWorld"));
+    expect([...bridge.matchAll(/^  (\w+):/gm)].map((m) => m[1])).toEqual(["getCapture", "crop", "close"]);
+    expect(src.match(/ipcRenderer\.\w+\([^)]*\)/g)).toEqual(["ipcRenderer.invoke(SNIP_CAPTURE)", "ipcRenderer.invoke(SNIP_CROP, rect)", "ipcRenderer.send(SNIP_CLOSE)"]);
+  });
+
   test("an install without the preload counts as not installed, so `up` installs again", () => {
     const app = join(dir, "installed");
     const paths = { home: dir, app, electronExe: join(app, "electron.exe") };
@@ -56,6 +75,9 @@ describe("bundle", () => {
     writeFileSync(join(app, BUNDLE), "");
     expect(isInstalled(paths)).toBe(false);
     writeFileSync(join(app, DOCK_PRELOAD), "");
+    // Nor without the snip's.
+    expect(isInstalled(paths)).toBe(false);
+    writeFileSync(join(app, SNIP_PRELOAD), "");
     expect(isInstalled(paths)).toBe(true);
   });
 
@@ -72,7 +94,7 @@ describe("bundle", () => {
     // Bundling is repeatable: the same source gives the same bytes, or `up` would reinstall every time.
     expect(await isCurrent(paths)).toBe(true);
 
-    for (const [file, text] of [[BUNDLE, "// an older bundle"], [DOCK_PRELOAD, "// an older preload"], ["package.json", "{}"], [join("node_modules", "electron", "dist", "version"), "v1.0.0"]] as const) {
+    for (const [file, text] of [[BUNDLE, "// an older bundle"], [DOCK_PRELOAD, "// an older preload"], [SNIP_PRELOAD, "// an older preload"], ["package.json", "{}"], [join("node_modules", "electron", "dist", "version"), "v1.0.0"]] as const) {
       const path = join(app, file);
       const before = readFileSync(path);
       writeFileSync(path, text);
@@ -100,20 +122,21 @@ describe("bundle", () => {
     expect(wantedElectron()).toBe(root.devDependencies.electron);
   });
 
-  test("only main.ts and the preload import electron, and the windows are sandboxed without Node; only the dock has a preload", () => {
+  test("only main.ts and the preloads import electron, and the windows are sandboxed without Node; only the dock and the snip have a preload", () => {
     const src = join(REPO, "shell", "src");
     for (const name of readdirSync(src)) {
       const imports = /from "electron"|require\("electron"\)/.test(readFileSync(join(src, name), "utf8"));
-      expect(`${name}: ${imports}`).toBe(`${name}: ${name === "main.ts" || name === "dock-preload.ts"}`);
+      expect(`${name}: ${imports}`).toBe(`${name}: ${["main.ts", "dock-preload.ts", "snip-preload.ts"].includes(name)}`);
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
     expect(main).toContain("sandbox: true, contextIsolation: true, nodeIntegration: false");
-    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(3);
-    // The pop-up and the chat window: no preload. The dock: the same preferences, plus its preload.
+    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(4);
+    // The pop-up and the chat window: no preload. The dock and the snip overlays: the same preferences, plus their preload.
     expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(2);
-    expect(main.match(/webPreferences:/g)).toHaveLength(3);
+    expect(main.match(/webPreferences:/g)).toHaveLength(4);
     expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) }");
-    expect(main.match(/preload\s*:/g)).toHaveLength(1);
+    expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) }");
+    expect(main.match(/preload\s*:/g)).toHaveLength(2);
     expect(main).not.toMatch(/nodeIntegration: true|sandbox: false|contextIsolation: false|webSecurity: false/);
   });
 });
@@ -121,14 +144,14 @@ describe("bundle", () => {
 describe("settings", () => {
   test("a first start writes the defaults", () => {
     const file = join(dir, "data", "settings.json");
-    expect(loadSettings(file)).toEqual({ runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", dock: true });
+    expect(loadSettings(file)).toEqual({ runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true });
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(DEFAULT_SETTINGS);
   });
 
   test("a changed file is read, and is not overwritten", () => {
     const file = join(dir, "changed.json");
     writeFileSync(file, JSON.stringify({ runnerUrl: "http://localhost:5000/", hotkey: " Alt+F9 " }));
-    expect(loadSettings(file)).toEqual({ runnerUrl: "http://localhost:5000", hotkey: "Alt+F9", dock: true });
+    expect(loadSettings(file)).toEqual({ runnerUrl: "http://localhost:5000", hotkey: "Alt+F9", snipHotkey: "Control+Alt+S", dock: true });
     expect(JSON.parse(readFileSync(file, "utf8")).hotkey).toBe(" Alt+F9 ");
   });
 
@@ -138,6 +161,12 @@ describe("settings", () => {
     expect(parseSettings('{"hotkey":"Alt+F9"}')).toEqual({ ...DEFAULT_SETTINGS, hotkey: "Alt+F9" });
     expect(parseSettings('{"runnerUrl":"file:///c:/x","hotkey":7}')).toEqual(DEFAULT_SETTINGS);
     expect(parseSettings('{"runnerUrl":"javascript:alert(1)"}')).toEqual(DEFAULT_SETTINGS);
+  });
+
+  test("the snip hotkey is Control+Alt+S unless the file names another", () => {
+    expect(DEFAULT_SETTINGS.snipHotkey).toBe("Control+Alt+S");
+    expect(parseSettings('{"snipHotkey":" Alt+Shift+S "}')).toEqual({ ...DEFAULT_SETTINGS, snipHotkey: "Alt+Shift+S" });
+    for (const odd of ['""', '"  "', "7", "null", "{}"]) expect(parseSettings(`{"snipHotkey":${odd}}`).snipHotkey).toBe("Control+Alt+S");
   });
 
   test("the dock is on unless the file says false, and the tray's checkbox is written keeping the rest", () => {
@@ -170,6 +199,23 @@ describe("clips", () => {
     const prune = clipsToPrune([...names].reverse().concat("notes.txt", "clip-x.png.bak", "self-test-data"));
     expect(prune.sort()).toEqual(names.slice(0, 5));
     expect(clipsToPrune(names.slice(0, KEEP_CLIPS))).toEqual([]);
+  });
+
+  test("snips are snip-<time>.png, and are pruned with the clips: the newest 20 of both together", () => {
+    expect(clipFileName(new Date(2026, 10, 12, 9, 5, 7, 42), "snip")).toBe("snip-20261112-090507-042.png");
+    const names = Array.from({ length: 24 }, (_, i) => clipFileName(new Date(2026, 0, 1, 0, 0, i), i % 2 ? "snip" : "clip"));
+    const prune = clipsToPrune([...names].reverse().concat("snip-x.png.bak", "notes.txt"));
+    // By time, not by name: the four oldest go, clips and snips alike.
+    expect(prune.sort()).toEqual(names.slice(0, 4).sort());
+    const folder = join(dir, "snips");
+    const png = Buffer.concat([PNG_SIGNATURE, Buffer.from("rest")]);
+    for (let i = 0; i < 15; i++) saveClip(folder, png, new Date(2026, 0, 1, 0, 0, i));
+    for (let i = 15; i < 25; i++) saveClip(folder, png, new Date(2026, 0, 1, 0, 0, i), "snip");
+    const left = readdirSync(folder).sort();
+    expect(left).toHaveLength(20);
+    expect(left.filter((n) => n.startsWith("snip-"))).toHaveLength(10);
+    expect(left).not.toContain("clip-20260101-000004-000.png");
+    expect(left).toContain("clip-20260101-000005-000.png");
   });
 
   test("saving writes the PNG and keeps the newest 20 in the folder", () => {
@@ -231,6 +277,22 @@ describe("origin", () => {
     expect(sessionOf(chatUrl(RUNNER, "a b&c"))).toBe("a b&c");
     expect(sessionOf(chatUrl(RUNNER))).toBeUndefined();
     expect(dockUrl(RUNNER)).toBe("http://127.0.0.1:4777/dock");
+  });
+
+  test("links elsewhere go to the browser: http, https and mailto only, never the runner's own origin", () => {
+    expect(externalLink("https://example.com/a?b=1#c", RUNNER)).toBe("https://example.com/a?b=1#c");
+    expect(externalLink("http://example.com", RUNNER)).toBe("http://example.com/");
+    expect(externalLink("HTTPS://Example.COM/x", RUNNER)).toBe("https://example.com/x");
+    expect(externalLink("mailto:someone@example.com?subject=hi", RUNNER)).toBe("mailto:someone@example.com?subject=hi");
+    // Another port or name for this machine is another origin: a local dev server, say.
+    expect(externalLink("http://localhost:4777/prompt", RUNNER)).toBe("http://localhost:4777/prompt");
+    expect(externalLink("http://127.0.0.1:3000/", RUNNER)).toBe("http://127.0.0.1:3000/");
+    for (const url of [
+      "http://127.0.0.1:4777/", "http://127.0.0.1:4777/assets/base.css", "file:///C:/Windows/win.ini", "javascript:alert(1)", "data:text/html,hi", "about:blank",
+      "ftp://example.com/", "ms-settings:display", "vbscript:x", "chrome://settings", "\\\\server\\share", "C:\\Windows\\notepad.exe", "mailto:", "https://user:pass@example.com/", "https://user@example.com/", "", "not a url",
+    ]) {
+      expect(`${url} ${externalLink(url, RUNNER)}`).toBe(`${url} null`);
+    }
   });
 
   test("new windows: the chat view from any page, the pop-up from the dock only, nothing else", () => {
@@ -421,7 +483,8 @@ describe("the dock", () => {
 
   test("main.ts: one listener on the dock's channel, and it takes a state only through the validation", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
-    expect(main.match(/ipcMain\.\w+\(/g)).toEqual(["ipcMain.on("]);
+    // The dock's one channel, and the snip's three (see "the snip" for those).
+    expect(main.match(/ipcMain\.\w+\([^)]*\)/g)).toEqual(["ipcMain.handle(SNIP_CAPTURE, onSnipCapture)", "ipcMain.handle(SNIP_CROP, onSnipCrop)", "ipcMain.on(SNIP_CLOSE, onSnipClose)", "ipcMain.on(DOCK_CHANNEL, onDockState)"]);
     expect(main).toContain("ipcMain.on(DOCK_CHANNEL, onDockState);");
     const handler = main.slice(main.indexOf("function onDockState("), main.indexOf("/** Listens for the page's setState"));
     expect(handler).toContain("event.sender === dock.webContents");
@@ -455,6 +518,125 @@ describe("the dock", () => {
   });
 });
 
+describe("the snip", () => {
+  const display = { width: 1920, height: 1080 };
+
+  test("the page is /assets/snip.html on the runner's origin, and only there", () => {
+    expect(snipUrl(RUNNER)).toBe(`http://127.0.0.1:4777${SNIP_PATH}`);
+    expect(isSnipPage("http://127.0.0.1:4777/assets/snip.html", RUNNER)).toBe(true);
+    expect(isSnipPage("http://127.0.0.1:4777/assets/snip.html?x#y", RUNNER)).toBe(true);
+    for (const url of ["http://localhost:4777/assets/snip.html", "http://127.0.0.1:4777/prompt", "http://127.0.0.1:4777/assets/snip.js", "http://127.0.0.1:4777/assets/snip.html/x", "file:///C:/snip.html", "", null]) {
+      expect(`${url} ${isSnipPage(url, RUNNER)}`).toBe(`${url} false`);
+    }
+  });
+
+  test("a call is answered only from an overlay's main frame on the snip page", () => {
+    const page = "http://127.0.0.1:4777/assets/snip.html";
+    expect(acceptedSender({ fromOverlay: true, mainFrame: true, url: page }, RUNNER)).toBe(true);
+    expect(acceptedSender({ fromOverlay: false, mainFrame: true, url: page }, RUNNER)).toBe(false);
+    expect(acceptedSender({ fromOverlay: true, mainFrame: false, url: page }, RUNNER)).toBe(false);
+    expect(acceptedSender({ fromOverlay: true, mainFrame: true, url: "http://127.0.0.1:4777/prompt" }, RUNNER)).toBe(false);
+    expect(acceptedSender({ fromOverlay: true, mainFrame: true, url: "https://example.com/assets/snip.html" }, RUNNER)).toBe(false);
+    expect(acceptedSender({ fromOverlay: true, mainFrame: true, url: null }, RUNNER)).toBe(false);
+  });
+
+  test("crop takes a rectangle of finite numbers inside the display, and nothing else", () => {
+    expect(acceptedRect({ x: 0, y: 0, width: 1920, height: 1080 }, display)).toEqual({ x: 0, y: 0, width: 1920, height: 1080 });
+    expect(acceptedRect({ height: 49.5, width: 101, y: 20.25, x: 10.5 }, display)).toEqual({ x: 10.5, y: 20.25, width: 101, height: 49.5 });
+    expect(acceptedRect({ x: 1919, y: 1079, width: 1, height: 1 }, display)).not.toBeNull();
+    for (const bad of [
+      null, undefined, 7, "0,0,10,10", [0, 0, 10, 10], {}, { x: 0, y: 0, width: 10 },
+      { x: 0, y: 0, width: 10, height: 10, path: "C:\\x.png" }, { x: 0, y: 0, width: 10, height: 10, toString: 1 },
+      { x: "0", y: 0, width: 10, height: 10 }, { x: NaN, y: 0, width: 10, height: 10 }, { x: 0, y: 0, width: Infinity, height: 10 },
+      { x: 0, y: -Infinity, width: 10, height: 10 }, { x: 0, y: 0, width: 10, height: null },
+      { x: -1, y: 0, width: 10, height: 10 }, { x: 0, y: -0.5, width: 10, height: 10 }, { x: 0, y: 0, width: 0, height: 10 }, { x: 0, y: 0, width: 10, height: 0.9 },
+      { x: 0, y: 0, width: -10, height: 10 }, { x: 1911, y: 0, width: 10, height: 10 }, { x: 0, y: 1071, width: 10, height: 10 }, { x: 0, y: 0, width: 1921, height: 1080 },
+      { x: 0, y: 0, width: 1e308, height: 1e308 },
+    ]) {
+      expect(`${JSON.stringify(bad)} ${acceptedRect(bad, display)}`).toBe(`${JSON.stringify(bad)} null`);
+    }
+  });
+
+  // A display of 2560x1440 device pixels at each scale, and the same selection as the page would make it.
+  for (const [scale, dip] of [[1, { width: 2560, height: 1440 }], [1.25, { width: 2048, height: 1152 }], [1.5, { width: 1707, height: 960 }], [2, { width: 1280, height: 720 }]] as const) {
+    test(`the crop at ${scale * 100}%: device pixels, edges rounded outwards, inside the image`, () => {
+      const native = { width: Math.round(dip.width * scale), height: Math.round(dip.height * scale) };
+      // The image Windows gives at 150% is 2560 wide, though 1707 DIPs times 1.5 is 2560.5: the same crop.
+      if (scale === 1.5) expect(cropPlan({ x: 10, y: 20, width: 100, height: 50 }, dip, scale, { width: 2560, height: 1440 }).source).toEqual({ x: 15, y: 30, width: 150, height: 75 });
+      // A whole display is the whole image.
+      expect(cropPlan({ x: 0, y: 0, ...dip }, dip, scale, native)).toEqual({ source: { x: 0, y: 0, ...native }, output: native });
+      // 100x50 DIPs at 10,20 is 100*scale x 50*scale device pixels at 10*scale,20*scale.
+      const plain = cropPlan({ x: 10, y: 20, width: 100, height: 50 }, dip, scale, native);
+      expect(plain.source).toEqual({ x: Math.floor(10 * scale), y: Math.floor(20 * scale), width: Math.ceil(110 * scale) - Math.floor(10 * scale), height: Math.ceil(70 * scale) - Math.floor(20 * scale) });
+      expect(plain.output).toEqual({ width: plain.source.width, height: plain.source.height });
+      // Fractions: what was selected is all in, and no pixel more than that.
+      const fine = cropPlan(SELF_TEST_CROP, dip, scale, native).source;
+      expect(fine.x).toBeLessThanOrEqual(SELF_TEST_CROP.x * scale);
+      expect(fine.x + fine.width).toBeGreaterThanOrEqual((SELF_TEST_CROP.x + SELF_TEST_CROP.width) * scale);
+      expect(fine.width).toBeLessThanOrEqual(Math.ceil(SELF_TEST_CROP.width * scale) + 1);
+      // The bottom right corner stays inside the image.
+      const corner = cropPlan({ x: dip.width - 3.3, y: dip.height - 2.7, width: 3.3, height: 2.7 }, dip, scale, native).source;
+      expect(corner.x + corner.width).toBe(native.width);
+      expect(corner.y + corner.height).toBe(native.height);
+      // A capture that came back larger (sized for a bigger display): cut from it in its pixels, saved at this display's.
+      const big = { width: native.width * 2, height: native.height * 2 };
+      const resized = cropPlan({ x: 10, y: 20, width: 100, height: 50 }, dip, scale, big);
+      expect(resized.output).toEqual(plain.output);
+      expect(Math.abs(resized.source.width - plain.output.width * 2)).toBeLessThanOrEqual(2);
+    });
+  }
+
+  test("the crop of the known numbers", () => {
+    const at = (scale: number) => cropPlan(SELF_TEST_CROP, { width: 1920, height: 1080 }, scale, { width: 1920 * scale, height: 1080 * scale });
+    // 10.5..111.5 x 20.25..69.75 DIPs.
+    expect(at(1)).toEqual({ source: { x: 10, y: 20, width: 102, height: 50 }, output: { width: 102, height: 50 } });
+    expect(at(1.25).source).toEqual({ x: 13, y: 25, width: 127, height: 63 });
+    expect(at(1.5).source).toEqual({ x: 15, y: 30, width: 153, height: 75 });
+    expect(at(2).source).toEqual({ x: 21, y: 40, width: 202, height: 100 });
+    // 0.1 * 3 is 0.30000000000000004: still 0 and 1, not a pixel more.
+    expect(toPixels({ x: 0.1, y: 0, width: 0.2, height: 1 }, 3, { width: 10, height: 10 })).toEqual({ x: 0, y: 0, width: 1, height: 3 });
+  });
+
+  test("one capture for every display, as large as the largest at its native resolution, matched by display id", () => {
+    expect(captureSize([{ size: { width: 1440, height: 901 }, scaleFactor: 2 }, { size: { width: 1920, height: 1200 }, scaleFactor: 1 }])).toEqual({ width: 2880, height: 1802 });
+    expect(captureSize([{ size: { width: 1707, height: 960 }, scaleFactor: 1.5 }])).toEqual({ width: 2561, height: 1440 });
+    expect(matchSources([5, 7], ["7", "5"])).toEqual([1, 0]);
+    expect(matchSources([5, 7], ["", ""])).toEqual([0, 1]);
+    expect(matchSources([5, 7], ["5"])).toEqual([0, -1]);
+    expect(matchSources([5, 7, 9], ["", ""])).toEqual([0, 1, -1]);
+  });
+
+  test("main.ts: the overlays are sandboxed, every call goes through the checks, and the PNG is written under the temp folder only", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    const section = main.slice(main.indexOf("// --- Snip ---"), main.indexOf("// --- Dock ---"));
+    expect(section).toContain("webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) }");
+    for (const handler of ["onSnipCapture", "onSnipCrop", "onSnipClose"]) {
+      const body = section.slice(section.indexOf(`function ${handler}(`));
+      expect(body.slice(0, body.indexOf("\n}\n"))).toContain("overlayOf(event)");
+    }
+    expect(section).toContain("acceptedSender(");
+    const crop = section.slice(section.indexOf("async function onSnipCrop("));
+    expect(crop.slice(0, crop.indexOf("\n}\n"))).toContain("const rect = acceptedRect(value, bounds);");
+    // One write, by name from the clock, in <temp>\intuition. Nothing the page sends names a file.
+    expect(section.match(/saveClip\(|writeFileSync\(|writeFile\(/g)).toEqual(["saveClip("]);
+    expect(section).toContain('saveClip(join(app.getPath("temp"), "intuition"), cut.toPNG(), new Date(), "snip")');
+    expect(main).toContain('globalShortcut.register(settings.snipHotkey, () => void snip())');
+    expect(main).toContain('{ label: "Snip", click: () => void snip() }');
+  });
+
+  test("main.ts: links elsewhere go through externalLink to the browser; the self-test opens none", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main.match(/shell\.openExternal\(/g)).toHaveLength(1);
+    const open = main.slice(main.indexOf("function openExternal("));
+    const body = open.slice(0, open.indexOf("\n}\n"));
+    expect(body).toContain("const link = externalLink(url, settings.runnerUrl);");
+    expect(body).toContain("if (link === null) return;");
+    expect(body.indexOf("if (args.selfTest) externalOpened.push(link);")).toBeLessThan(body.indexOf("shell.openExternal(link)"));
+    // A redirect never opens anything.
+    expect(main).toContain('contents.on("will-redirect", stay);');
+  });
+});
+
 describe("no toasts for sessions", () => {
   test("the poller is gone: nothing in the shell asks for notifications or shows one for a session", () => {
     const src = join(REPO, "shell", "src");
@@ -466,9 +648,9 @@ describe("no toasts for sessions", () => {
     const main = readFileSync(join(src, "main.ts"), "utf8");
     // The one Notification left is notify(): the runner is not running or is older than the shell, the hotkey is taken, start on login failed.
     expect(main.match(/new Notification\(/g)).toHaveLength(1);
-    expect(main.match(/\bnotify\(/g)).toHaveLength(5);
+    expect(main.match(/\bnotify\(/g)).toHaveLength(6);
     expect(main).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
-    for (const title of ["intuition: the runner is not running", "intuition: the hotkey is taken", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
+    for (const title of ["intuition: the runner is not running", "intuition: the hotkey is taken", "intuition: the snip hotkey is taken", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
     expect(main).toContain("app.setAppUserModelId(");
   });
 });
@@ -489,11 +671,26 @@ describe("self-test runner", () => {
     dockBackBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockBackFocusable: false, dockForeignOriginIgnored: true,
     dockIgnoresMouseUnreported: true, dockIgnoresMouseAfterCrash: true,
     dockOpenedChatUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, dockOpenedPromptUrl: "http://127.0.0.1:5000/prompt",
-    dockOtherWindowRefused: true, dockHiddenWithoutRunner: true, dockShownAgain: true, errors: [],
+    dockOtherWindowRefused: true, dockHiddenWithoutRunner: true, dockShownAgain: true,
+    snipHotkeyRegistered: true, snipDisplays: [{ bounds: display, scaleFactor: 1.5 }, { bounds: { x: 2560, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }],
+    snipOverlayBounds: [display, { x: 2560, y: 0, width: 1920, height: 1080 }], snipOverlaysShown: true, snipUrl: "http://127.0.0.1:5000/assets/snip.html",
+    snipMs: 240, snipPhases: { warm: 1, captured: 150, drawn: 230 }, snipCaptured: true, snipBridge: "object:close,crop,getCapture:undefined:undefined",
+    snipCropRect: SELF_TEST_CROP, snipCropPath: "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\snip-20261113-120000-000.png", snipBadRectsRefused: true,
+    snipClosed: true, snipEscClosed: true, externalLinks: expectedExternal("http://127.0.0.1:5000"), errors: [],
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
-  const png = () => Buffer.concat([PNG_SIGNATURE, Buffer.alloc(8)]);
-  const check = (r: Partial<SelfTestResult>, p = posts, read: () => Uint8Array | null = png) => problems(r, { posts: p }, "http://127.0.0.1:5000", read);
+  /** A PNG header of a given size: what the stand-in reader gives for every path. */
+  const header = (width: number, height: number) => {
+    const b = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(16)]);
+    b.writeUInt32BE(13, 8);
+    b.write("IHDR", 12, "latin1");
+    b.writeUInt32BE(width, 16);
+    b.writeUInt32BE(height, 20);
+    return b;
+  };
+  // SELF_TEST_CROP at 150%: 10.5..111.5 x 20.25..69.75 is 15..168 x 30..105 device pixels.
+  const png = () => header(153, 75);
+  const check = (r: Partial<SelfTestResult>, p = posts, read: (windowsPath: string) => Uint8Array | null = png) => problems(r, { posts: p }, "http://127.0.0.1:5000", read);
 
   test("a clean result has no problems", () => {
     expect(check(good)).toEqual([]);
@@ -505,8 +702,8 @@ describe("self-test runner", () => {
       // Flipped, moved or replaced, by the field's kind. A display moved sideways moves where the dock should be.
       const broken = {
         ...good,
-        [key]: key === "errors" ? ["boom"] : typeof value === "number" ? 381 : typeof value === "string" || key === "openAtLogin" ? "C:\\elsewhere"
-          : typeof value === "boolean" ? !value : value && typeof value === "object" ? { ...value, x: (value as { x: number }).x + 2 } : false,
+        [key]: key === "errors" ? ["boom"] : typeof value === "number" ? 9999 : typeof value === "string" || key === "openAtLogin" ? "C:\\elsewhere"
+          : typeof value === "boolean" ? !value : Array.isArray(value) ? [] : value && typeof value === "object" ? { ...value, x: Number((value as { x: number }).x) + 2.5 } : false,
       };
       expect(`${key}: ${check(broken).length > 0}`).toBe(`${key}: true`);
     }
@@ -536,6 +733,35 @@ describe("self-test runner", () => {
     for (const bridge of ["object:setState,resize:undefined:undefined", "undefined::undefined:undefined", "object:setState:function:undefined", "object:setState:undefined:object"]) expect(check({ ...good, dockBridge: bridge })).toHaveLength(1);
   });
 
+  test("the snip: one overlay on each display's bounds, the bridge, the crop's size at the display's scale, and the time", () => {
+    expect(check({ ...good, snipOverlayBounds: [display] })).toHaveLength(1);
+    expect(check({ ...good, snipOverlayBounds: [display, { x: 2560, y: 0, width: 1920, height: 1081 }] })).toHaveLength(1);
+    expect(check({ ...good, snipMs: SNIP_SLOW_MS })).toHaveLength(1);
+    // Slower than aimed for is printed, not failed.
+    expect(check({ ...good, snipMs: 900 })).toEqual([]);
+    for (const bridge of ["object:close,crop,getCapture,save:undefined:undefined", "object:crop,getCapture:undefined:undefined", "object:close,crop,getCapture:function:undefined"]) expect(check({ ...good, snipBridge: bridge })).toHaveLength(1);
+    // The PNG's size at the first display's 150%: a pixel off, or the size at 100%, fails.
+    expect(check(good, posts, () => header(154, 75))).toHaveLength(1);
+    expect(check(good, posts, () => header(102, 50))).toHaveLength(1);
+    expect(check({ ...good, snipDisplays: [{ bounds: display, scaleFactor: 1 }, good.snipDisplays![1]!] }, posts, () => header(102, 50))).toEqual([]);
+    expect(check({ ...good, snipCropPath: "C:\\Users\\x\\Desktop\\snip-1.png" })).toHaveLength(1);
+    expect(check({ ...good, externalLinks: [...good.externalLinks, "file:///C:/Windows/win.ini"] })).toHaveLength(1);
+  });
+
+  test("an empty capture (a locked desktop) is said once and plainly, and the crop is not judged", () => {
+    const locked = check({ ...good, snipCaptured: false, snipCropPath: null }, posts, (p) => (p.includes("snip-") ? null : png()));
+    expect(locked).toHaveLength(1);
+    expect(locked[0]).toContain("lock screen");
+    // The rest of the snip is still judged.
+    expect(check({ ...good, snipCaptured: false, snipCropPath: null, snipEscClosed: false })).toHaveLength(2);
+  });
+
+  test("a PNG's size is read from its header", () => {
+    expect(pngSize(header(1920, 1080))).toEqual({ width: 1920, height: 1080 });
+    expect(pngSize(Buffer.from("BM not a png at all, long enough"))).toBeNull();
+    expect(pngSize(PNG_SIGNATURE)).toBeNull();
+  });
+
   test("start on login is reported, on or off: either passes, and only an unread one fails", () => {
     expect(check({ ...good, openAtLogin: true })).toEqual([]);
     expect(check({ ...good, openAtLogin: false })).toEqual([]);
@@ -545,8 +771,9 @@ describe("self-test runner", () => {
   test("what the stub runner received and the saved file are asserted too", () => {
     expect(check(good, [{ imagePath }])).toHaveLength(1);
     expect(check(good, [{ text: "intuition self-test 1" }])).toHaveLength(1);
-    expect(check(good, posts, () => null)).toHaveLength(2);
-    expect(check(good, posts, () => Buffer.from("BM not a png at all"))).toHaveLength(1);
+    // The clipboard image twice (missing, not a PNG) and the snip once.
+    expect(check(good, posts, () => null)).toHaveLength(3);
+    expect(check(good, posts, () => Buffer.from("BM not a png at all"))).toHaveLength(2);
   });
 
   test("the stub runner answers what the shell asks and records the clipboard posts", async () => {
@@ -564,6 +791,13 @@ describe("self-test runner", () => {
       expect(res.status).toBe(200);
       expect(runner.posts).toEqual([{ text: "hi" }]);
       expect((await fetch(`${runner.url}/nope`)).status).toBe(404);
+      // The real snip page and what it loads, from src/web; nothing outside it.
+      const page = await fetch(`${runner.url}/assets/snip.html`);
+      expect(page.headers.get("content-type")).toContain("text/html");
+      expect(await page.text()).toContain('src="/assets/snip.js"');
+      for (const file of ["snip.js", "snip-geometry.js", "snip.css", "base.css"]) expect(`${file} ${(await fetch(`${runner.url}/assets/${file}`)).status}`).toBe(`${file} 200`);
+      for (const path of ["/assets/../../package.json", "/assets/%2e%2e/%2e%2e/package.json", "/assets/nope.js"]) expect(`${path} ${(await fetch(`${runner.url}${path}`)).status}`).toBe(`${path} 404`);
+      expect(await (await fetch(`${runner.url}/api/workspaces`)).json()).toEqual({ workspaces: [], lastUsed: null });
     } finally {
       await runner.stop();
     }
