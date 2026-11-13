@@ -84,7 +84,7 @@ export function isInstalled(paths: ShellPaths): boolean {
 
 function needInstalled(paths: ShellPaths): void {
   needWindows();
-  if (!isInstalled(paths)) throw new Error("the shell is not installed: run `bun src/cli.ts shell install`");
+  if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
 }
 
 /** Where the runner lives, for the shell to start it: this distribution, this repo and the bun running this command. */
@@ -136,7 +136,7 @@ export async function login(action: "on" | "off" | "status", paths = shellPaths(
   await shell.exited;
   clearTimeout(timer);
   try {
-    if (!existsSync(resultFile)) throw new Error("the shell wrote no answer: an older bundle may be installed (run `bun src/cli.ts shell install`)");
+    if (!existsSync(resultFile)) throw new Error("the shell wrote no answer: an older bundle may be installed (run `intuition shell install`)");
     const result = JSON.parse(readFileSync(resultFile, "utf8")) as LoginResult;
     if (result.error || typeof result.openAtLogin !== "boolean") throw new Error(`the shell could not ${action === "status" ? "read" : "set"} start on login: ${result.error}`);
     return result;

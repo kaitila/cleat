@@ -11,12 +11,15 @@ How they talk: [protocol](docs/protocol.md). Why it is built this way: [decision
 
 ## Setup
 1. `bun install`
-2. `bun src/cli.ts up`
+2. `bun src/cli.ts link`, once: it puts the `intuition` command on the PATH
+3. `intuition up`, from any folder (`intuition` alone does the same)
+
+`link` makes a symlink named `intuition` to `src/cli.ts` in the folder bun itself is in (`~/.bun/bin`), or in the folder you give it (`bun src/cli.ts link ~/.local/bin`), and says whether that folder is on the PATH. It replaces its own link and nothing else: a file, or a link to another program, stays, and `link` says what it is. The command finds the repo from where the link points, so the repo can be anywhere, but a moved repo needs the old link removed and `link` run again. `bun src/cli.ts <command>` from the repo keeps working, with or without the link.
 
 `up` starts the runner in the background, installs the Windows shell if it is not installed yet (the first time, a download of about 130 MB) and starts it: look for its icon in the tray, then press Ctrl+Alt+Space. Without Windows it starts only the runner; the chat view is at `http://127.0.0.1:4777/`.
 
 ## Windows
-The shell (tray icon, hotkey, the dock) is installed and started from WSL, starts the runner itself when it is not running, and can start when you log in: `bun src/cli.ts shell login on`, or "Start on login" in the tray menu. Everything about it, its settings and its hand-test checklist: [the Windows shell](docs/windows-shell.md).
+The shell (tray icon, hotkey, the dock) is installed and started from WSL, starts the runner itself when it is not running, and can start when you log in: `intuition shell login on`, or "Start on login" in the tray menu. Everything about it, its settings and its hand-test checklist: [the Windows shell](docs/windows-shell.md).
 
 ## Configuration
 A file, `~/.config/intuition/config.json`, written with these defaults on first start:
@@ -36,13 +39,15 @@ A workspace whose folder is missing is listed but can't be picked. Sessions and 
 ## Commands
 | Command | What it does |
 |---|---|
-| `bun src/cli.ts up` | Start the runner, install the Windows shell if needed, start it |
-| `bun src/cli.ts start` | Start the runner in the background; prints its URL once it answers. Says so and exits 0 if it already runs |
-| `bun src/cli.ts stop` | Stop the runner that `start` started |
-| `bun src/cli.ts status` | Whether the runner runs (exit code 0 when it does, 1 when not) |
-| `bun src/cli.ts logs` | The end of the runner's log |
-| `bun src/cli.ts shell install` / `start` / `stop` | The Windows shell: install or update it, start it, quit it |
-| `bun src/cli.ts shell login on` / `off` / `status` | Start the shell when you log in to Windows |
+| `bun src/cli.ts link [dir]` | Put `intuition` on the PATH: a symlink in `dir`, or else in the folder bun is in. `intuition unlink [dir]` removes it |
+| `intuition up`, or `intuition` alone | Start the runner, install the Windows shell if needed, start it |
+| `intuition start` | Start the runner in the background; prints its URL once it answers. Says so and exits 0 if it already runs |
+| `intuition stop` | Stop the runner that `start` started |
+| `intuition status` | Whether the runner runs (exit code 0 when it does, 1 when not) |
+| `intuition logs` | The end of the runner's log |
+| `intuition shell install` / `start` / `stop` | The Windows shell: install or update it, start it, quit it |
+| `intuition shell login on` / `off` / `status` | Start the shell when you log in to Windows |
+| `intuition help` | The list of commands. An unknown command prints it too, and exits 2 |
 | `bun run start` | The runner in the foreground |
 | `bun run dev` | The runner in the foreground, restarting on change |
 | `bun run check` | Typecheck and tests: run before every commit |

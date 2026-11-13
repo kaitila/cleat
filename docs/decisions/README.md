@@ -12,3 +12,4 @@ One file per decision. Add a row when you add one.
 | [D0006](D0006-start-stop-and-login.md) | Start, stop and status keep a pid file; the shell starts the runner with `wsl.exe --exec`; start on login is Electron's login item | 2026-11-13 | Active |
 | [D0007](D0007-design-system.md) | The design system: Inter and JetBrains Mono served by the runner, hairlines of one device pixel, raw values only in `base.css` | 2026-11-13 | Active |
 | [D0008](D0008-dock.md) | A dock instead of toasts: one page in three window sizes, a one-word bridge to the shell, notifications pushed on the WebSocket | 2026-11-13 | Active |
+| [D0009](D0009-intuition-command.md) | The `intuition` command is a symlink to `src/cli.ts` in the folder bun is in; `link` replaces only its own link; a wrong command line exits 2 | 2026-11-13 | Active |

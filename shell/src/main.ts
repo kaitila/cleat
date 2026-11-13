@@ -92,8 +92,8 @@ function runnerDown(): void {
   // The self-test checks that no window opens; it does not put a toast on the person's screen.
   if (args.selfTest) return;
   const how = settings.wsl
-    ? "The shell tried to start it in WSL and it did not come up. In WSL: bun src/cli.ts start, and bun src/cli.ts logs"
-    : "Start it in WSL: bun src/cli.ts up";
+    ? "The shell tried to start it in WSL and it did not come up. In WSL: intuition start, and intuition logs"
+    : "Start it in WSL: intuition up";
   notify("intuition: the runner is not running", `Nothing answers at ${settings.runnerUrl}. ${how}`);
 }
 
