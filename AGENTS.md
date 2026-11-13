@@ -5,7 +5,7 @@ A Windows background app that fires tasks at Claude Code agents running in WSL2:
 Three parts:
 - **Runner** (`src/runner/`, bun + TypeScript, runs in WSL): a daemon on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, streams their events over a WebSocket and stores session metadata.
 - **Web UI** (`src/web/`, served by the runner): the pop-up prompt (`/prompt`) and the chat view (`/`). Plain HTML, CSS and JavaScript modules, no build step.
-- **Windows shell** (`shell/`, Electron + TypeScript): tray icon, global hotkey, clipboard capture, toasts, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun; Electron itself is installed into a Windows folder from WSL.
+- **Windows shell** (`shell/`, Electron + TypeScript): tray icon, global hotkey, clipboard capture, the dock, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun; Electron itself is installed into a Windows folder from WSL.
 
 ## Commands
 - `bun run check`: typecheck and tests. Run it before every commit; CI runs the same.

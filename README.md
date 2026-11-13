@@ -1,11 +1,11 @@
 # intuition
 
-Fire tasks at Claude Code agents in WSL2 from anywhere in Windows. Press a hotkey, a small pop-up appears with your clipboard attached, pick a workspace, type a task, press Enter. A chat window lists every session and shows the selected one streaming, with Allow / Deny for tool calls that need approval. Windows toasts tell you when a session finishes or needs you.
+Fire tasks at Claude Code agents in WSL2 from anywhere in Windows. Press a hotkey, a small pop-up appears with your clipboard attached, pick a workspace, type a task, press Enter. A chat window lists every session and shows the selected one streaming, with Allow / Deny for tool calls that need approval. A dock at the top of the screen shows when a session finishes or needs you.
 
 ## Parts
 - **Runner** (`src/runner/`): a bun daemon in WSL on `127.0.0.1:4777`. Starts and resumes Claude Code sessions through the Claude Agent SDK, streams events over a WebSocket, stores session metadata.
 - **Web UI** (`src/web/`): the pop-up (`/prompt`) and the chat view (`/`), served by the runner.
-- **Windows shell** (`shell/`): an Electron app in TypeScript: hotkey, tray icon, clipboard capture, toasts, start on login.
+- **Windows shell** (`shell/`): an Electron app in TypeScript: hotkey, tray icon, clipboard capture, the dock, start on login.
 
 How they talk: [protocol](docs/protocol.md). Why it is built this way: [decisions](docs/decisions/README.md).
 
@@ -16,7 +16,7 @@ How they talk: [protocol](docs/protocol.md). Why it is built this way: [decision
 `up` starts the runner in the background, installs the Windows shell if it is not installed yet (the first time, a download of about 130 MB) and starts it: look for its icon in the tray, then press Ctrl+Alt+Space. Without Windows it starts only the runner; the chat view is at `http://127.0.0.1:4777/`.
 
 ## Windows
-The shell (tray icon, hotkey, toasts) is installed and started from WSL, starts the runner itself when it is not running, and can start when you log in: `bun src/cli.ts shell login on`, or "Start on login" in the tray menu. Everything about it, its settings and its hand-test checklist: [the Windows shell](docs/windows-shell.md).
+The shell (tray icon, hotkey, the dock) is installed and started from WSL, starts the runner itself when it is not running, and can start when you log in: `bun src/cli.ts shell login on`, or "Start on login" in the tray menu. Everything about it, its settings and its hand-test checklist: [the Windows shell](docs/windows-shell.md).
 
 ## Configuration
 A file, `~/.config/intuition/config.json`, written with these defaults on first start:
