@@ -31,6 +31,14 @@ export const DOCK_PRELOAD = "dock-preload.cjs";
 export const DOCK_CHECK_MS = 4000;
 /** The runner has to miss this many checks in a row before the dock hides: one slow answer is not "gone". */
 export const DOCK_MISSES = 2;
+/**
+ * Shown once when the runner answers /health but its /dock does not load: a runner started before
+ * the update that added the dock, or one older than the shell some other way.
+ */
+export const DOCK_STALE_RUNNER = {
+  title: "intuition: the runner is older than the shell",
+  body: "The dock needs a newer runner: run intuition up in WSL. The dock appears by itself once it is restarted.",
+} as const;
 
 export function isDockState(value: unknown): value is DockState {
   return typeof value === "string" && (DOCK_STATES as readonly string[]).includes(value);

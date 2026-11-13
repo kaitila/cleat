@@ -3,17 +3,17 @@
 // at the top of the screen.
 // Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, session, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, takesMouse, watchMs } from "./dock";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, takesMouse, watchMs } from "./dock";
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, promptUrl, sameOrigin, windowTarget } from "./origin";
 import type { SelfTestResult } from "./result";
-import { loadSettings, saveDock, SETTINGS_FILE, type Settings } from "./settings";
+import { loadSettings, PID_FILE, saveDock, SETTINGS_FILE, type Settings } from "./settings";
 import { RUNNER_START_MS, runnerCommand } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
@@ -491,6 +491,9 @@ function createDock(): BrowserWindow {
   return win;
 }
 
+/** True once the stale-runner notification was shown; a dock that loads clears it. */
+let staleRunnerSaid = false;
+
 async function loadDock(): Promise<void> {
   const win = (dock ??= createDock());
   try {
@@ -502,12 +505,19 @@ async function loadDock(): Promise<void> {
     // A runner without the page answers 404 with a body, which loads: that is not the dock.
     if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl)} answered ${dockStatus}`);
     dockLoaded = true;
+    staleRunnerSaid = false;
     // Never activated: showing the dock takes nothing from what the person is doing.
     win.showInactive();
     watchDockMouseLoop();
   } catch (e) {
     console.error("loading the dock failed", e);
     hideDock();
+    // The runner answers but has no dock: it runs older code than the shell. Said once; the dock's
+    // check keeps loading the page every few seconds, so the dock appears once the runner is restarted.
+    if (!staleRunnerSaid && !args.selfTest && dockStatus >= 400 && (await runnerAnswers())) {
+      staleRunnerSaid = true;
+      notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);
+    }
   }
 }
 
@@ -816,6 +826,14 @@ function start(): void {
     setTimeout(() => done({ errors: ["the self-test did not finish in 40 seconds"] }), 40_000);
     void selfTest().then(done, (e) => done({ errors: [String(e)] }));
     return;
+  }
+  // For `up`, which waits for this process to end before it installs a new bundle over it.
+  const pidFile = join(app.getPath("userData"), PID_FILE);
+  try {
+    writeFileSync(pidFile, String(process.pid));
+    app.on("will-quit", () => rmSync(pidFile, { force: true }));
+  } catch (e) {
+    console.error("writing the pid file failed", e);
   }
 
   tray = createTray();

@@ -17,7 +17,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 
 | Method and path | Body | Answer |
 |---|---|---|
-| `GET /health` | | `{ ok: true, version }` |
+| `GET /health` | | `HealthResponse`: `{ ok: true, version, build }`. `build` is a hash of the code the runner process loaded ([D0011](decisions/D0011-stale-runner-and-shell.md)): `start` and `up` restart a runner whose `build` differs from the repo's. |
 | `GET /api/workspaces` | | `WorkspacesResponse`: the config's workspaces and the last one used |
 | `GET /api/sessions` | | `SessionsResponse`, newest first |
 | `POST /api/sessions` | `StartSessionRequest` | 201 `SessionResponse`. The turn runs in the background. Remembers the workspace as last used. 400 for an `imagePath` that is refused (see "Clipboard images"). |
