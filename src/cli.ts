@@ -1,10 +1,13 @@
-// The app's own commands: `bun src/cli.ts <command>`.
+#!/usr/bin/env bun
+// The app's own commands: `intuition <command>` once `bun src/cli.ts link` has put it on the PATH, or `bun src/cli.ts <command>`.
+import { pick } from "./cli/command";
+import { link, unlink } from "./cli/link";
 import * as runner from "./cli/runner";
 import { parseLogin } from "../shell/src/login";
 import { install, isInstalled, login, start, stop, writeRunnerLocation } from "./shell/install";
 import { hasWindows, shellPaths } from "./shell/paths";
 
-const USAGE = `usage: bun src/cli.ts <command>
+const USAGE = `usage: intuition <command>     (no command: intuition up)
 
   up              start the runner, install the Windows shell if it is not, and start it: the one command to run
   start           start the runner in the background and print its URL (--login-env: with the login shell's environment)
@@ -17,7 +20,11 @@ const USAGE = `usage: bun src/cli.ts <command>
   shell stop      quit the Windows shell
   shell login on|off|status
                   start the shell when you log in to Windows: turn it on, turn it off, or say which it is
-  shell selftest  install the shell and run its self-test against a stub runner`;
+  shell selftest  install the shell and run its self-test against a stub runner
+
+  link [dir]      put this command on the PATH: a link named intuition, in dir or else in the folder bun is in
+  unlink [dir]    remove that link
+  help            print this`;
 
 function startShell(): void {
   start();
@@ -26,7 +33,7 @@ function startShell(): void {
 
 function usageError(): never {
   console.error(USAGE);
-  process.exit(1);
+  process.exit(2);
 }
 
 /** Each command gets the words after its name and may return an exit code. */
@@ -65,19 +72,20 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
     const { openAtLogin } = await login(action);
     console.log(`start on login is ${openAtLogin ? "on" : "off"}`);
   },
+  link: (rest) => link(rest[0]),
+  unlink: (rest) => unlink(rest[0]),
+  help: () => console.log(USAGE),
   "shell selftest": async () => {
     process.exitCode = await (await import("./shell/selftest-run")).selfTestRun();
   },
 };
 
-const words = process.argv.slice(2);
-const name = [words.slice(0, 2).join(" "), words[0] ?? ""].find((n) => n in commands);
-if (name === undefined) {
-  console.error(USAGE);
-  process.exit(words.length ? 1 : 0);
-}
-const rest = words.slice(name.split(" ").length);
-if (rest.length && name !== "start" && name !== "shell login") usageError();
+const picked = pick(process.argv.slice(2), Object.keys(commands));
+if (!picked) usageError();
+const { name, rest } = picked;
+/** How many words each command takes after its name; the others take none. */
+const takes: Record<string, number> = { start: 1, "shell login": 1, link: 1, unlink: 1 };
+if (rest.length > (takes[name] ?? 0)) usageError();
 try {
   const code = await commands[name]!(rest);
   if (typeof code === "number") process.exitCode = code;

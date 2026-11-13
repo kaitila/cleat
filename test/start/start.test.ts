@@ -1,9 +1,11 @@
-// The runner's start, status, stop and logs commands, run as a person runs them: `bun src/cli.ts <command>`,
+// The runner's start, status, stop and logs commands, run as a person runs them: `bun src/cli.ts <command>`, and `intuition <command>` through a link in a temp folder,
 // against a temp config and data folder, a free port and the fake agent.
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join, relative } from "node:path";
+import { DEFAULT_COMMAND, pick } from "../../src/cli/command";
+import { defaultDir, link, onPath, unlink } from "../../src/cli/link";
 import { isRunner, LOG_FILE, PID_FILE, runnerCommand, URL_FILE } from "../../src/cli/runner";
 
 const REPO = join(import.meta.dir, "..", "..");
@@ -138,16 +140,205 @@ describe("edges", () => {
     expect(existsSync(join(data, PID_FILE))).toBe(false);
   });
 
-  test("unknown commands and stray words print the usage and exit 1", async () => {
+  test("unknown commands and stray words print the usage on stderr and exit 2", async () => {
     const { env } = folders();
-    for (const words of [["nope"], ["start", "now"], ["stop", "x"], ["shell", "login"], ["shell", "login", "maybe"], ["shell", "login", "on", "x"]]) {
-      const { code, out } = await cli(env, ...words);
-      expect(`${words.join(" ")}: ${code}`).toBe(`${words.join(" ")}: 1`);
-      expect(out).toContain("usage: bun src/cli.ts <command>");
+    for (const words of [["nope"], ["start", "now"], ["stop", "x"], ["shell", "login"], ["shell", "login", "maybe"], ["shell", "login", "on", "x"], ["link", "a", "b"], ["help", "x"]]) {
+      const p = Bun.spawnSync([process.execPath, CLI, ...words], { cwd: REPO, env: { ...process.env, ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      expect(`${words.join(" ")}: ${p.exitCode}`).toBe(`${words.join(" ")}: 2`);
+      expect(p.stderr.toString()).toContain("usage: intuition <command>");
+      expect(p.stdout.toString()).toBe("");
     }
-    const bare = await cli(env);
-    expect(bare.code).toBe(0);
-    for (const name of ["up", "start", "stop", "status", "logs", "shell install", "shell login on|off|status"]) expect(bare.out).toContain(`  ${name}`);
+  });
+
+  test("help, --help and -h print the usage on stdout and exit 0; it names every command as intuition", async () => {
+    const { env } = folders();
+    for (const word of ["help", "--help", "-h"]) {
+      const p = Bun.spawnSync([process.execPath, CLI, word], { cwd: REPO, env: { ...process.env, ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      expect(p.exitCode).toBe(0);
+      const out = p.stdout.toString();
+      expect(out).toContain("usage: intuition <command>");
+      expect(out).toContain("intuition up");
+      expect(out).not.toContain("bun src/cli.ts");
+      for (const name of ["up", "start", "stop", "status", "logs", "shell install", "shell login on|off|status", "link [dir]", "unlink [dir]", "help"]) expect(out).toContain(`  ${name}`);
+    }
+  });
+});
+
+// `intuition` alone is never run here: it is `up`, which would install and start the real Windows shell.
+describe("which command the words name", () => {
+  const names = ["up", "start", "shell install", "shell login", "link", "help"];
+
+  test("no words: up", () => {
+    expect(DEFAULT_COMMAND).toBe("up");
+    expect(pick([], names)).toEqual({ name: "up", rest: [] });
+  });
+
+  test("help, --help and -h: help", () => {
+    for (const word of ["help", "--help", "-h"]) expect(pick([word], names)).toEqual({ name: "help", rest: [] });
+  });
+
+  test("one word or two, with the rest after it", () => {
+    expect(pick(["start", "--login-env"], names)).toEqual({ name: "start", rest: ["--login-env"] });
+    expect(pick(["shell", "login", "on"], names)).toEqual({ name: "shell login", rest: ["on"] });
+    expect(pick(["link", "/some/bin"], names)).toEqual({ name: "link", rest: ["/some/bin"] });
+  });
+
+  test("anything else: none", () => {
+    for (const words of [["nope"], ["shell"], ["shell", "nope"], ["--version"], [""]]) expect(pick(words, names)).toBeNull();
+  });
+});
+
+describe("link and unlink", () => {
+  // Always a temp folder: the default, the folder bun is in, is the person's real PATH.
+  const bin = () => mkdtempSync(join(tmpdir(), "intuition-bin-"));
+  const lines = () => {
+    const out: string[] = [];
+    return { out, log: (line: string) => void out.push(line) };
+  };
+
+  test("the default folder is the one bun is in", () => {
+    expect(defaultDir()).toBe(dirname(process.execPath));
+  });
+
+  test("link makes a symlink named intuition to src/cli.ts, which is executable and starts with the bun line", () => {
+    const dir = bin();
+    const { out, log } = lines();
+    expect(link(dir, { PATH: `/usr/bin:${dir}` }, log)).toBe(0);
+    const path = join(dir, "intuition");
+    expect(lstatSync(path).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(path)).toBe(CLI);
+    expect(out).toEqual([`${path} -> ${CLI}`, `${dir} is on the PATH: type \`intuition\` in any folder`]);
+    expect(statSync(CLI).mode & 0o111).toBe(0o111);
+    expect(readFileSync(CLI, "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
+  });
+
+  test("it says when the folder is not on the PATH, and still links", () => {
+    const dir = bin();
+    const { out, log } = lines();
+    expect(link(dir, { PATH: "/usr/bin:/bin" }, log)).toBe(0);
+    expect(out[1]).toBe(`${dir} is not on the PATH: add it to the PATH, or run link with a folder that is on it`);
+    expect(readlinkSync(join(dir, "intuition"))).toBe(CLI);
+    expect(link(dir, {}, lines().log)).toBe(0);
+  });
+
+  test("the PATH is compared by real folder: a trailing slash or a link to it counts", () => {
+    const dir = bin();
+    const alias = join(bin(), "alias");
+    symlinkSync(dir, alias);
+    expect(onPath(dir, { PATH: `${dir}/` })).toBe(true);
+    expect(onPath(dir, { PATH: `/usr/bin:${alias}` })).toBe(true);
+    expect(onPath(dir, { PATH: "" })).toBe(false);
+    expect(onPath(dir, {})).toBe(false);
+  });
+
+  test("link replaces its own link, also one written as a relative path", () => {
+    const dir = bin();
+    const path = join(dir, "intuition");
+    expect(link(dir, {}, lines().log)).toBe(0);
+    expect(link(dir, {}, lines().log)).toBe(0);
+    expect(readlinkSync(path)).toBe(CLI);
+    rmSync(path);
+    symlinkSync(relative(realpathSync(dir), CLI), path);
+    expect(link(dir, {}, lines().log)).toBe(0);
+    expect(readlinkSync(path)).toBe(CLI);
+  });
+
+  test("link and unlink refuse a real file, a folder, and a link to another program or to nothing, and say what is there", () => {
+    const other = join(bin(), "other-program");
+    writeFileSync(other, "#!/bin/sh\n");
+    const gone = join(bin(), "gone", "src", "cli.ts");
+    const cases: [(path: string) => void, string][] = [
+      [(path) => writeFileSync(path, "mine\n"), "a file that is not a link"],
+      [(path) => mkdirSync(path), "a folder"],
+      [(path) => symlinkSync(other, path), `a link to ${other}`],
+      [(path) => symlinkSync(gone, path), `a link to ${gone} (which does not exist)`],
+    ];
+    for (const [make, what] of cases) {
+      const dir = bin();
+      const path = join(dir, "intuition");
+      make(path);
+      const before = lstatSync(path);
+      const linked = lines();
+      expect(link(dir, {}, linked.log)).toBe(1);
+      expect(linked.out).toEqual([`${path} is ${what}: not replaced. Remove it yourself, or give link another folder`]);
+      const unlinked = lines();
+      expect(unlink(dir, unlinked.log)).toBe(1);
+      expect(unlinked.out).toEqual([`${path} is ${what}: not removed`]);
+      const after = lstatSync(path);
+      expect([after.ino, after.isSymbolicLink()]).toEqual([before.ino, before.isSymbolicLink()]);
+    }
+    expect(readFileSync(other, "utf8")).toBe("#!/bin/sh\n");
+  });
+
+  test("link into a folder that is not there: exit 1, nothing made", () => {
+    const dir = join(bin(), "missing");
+    const { out, log } = lines();
+    expect(link(dir, {}, log)).toBe(1);
+    expect(out).toEqual([`${dir} is not a folder`]);
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  test("unlink removes our link, and says so when there is none", () => {
+    const dir = bin();
+    const path = join(dir, "intuition");
+    link(dir, {}, lines().log);
+    const first = lines();
+    expect(unlink(dir, first.log)).toBe(0);
+    expect(first.out).toEqual([`removed ${path}`]);
+    expect(existsSync(path)).toBe(false);
+    const second = lines();
+    expect(unlink(dir, second.log)).toBe(0);
+    expect(second.out).toEqual([`no link at ${path}`]);
+    expect(existsSync(CLI)).toBe(true);
+  });
+});
+
+describe("through the link, from another folder", () => {
+  const { dir, env } = folders();
+  started.push(env);
+  const bin = join(dir, "bin");
+  const elsewhere = join(dir, "elsewhere");
+  mkdirSync(bin);
+  mkdirSync(elsewhere);
+  // The link is run by name, so its first line finds bun on the PATH, as in a terminal.
+  const path = [bin, dirname(process.execPath), process.env.PATH ?? ""].join(delimiter);
+
+  async function intuition(...words: string[]): Promise<{ code: number; out: string }> {
+    const p = Bun.spawn([join(bin, "intuition"), ...words], { cwd: elsewhere, env: { ...process.env, ...env, PATH: path }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+    return { code, out: out + err };
+  }
+
+  test("bun src/cli.ts link <dir> makes the command, and says the folder is on the PATH", async () => {
+    const { code, out } = await cli({ ...env, PATH: path }, "link", bin);
+    expect(out).toBe(`${join(bin, "intuition")} -> ${CLI}\n${bin} is on the PATH: type \`intuition\` in any folder\n`);
+    expect(code).toBe(0);
+  });
+
+  test("intuition help, run by its name", async () => {
+    const { code, out } = await intuition("help");
+    expect(code).toBe(0);
+    expect(out).toContain("usage: intuition <command>");
+  });
+
+  test("intuition start finds the runner in the repo, not beside the link or in the current folder; stop stops it", async () => {
+    const start = await intuition("start");
+    expect(start.out).toMatch(/^intuition runner on http:\/\/127\.0\.0\.1:\d+ /);
+    expect(start.code).toBe(0);
+    const pid = Number(readFileSync(join(env.INTUITION_DATA_DIR, PID_FILE), "utf8"));
+    expect(readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")).toContain(join(REPO, "src", "runner", "main.ts"));
+    expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(REPO);
+    const url = start.out.match(/http:\/\/127\.0\.0\.1:\d+/)![0];
+    // The pages are served from the repo too.
+    expect((await fetch(`${url}/`)).status).toBe(200);
+    expect(await intuition("status")).toEqual({ code: 0, out: `running: ${url} (pid ${pid})\n` });
+    expect(await intuition("stop")).toEqual({ code: 0, out: `stopped (pid ${pid})\n` });
+    expect(isRunner(pid)).toBe(false);
+  });
+
+  test("intuition unlink <dir> removes it", async () => {
+    expect(await intuition("unlink", bin)).toEqual({ code: 0, out: `removed ${join(bin, "intuition")}\n` });
+    expect(existsSync(join(bin, "intuition"))).toBe(false);
   });
 });
 
