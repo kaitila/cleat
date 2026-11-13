@@ -51,20 +51,21 @@ export function sizeText(size) {
 }
 
 /**
- * Where the prompt box goes for a selection: below it, left edges lined up; above it when there is
- * no room below; inside it, at its bottom and centred, when there is room on neither side (a
- * selection as tall as the display). Always inside the display, GAP from its edges where it fits.
+ * Where the prompt box goes for a selection: below it, centred on it; above it, centred, when there
+ * is no room below; inside it, at its bottom and centred, when there is room on neither side (a
+ * selection as tall as the display). Always inside the display, GAP from its edges where it fits,
+ * so a selection near a side has its box pushed in from that side rather than centred.
  */
 export function anchorBox(sel, box, viewport) {
   const maxX = Math.max(0, viewport.width - box.width - GAP);
   const maxY = Math.max(0, viewport.height - box.height - GAP);
+  const x = Math.round(clamp(sel.x + (sel.width - box.width) / 2, Math.min(GAP, maxX), maxX));
   const below = sel.y + sel.height + GAP;
-  if (below + box.height <= viewport.height - GAP) return { placement: "below", x: clamp(sel.x, Math.min(GAP, maxX), maxX), y: below };
+  if (below + box.height <= viewport.height - GAP) return { placement: "below", x, y: below };
   const above = sel.y - GAP - box.height;
-  if (above >= GAP) return { placement: "above", x: clamp(sel.x, Math.min(GAP, maxX), maxX), y: above };
-  const x = sel.x + (sel.width - box.width) / 2;
+  if (above >= GAP) return { placement: "above", x, y: above };
   const y = sel.y + sel.height - GAP - box.height;
-  return { placement: "inside", x: Math.round(clamp(x, Math.min(GAP, maxX), maxX)), y: Math.round(clamp(y, Math.min(GAP, maxY), maxY)) };
+  return { placement: "inside", x, y: Math.round(clamp(y, Math.min(GAP, maxY), maxY)) };
 }
 
 /**

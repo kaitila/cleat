@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { EventsResponse, SessionsResponse, WorkspacesResponse } from "../../src/shared/protocol";
 import { loadConfig } from "../../src/runner/config";
 import { startServer } from "../../src/runner/server";
+import { frameStrip, pauseAll, type FramePage } from "./motion-frames";
 
 // The little of playwright's API this script uses (the package isn't a dependency, so no types).
 interface Page {
@@ -16,7 +17,8 @@ interface Page {
   click(selector: string): Promise<void>;
   waitForFunction(fn: () => unknown, arg?: unknown, options?: { timeout?: number }): Promise<unknown>;
   waitForEvent(event: "close", options?: { timeout?: number }): Promise<unknown>;
-  screenshot(options: { path: string }): Promise<unknown>;
+  screenshot(options: { path?: string; clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean }): Promise<Uint8Array>;
+  setContent(html: string): Promise<unknown>;
   isClosed(): boolean;
   close(): Promise<void>;
   addInitScript(fn: () => void): Promise<void>;
@@ -25,7 +27,7 @@ interface Page {
   keyboard: { type(text: string): Promise<void>; press(key: string): Promise<void> };
 }
 interface Browser {
-  newContext(options: { viewport: { width: number; height: number }; colorScheme: "light" | "dark"; deviceScaleFactor?: number }): Promise<{
+  newContext(options: { viewport: { width: number; height: number }; colorScheme: "light" | "dark"; deviceScaleFactor?: number; reducedMotion?: "reduce" | "no-preference" }): Promise<{
     newPage(): Promise<Page>;
     on(event: "request", listener: (request: { url(): string }) => void): void;
   }>;
@@ -132,17 +134,36 @@ const checkedOf = (s: ReturnType<typeof state>) => s.workspaces.find((w) => w.ch
 
 /** Every URL the pages asked for: none may be on another host (the fonts are the runner's own files). */
 const requested: string[] = [];
-async function newPage(colorScheme: "light" | "dark", from = browser): Promise<Page> {
-  const context = await from.newContext({ viewport: SIZE, colorScheme, ...(from === dense ? { deviceScaleFactor: 2 } : {}) });
+async function newPage(colorScheme: "light" | "dark", from = browser, reducedMotion: "reduce" | "no-preference" = "no-preference"): Promise<Page> {
+  const context = await from.newContext({ viewport: SIZE, colorScheme, reducedMotion, ...(from === dense ? { deviceScaleFactor: 2 } : {}) });
   context.on("request", (r) => requested.push(r.url()));
   return context.newPage();
 }
-async function open(colorScheme: "light" | "dark", from = browser): Promise<Page> {
-  const page = await newPage(colorScheme, from);
+async function open(colorScheme: "light" | "dark", from = browser, reducedMotion: "reduce" | "no-preference" = "no-preference"): Promise<Page> {
+  const page = await newPage(colorScheme, from, reducedMotion);
   await page.goto(`${runner.url}/prompt`);
   await page.waitForFunction(ready);
   return page;
 }
+/** How the page moves: the window's own animation, the workspace mark and where it is against the chosen chip. */
+const motion = () => {
+  const prompt = getComputedStyle(document.querySelector(".prompt")!);
+  const mark = document.querySelector<HTMLElement>(".workspace-mark")!;
+  const chip = document.querySelector("#workspaces input:checked + span")!.getBoundingClientRect();
+  const at = mark.getBoundingClientRect();
+  const clip = document.querySelector<HTMLElement>("#clipboard")!;
+  return {
+    page: prompt.animationName,
+    pageEasing: prompt.animationTimingFunction,
+    markTransition: getComputedStyle(mark).transitionProperty + " " + getComputedStyle(mark).transitionTimingFunction,
+    markOnChip: Math.abs(at.x - chip.x) <= 1 && Math.abs(at.y - chip.y) <= 1 && Math.abs(at.width - chip.width) <= 1,
+    markBehind: getComputedStyle(mark).backgroundColor !== "rgba(0, 0, 0, 0)" && getComputedStyle(document.querySelector("#workspaces input:checked + span")!).backgroundColor === "rgba(0, 0, 0, 0)",
+    clip: clip.getAnimations().map((a) => (a as CSSAnimation).animationName),
+  };
+};
+const blank = async () => (await (await browser.newContext({ viewport: { width: 1200, height: 400 }, colorScheme: "light" })).newPage()) as unknown as FramePage;
+const TIMES = [0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 350];
+
 async function shot(page: Page, name: string): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
   const path = join(shots, `${name}.png`);
@@ -172,9 +193,19 @@ try {
 
   await page.keyboard.press("Alt+1");
   check("Alt+1 can't pick the missing workspace", checkedOf(await page.evaluate(state)) === "alpha");
+  let m = await page.evaluate(motion);
+  check("the window's contents spring in on the gentle curve, with a fade", m.page === "page-in, fade-in" && m.pageEasing.startsWith("linear("), JSON.stringify(m));
+  check("the chosen workspace's background is one mark behind the chips, on the chosen chip", m.markOnChip && m.markBehind, JSON.stringify(m));
   await page.keyboard.press("Alt+3");
+  await pauseAll(page as unknown as FramePage);
+  m = await page.evaluate(motion);
+  check("the mark moves on a transform only, on the bouncy spring", /^transform linear\(/.test(m.markTransition), m.markTransition);
+  const markFrames = await frameStrip(page as unknown as FramePage, await blank(), { selector: ".workspace-mark", clip: { x: 0, y: 0, width: 280, height: 56 }, times: TIMES, path: join(shots, "strip-workspace-moving.png"), title: "The workspace mark sliding from alpha to beta (--ease-bouncy), at 2x", zoom: 2 });
+  console.log(`screenshot: ${join(shots, "strip-workspace-moving.png")}`);
+  check("Alt+3 slides the mark (a transition was running)", markFrames === 1, String(markFrames));
   s = await page.evaluate(state);
   check("Alt+3 picks the third workspace and typing stays in the task box", checkedOf(s) === "beta" && s.focus === "task");
+  check("and the mark ends on that chip", (await page.evaluate(motion)).markOnChip);
 
   await page.keyboard.type("Tidy the notes");
   await page.keyboard.press("Shift+Enter");
@@ -262,6 +293,12 @@ try {
   await post({ text: COPIED });
   const withText = await open("light");
   await withText.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
+  await pauseAll(withText as unknown as FramePage);
+  const arriving = (await withText.evaluate(motion)).clip;
+  check("the attachment springs in as it arrives", arriving.includes("pop-in") && arriving.includes("fade-in"), JSON.stringify(arriving));
+  const clipFrames = await frameStrip(withText as unknown as FramePage, await blank(), { selector: "#clipboard", clip: { x: 0, y: 250, width: 560, height: 90 }, times: TIMES, path: join(shots, "strip-clipboard-arriving.png"), title: "The clipboard attachment arriving (pop-in on --ease-bouncy)" });
+  console.log(`screenshot: ${join(shots, "strip-clipboard-arriving.png")}`);
+  check("the strip stepped its spring", clipFrames >= 1, String(clipFrames));
   let c = await withText.evaluate(clipState);
   check("a fresh text capture is shown with its first two lines", !c.hidden && c.text === "const answer = 42;\nconsole.log(answer);", JSON.stringify(c));
   check("the attachment has a remove control", c.remove);
@@ -368,6 +405,11 @@ try {
 
   const elsewhere = requested.filter((u) => !/^(?:data|blob|about):/.test(u) && new URL(u).hostname !== "127.0.0.1");
   check("no request left 127.0.0.1", requested.length > 0 && elsewhere.length === 0, elsewhere.join(" "));
+  // Reduced motion: the window fades in, and nothing grows, slides or bounces.
+  const still = await open("light", browser, "reduce");
+  m = await still.evaluate(motion);
+  check("with prefers-reduced-motion the window only fades in, linear, and the mark doesn't slide", m.page === "fade-in" && m.pageEasing === "linear" && !/[1-9]/.test(await still.evaluate(() => getComputedStyle(document.querySelector(".workspace-mark")!).transitionDuration)), JSON.stringify(m));
+  await still.close();
 } catch (e) {
   check("the run finished", false, (e as Error).stack ?? String(e));
 } finally {

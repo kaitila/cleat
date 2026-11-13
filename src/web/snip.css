@@ -17,32 +17,57 @@ body.snip {
   pointer-events: none;
 }
 
-/* The dim: the dark scheme's back surface at a little under half. snip.js cuts the selection out
-   of it with a clip-path, so the selection shows the screen as it is. */
+/* The dim: the dark scheme's back surface at about half, a little more than a plain dim so the
+   selection stands out. snip.js cuts the selection out of it with a clip-path, so the selection
+   shows the screen as it is. It fades in fast once the capture is up. */
 .shade {
   position: fixed;
   inset: 0;
   background: var(--sunken);
-  opacity: 0.42;
+  opacity: var(--snip-dim);
   pointer-events: none;
 }
+body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backwards; }
 
-/* The selection's edge: a hairline outside it, so every selected pixel shows as it is. */
+/* The selection's edge: a light neutral hairline of one device pixel, just outside it, so every
+   selected pixel shows as it is; a faint light inside the edge lifts it off the dim (--snip-edge). It follows
+   the pointer exactly: nothing here moves it on a curve. snip.js sets its box on device pixels. */
 .selection {
   position: fixed;
-  outline: var(--hairline) solid var(--accent);
-  outline-offset: 0;
+  box-shadow: var(--snip-edge);
   pointer-events: none;
 }
+/* Corner marks, a little bolder than the edge. On release (data-settle) they come in from a few
+   pixels out and settle with a small bounce. */
+.corner {
+  position: absolute;
+  width: var(--space-3);
+  height: var(--space-3);
+  border-style: solid;
+  border-color: var(--snip-mark);
+  border-width: 0;
+}
+.corner[data-at="tl"] { top: calc(var(--snip-mark-w) * -1); left: calc(var(--snip-mark-w) * -1); border-top-width: var(--snip-mark-w); border-left-width: var(--snip-mark-w); }
+.corner[data-at="tr"] { top: calc(var(--snip-mark-w) * -1); right: calc(var(--snip-mark-w) * -1); border-top-width: var(--snip-mark-w); border-right-width: var(--snip-mark-w); }
+.corner[data-at="bl"] { bottom: calc(var(--snip-mark-w) * -1); left: calc(var(--snip-mark-w) * -1); border-bottom-width: var(--snip-mark-w); border-left-width: var(--snip-mark-w); }
+.corner[data-at="br"] { bottom: calc(var(--snip-mark-w) * -1); right: calc(var(--snip-mark-w) * -1); border-bottom-width: var(--snip-mark-w); border-right-width: var(--snip-mark-w); }
+.selection[data-settle] .corner { animation: var(--dur-bouncy) var(--ease-bouncy) backwards; }
+.selection[data-settle] .corner[data-at="tl"] { animation-name: corner-tl; }
+.selection[data-settle] .corner[data-at="tr"] { animation-name: corner-tr; }
+.selection[data-settle] .corner[data-at="bl"] { animation-name: corner-bl; }
+.selection[data-settle] .corner[data-at="br"] { animation-name: corner-br; }
+/* A selection too small for its marks shows its edge alone. */
+.selection[data-small] .corner { display: none; }
 
-/* Its size in device pixels, small, at its top left corner. */
+/* Its size in device pixels, small, at its top left corner: the same neutral light on a dark veil. */
 .size {
   position: fixed;
   padding: 0 var(--space-1);
   border-radius: var(--radius-s);
-  background: var(--sunken);
-  color: var(--text);
+  background: var(--snip-label);
+  color: var(--snip-mark);
   font-size: var(--text-xs);
+  font-weight: var(--medium);
   line-height: var(--leading);
   white-space: nowrap;
   pointer-events: none;
@@ -67,7 +92,9 @@ body.snip {
 }
 .hint[data-kind="error"] { border-color: var(--danger); }
 
-/* The prompt box: it floats above the screen, so it has the shadow. snip.js places it. */
+/* The prompt box: it floats above the screen, so it has the shadow. snip.js places it, centred
+   on the selection, and sets data-in when it appears: it springs up from a little smaller and
+   lower, past its place and back, while the focus is already in its task box. */
 .box {
   position: fixed;
   display: flex;
@@ -81,7 +108,10 @@ body.snip {
   cursor: auto;
   user-select: text;
   overflow: hidden;
+  transform-origin: 50% 0;
 }
+.box[data-placement="above"], .box[data-placement="inside"] { transform-origin: 50% 100%; }
+.box[data-in] { animation: box-pop var(--dur-bouncy) var(--ease-bouncy) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
 .task {
   display: block;
   width: 100%;
@@ -130,3 +160,24 @@ button.chip:hover { background: var(--hover); }
 .status[data-kind="error"] { color: var(--danger); }
 .keys { flex: none; display: flex; align-items: center; gap: var(--space-1); white-space: nowrap; font-size: var(--text-xs); }
 .keys span { margin-right: var(--space-1); }
+
+/* Closing: the marks fade back to the frozen screen, quickly, before the window goes. */
+body[data-closing] :is(.shade, .selection, .size, .hint, .box) { animation: fade-out var(--dur-out) var(--ease) forwards; }
+
+@keyframes dim-in { from { opacity: 0; } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes box-pop { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
+/* Each corner mark comes in from a few pixels out along its diagonal. */
+@keyframes corner-tl { from { transform: translate(calc(var(--space-1) * -1), calc(var(--space-1) * -1)); } }
+@keyframes corner-tr { from { transform: translate(var(--space-1), calc(var(--space-1) * -1)); } }
+@keyframes corner-bl { from { transform: translate(calc(var(--space-1) * -1), var(--space-1)); } }
+@keyframes corner-br { from { transform: translate(var(--space-1), var(--space-1)); } }
+
+/* Reduced motion: base.css stops every animation; the fades come back, plain (base.css also takes
+   the rise and the pop out of the tokens). Nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  body[data-ready] .shade { animation: dim-in var(--dur-fade) linear backwards !important; }
+  .box[data-in] { animation: fade-in var(--dur-fade) linear backwards !important; }
+  body[data-closing] :is(.shade, .selection, .size, .hint, .box) { animation: fade-out var(--dur-out) linear forwards !important; }
+}
