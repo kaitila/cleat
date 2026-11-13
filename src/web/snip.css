@@ -108,13 +108,17 @@ body.snip {
   background: var(--sunken);
 }
 /* The workspace: one chip. Tab and Alt+1..9 switch it; so does a click. */
-.chip {
+button.chip {
   flex: none;
   max-width: 50%;
+  gap: var(--space-2);
+  padding: 0 var(--space-1) 0 var(--space-2);
   background: var(--selected);
   color: var(--text);
 }
+button.chip:hover { background: var(--hover); }
 .chip span { overflow: hidden; text-overflow: ellipsis; }
+.chip kbd { height: calc(var(--control-s) - var(--space-1)); }
 .status {
   flex: 1;
   min-width: 0;
