@@ -2,15 +2,18 @@
 // This machine only: it needs the playwright that is installed globally for bun and its browser,
 // and prints a "skipped" line and exits 0 where there is none (and in CI).
 // The runner is real, on a free port with temp folders, with the fake agent (INTUITION_FAKE_AGENT=1),
-// slowed down so a running session can be seen. The shell is a stand-in: a window.intuitionDock that
-// records each setState call and resizes the viewport to the contract's size, as the shell resizes
-// its window (docs/protocol.md, "Dock").
-import { existsSync, mkdtempSync } from "node:fs";
+// slowed down so a running session can be seen. The shell is a stand-in: a viewport of the window's
+// one size that never changes, and a window.intuitionDock that records each setState call
+// (docs/protocol.md, "Dock").
+// It measures the island as it is drawn (its clip, found by hit-testing), times the frames of an
+// open and a close, and saves screenshots of every state and a strip of frames through the open and
+// the close animation, for a person or an agent to look at.
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeDriver } from "../../src/runner/agent-fake";
 import { Store } from "../../src/runner/store";
-import { DOCK_SIZES, type DockState } from "../../shell/src/dock";
+import { DOCK_SIZES, DOCK_WINDOW, type DockState, islandRect } from "../../shell/src/dock";
 import { testRunner } from "../runner/helpers";
 
 const PLAYWRIGHT = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
@@ -18,6 +21,10 @@ const PLAYWRIGHT = join(homedir(), ".bun", "install", "global", "node_modules", 
 const HOSTILE = '<img src=x onerror="window.__xss=1">';
 /** The fake agent waits this long between its steps: a turn takes a second or two. */
 const STEP_MS = 250;
+/** A frame of a 60 Hz screen is 16.7 ms: a worst frame under two of them dropped none in a row. */
+const FRAME_LIMIT_MS = 34;
+/** What stands in for the desktop behind the clear window, in the screenshots only. */
+const DESKTOP = { light: "#dfe3ea", dark: "#1d1f24" };
 
 function skip(why: string): never {
   console.log(`dock-ui: skipped (${why})`);
@@ -46,8 +53,12 @@ function check(ok: unknown, what: string): void {
   console.log(`  ok  ${what}`);
 }
 
-/** One setState call, as the stand-in saw it: the state, and what the page showed at that moment. */
-interface Call { state: DockState; at: number; panelShown: boolean; peekShown: boolean; islandWidth: number; islandHeight: number }
+/** One setState call, as the stand-in saw it. */
+interface Call { state: DockState; at: number }
+/** The island as drawn: its clip, measured by hit-testing, relative to the island's box (the window). */
+interface Shape { left: number; top: number; width: number; height: number }
+/** One frame of a recording: how long after the frame before, and how tall and wide the island was drawn. */
+interface Frame { ms: number; height: number; width: number }
 
 /** An older session full of text that must stay text. */
 function seed(dataDir: string): string {
@@ -78,85 +89,219 @@ let failed = false;
 const requested: string[] = [];
 const pageErrors: string[] = [];
 
-/** A dock page in a window of the idle size, with the stand-in for the shell's bridge. */
-async function dock(colorScheme: "light" | "dark", bridge = true) {
-  const context = await browser.newContext({ viewport: bridge ? { ...DOCK_SIZES.idle } : { width: 1000, height: 700 }, colorScheme });
+/** What the page gets before its own scripts: the stand-in bridge, and the test's instruments. */
+function instruments(bridge: boolean): void {
+  const w = window as Any;
+  w.__calls = [];
+  // What the shell's preload gives the page: setState and nothing else. The window stays as it is.
+  if (bridge) w.intuitionDock = { setState: (state: string) => void w.__calls.push({ state, at: Date.now() }) };
+
+  /** The island as drawn. Its box never changes, so its clip is found by asking what is under a point. */
+  w.__shape = () => {
+    const island = document.getElementById("island")!;
+    const box = island.getBoundingClientRect();
+    const middle = box.left + box.width / 2;
+    const y0 = box.top + 1;
+    const on = (x: number, y: number) => {
+      const el = document.elementFromPoint(x, y);
+      return el !== null && island.contains(el);
+    };
+    /** The first value past `from`, towards `to`, that is off the island, to a quarter pixel. */
+    const edge = (test: (v: number) => boolean, from: number, to: number) => {
+      let [a, b] = [from, to];
+      while (Math.abs(b - a) > 0.25) {
+        const mid = (a + b) / 2;
+        if (test(mid)) a = mid;
+        else b = mid;
+      }
+      return Math.round(b * 2) / 2;
+    };
+    if (!on(middle, y0)) return { left: box.width / 2, top: 0, width: 0, height: 0 };
+    const bottom = edge((y) => on(middle, y), y0, box.bottom + 1);
+    const right = edge((x) => on(x, y0), middle, box.right + 1);
+    const left = edge((x) => on(x, y0), middle, box.left - 1);
+    return { left: left - box.left, top: 0, width: right - left, height: bottom - box.top };
+  };
+
+  /** Records every frame from now until __stop(): its length, and the island's size in it. */
+  w.__record = () => {
+    const frames: { ms: number; height: number; width: number }[] = [];
+    let last = 0;
+    let on = true;
+    const tick = (now: number) => {
+      if (!on) return;
+      if (last) {
+        const shape = w.__shape();
+        frames.push({ ms: now - last, height: shape.height, width: shape.width });
+      }
+      last = now;
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    w.__stop = () => {
+      on = false;
+      return frames;
+    };
+  };
+
+  /** Everything that moves for a change of state: the clip's transitions and the content's fades, not the running dot's pulse. */
+  w.__moving = () => document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity);
+
+  /** Holds every animation of a change of state at one moment of it (ms), until __release(). */
+  w.__hold = (ms: number) => {
+    w.__held = ms;
+    if (w.__holding) return;
+    w.__holding = true;
+    const pin = () => {
+      if (!w.__holding) return;
+      for (const a of w.__moving()) {
+        a.pause();
+        a.currentTime = w.__held;
+      }
+      requestAnimationFrame(pin);
+    };
+    pin();
+  };
+  w.__release = () => {
+    w.__holding = false;
+    for (const a of w.__moving()) a.play();
+  };
+}
+
+interface Options { bridge?: boolean; scale?: number; reducedMotion?: "reduce" | "no-preference" }
+
+/** A dock page in a window of the shell's one size, with the stand-in for the bridge. */
+async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, reducedMotion = "no-preference" }: Options = {}) {
+  const viewport = bridge ? { ...DOCK_WINDOW } : { width: 1000, height: 700 };
+  const context = await browser.newContext({ viewport, colorScheme, deviceScaleFactor: scale, reducedMotion });
   context.on("request", (r: Any) => requested.push(r.url()));
   const page = await context.newPage();
   page.on("pageerror", (e: Error) => pageErrors.push(e.message));
   page.on("console", (m: Any) => {
     if (m.type() === "error") pageErrors.push(m.text());
   });
-  if (bridge) {
-    await page.exposeFunction("__resize", (state: DockState) => page.setViewportSize({ ...DOCK_SIZES[state] }));
-    await page.addInitScript(() => {
-      const w = window as Any;
-      w.__calls = [];
-      // What the shell's preload gives the page: setState and nothing else.
-      w.intuitionDock = {
-        setState(state: string) {
-          const island = document.getElementById("island")?.getBoundingClientRect();
-          const shown = (id: string) => document.getElementById(id)?.hidden === false;
-          w.__calls.push({ state, at: Date.now(), panelShown: shown("panel"), peekShown: shown("peek"), islandWidth: island?.width ?? 0, islandHeight: island?.height ?? 0 });
-          void w.__resize(state);
-        },
-      };
-    });
-  }
+  await page.addInitScript(instruments, bridge);
   const calls = () => page.evaluate(() => (window as Any).__calls) as Promise<Call[]>;
   const lastCall = async () => (await calls()).at(-1)!;
   const text = (selector: string) => page.locator(selector).allTextContents() as Promise<string[]>;
-  /** Waits until the shell has been told `state` and the island has finished changing size. */
+  const shape = () => page.evaluate(() => (window as Any).__shape()) as Promise<Shape>;
+  /** Waits until the shell has been told `state` and nothing moves any more. */
   const settle = async (state: DockState) => {
-    await page.waitForFunction((s: string) => (window as Any).__calls.at(-1)?.state === s, state);
-    await page.waitForFunction(
-      ([w, h]: number[]) => {
-        const r = document.getElementById("island")!.getBoundingClientRect();
-        return r.width === w && r.height === h && window.innerWidth === w && window.innerHeight === h;
-      },
-      [DOCK_SIZES[state].width, DOCK_SIZES[state].height],
-    );
+    if (bridge) await page.waitForFunction((s: string) => (window as Any).__calls.at(-1)?.state === s, state);
+    await page.waitForFunction((s: string) => document.getElementById("island")!.dataset.state === s && (window as Any).__moving().length === 0, state);
+    // The panel may still be growing with its content: two frames in a row of the same shape.
+    await page.waitForFunction(() => {
+      const w = window as Any;
+      const now = JSON.stringify(w.__shape());
+      const same = w.__lastShape === now && w.__moving().length === 0;
+      w.__lastShape = now;
+      return same;
+    }, undefined, { polling: 60 });
   };
-  /** What is outside the state's window: nothing may be. Returns the reasons, none when all is inside. */
-  const outside = (state: DockState) =>
+  /** What is wrong with the island as drawn in a state. Returns the reasons, none when all is well. */
+  const wrong = (state: DockState) =>
     page.evaluate(
-      ([w, h, view]: [number, number, string]) => {
+      ([most, rect, win, view, exact]: [{ width: number; height: number }, { x: number; y: number }, { width: number; height: number } | null, string, boolean]) => {
         const why: string[] = [];
         const root = document.documentElement;
-        if (window.innerWidth !== w || window.innerHeight !== h) why.push(`the window is ${window.innerWidth}x${window.innerHeight}`);
-        if (root.scrollWidth > w || root.scrollHeight > h) why.push(`the page is ${root.scrollWidth}x${root.scrollHeight} and scrolls`);
+        if (win && (window.innerWidth !== win.width || window.innerHeight !== win.height)) why.push(`the window is ${window.innerWidth}x${window.innerHeight}`);
+        if (root.scrollWidth > window.innerWidth || root.scrollHeight > window.innerHeight) why.push(`the page is ${root.scrollWidth}x${root.scrollHeight} and scrolls`);
         if (getComputedStyle(document.body).overflow !== "hidden") why.push("the body may scroll");
-        const island = document.getElementById("island")!;
-        const r = island.getBoundingClientRect();
-        if (r.left !== 0 || r.top !== 0 || r.width !== w || r.height !== h) why.push(`the island is at ${r.left},${r.top} ${r.width}x${r.height}`);
-        if (getComputedStyle(island).overflow !== "hidden") why.push("the island does not clip its content");
-        if (getComputedStyle(island).boxShadow !== "none") why.push("the island has a shadow, which would be cut by the window");
         const bg = getComputedStyle(document.body).backgroundColor;
         if (bg !== "rgba(0, 0, 0, 0)") why.push(`the page's background is ${bg}, not transparent`);
-        // Everything the state shows lies inside the window, except what a scrolling box holds.
-        for (const el of document.getElementById(view)!.querySelectorAll("*")) {
+        const island = document.getElementById("island")!;
+        const box = island.getBoundingClientRect();
+        if (win && (box.left !== 0 || box.top !== 0 || box.width !== win.width || box.height !== win.height)) why.push(`the island's box is at ${box.left},${box.top} ${box.width}x${box.height}, not the window`);
+        for (const el of [island, island.firstElementChild!]) {
+          const style = getComputedStyle(el);
+          if (style.boxShadow !== "none" || style.filter !== "none" || style.backdropFilter !== "none") why.push(`<${el.tagName.toLowerCase()} class="${el.className}"> has a shadow or a filter`);
+        }
+        // As drawn: hanging from the top, in the middle, and nowhere outside the rectangle the shell takes the mouse in.
+        const shape = (window as Any).__shape() as { left: number; top: number; width: number; height: number };
+        if (shape.width <= 0 || shape.height <= 0) why.push("nothing is drawn");
+        if (shape.width > most.width || shape.height > most.height) why.push(`the island is drawn ${shape.width}x${shape.height}, more than ${most.width}x${most.height}`);
+        if (exact && (shape.width !== most.width || shape.height !== most.height)) why.push(`the island is drawn ${shape.width}x${shape.height}, not ${most.width}x${most.height}`);
+        if (Math.abs(shape.left + shape.width / 2 - box.width / 2) > 0.5) why.push(`the island's middle is at ${shape.left + shape.width / 2}, not ${box.width / 2}`);
+        if (win && shape.left < rect.x) why.push(`the island starts at ${shape.left}, left of ${rect.x}`);
+        // Everything the state shows lies inside what is drawn, except what a scrolling box holds.
+        const layer = document.getElementById(view)!;
+        if (layer.hidden || layer.classList.contains("leaving")) why.push(`#${view} is not shown`);
+        for (const el of [layer, ...layer.querySelectorAll("*")]) {
           if (el.closest(".scroller > *, .sessions > *") || (el as HTMLElement).offsetParent === null) continue;
           const b = el.getBoundingClientRect();
-          if (b.left < -0.5 || b.top < -0.5 || b.right > w + 0.5 || b.bottom > h + 0.5) why.push(`<${el.tagName.toLowerCase()} class="${el.className}"> reaches ${Math.round(b.right)},${Math.round(b.bottom)}`);
+          if (b.width === 0 || b.height === 0) continue;
+          const [l, t, r, bt] = [b.left - box.left - shape.left, b.top - box.top, b.right - box.left - shape.left - shape.width, b.bottom - box.top - shape.height];
+          if (l < -0.5 || t < -0.5 || r > 0.5 || bt > 0.5) why.push(`<${el.tagName.toLowerCase()} class="${el.className}"> reaches outside the island by ${Math.max(-l, -t, r, bt).toFixed(1)}px`);
         }
         return why;
       },
-      [DOCK_SIZES[state].width, DOCK_SIZES[state].height, state === "idle" ? "pill" : state === "peek" ? "peek" : "panel"] as [number, number, string],
+      [DOCK_SIZES[state], islandRect(state), bridge ? DOCK_WINDOW : null, state === "idle" ? "pill" : state === "peek" ? "peek" : "panel", state === "peek"] as const,
     ) as Promise<string[]>;
   const fits = async (state: DockState) => {
-    const why = await outside(state);
-    check(why.length === 0, `${colorScheme}, ${state}: nothing is drawn or scrolls outside ${DOCK_SIZES[state].width}x${DOCK_SIZES[state].height} (${why.join("; ") || "all inside"})`);
+    const why = await wrong(state);
+    const s = await shape();
+    check(why.length === 0, `${colorScheme}, ${state}: the island is drawn ${s.width}x${s.height}, inside its ${DOCK_SIZES[state].width}x${DOCK_SIZES[state].height} rectangle at the top centre, with its content inside it (${why.join("; ") || "all inside"})`);
+    return s;
   };
-  const shot = async (name: string) => {
+  /** A screenshot over a stand-in for the desktop. `tall` false: only the top of the window, where the pill and the peek are. */
+  const shot = async (name: string, tall = true) => {
     const path = join(shots, `dock-${name}-${colorScheme}.png`);
-    await page.waitForTimeout(350);
-    await page.screenshot({ path });
+    await page.evaluate((colour: string) => document.documentElement.style.setProperty("background", colour), DESKTOP[colorScheme]);
+    await page.screenshot({ path, clip: { x: 0, y: 0, width: viewport.width, height: tall ? viewport.height : 72 } });
+    await page.evaluate(() => document.documentElement.style.removeProperty("background"));
     console.log(`  screenshot: ${path}`);
+    return path;
   };
-  /** The pointer onto the island, and away from it: out of the window, as on a real screen. */
-  const hover = () => page.mouse.move(Math.round(page.viewportSize().width / 2), 20);
-  const leave = () => page.mouse.move(page.viewportSize().width + 200, 300);
-  return { context, page, calls, lastCall, text, settle, fits, shot, hover, leave };
+  const middle = Math.round(viewport.width / 2);
+  /** The pointer onto the island, and away from it: out of the window, as it must go from an island that fills it. */
+  const hover = () => page.mouse.move(middle, 8);
+  const leave = () => page.mouse.move(-40, viewport.height + 40);
+  return { context, page, calls, lastCall, text, shape, settle, fits, shot, hover, leave, middle };
+}
+
+type Dock = Awaited<ReturnType<typeof dock>>;
+
+/** Records the frames while `act` changes the state and the island settles in `state`. */
+async function recorded(d: Dock, state: DockState, act: () => Promise<void>): Promise<Frame[]> {
+  await d.page.evaluate(() => (window as Any).__record());
+  await d.page.waitForTimeout(100);
+  await act();
+  await d.settle(state);
+  await d.page.waitForTimeout(100);
+  return d.page.evaluate(() => (window as Any).__stop()) as Promise<Frame[]>;
+}
+
+const worst = (frames: Frame[]) => Math.max(...frames.map((f) => f.ms));
+
+/** Screenshots of one change of state held at each moment in `at` (ms), put side by side in one picture. */
+async function strip(d: Dock, name: string, state: DockState, act: () => Promise<void>, at: number[]): Promise<string> {
+  const { page } = d;
+  await page.evaluate((colour: string) => document.documentElement.style.setProperty("background", colour), DESKTOP.dark);
+  await page.evaluate(() => (window as Any).__hold(0));
+  await act();
+  await page.waitForFunction((s: string) => document.getElementById("island")!.dataset.state === s, state);
+  // Held at its first moment while the content loads, so the frames show one move and not two.
+  await page.waitForTimeout(500);
+  const frames: string[] = [];
+  for (const ms of at) {
+    await page.evaluate((t: number) => (window as Any).__hold(t), ms);
+    await page.waitForTimeout(80);
+    frames.push((await page.screenshot()).toString("base64"));
+  }
+  await page.evaluate(() => (window as Any).__release());
+  await d.settle(state);
+  await page.evaluate(() => document.documentElement.style.removeProperty("background"));
+  // The frames in two rows, each with its moment under it. A blank page: no network, the pictures are data URLs.
+  const sheet = await d.context.newPage();
+  await sheet.setViewportSize({ width: Math.ceil(at.length / 2) * (DOCK_WINDOW.width + 12) + 12, height: 2 * (DOCK_WINDOW.height + 44) + 12 });
+  await sheet.setContent(`<body style="margin:12px;background:#000;color:#bbb;font:14px system-ui;display:flex;flex-wrap:wrap;gap:12px">${frames
+    .map((png, i) => `<figure style="margin:0"><img width="${DOCK_WINDOW.width}" height="${DOCK_WINDOW.height}" src="data:image/png;base64,${png}"><figcaption style="height:28px;padding-top:4px">${name}, ${at[i]} ms</figcaption></figure>`)
+    .join("")}</body>`);
+  const path = join(shots, `dock-strip-${name}.png`);
+  await sheet.screenshot({ path });
+  await sheet.close();
+  console.log(`  frames: ${path} (${at.join(", ")} ms)`);
+  return path;
 }
 
 try {
@@ -164,39 +309,49 @@ try {
   const d = await dock("light");
   const { page } = d;
   await page.goto(`${runner.url}/dock`);
-  await page.locator("#pill-text", { hasText: "intuition" }).waitFor();
+  await page.locator("#pill").waitFor();
   await d.settle("idle");
   check((await d.calls()).map((c) => c.state).join(",") === "idle", "on load the page tells the shell 'idle', once");
-  check((await page.locator("#pill").getAttribute("data-tone")) === "none" && (await page.locator("#pill-dot").isHidden()), "with nothing going on the pill says 'intuition', dimmed, without a dot");
+  check((await page.locator("#pill").getAttribute("data-tone")) === "none" && (await page.locator("#pill-text").isHidden()) && (await page.locator("#pill-dot").getAttribute("data-status")) === null,
+    "with nothing going on the pill is a dim dot alone, without words");
+  check((await page.locator("#pill").getAttribute("aria-label")) === "intuition", "and is named 'intuition' for a screen reader");
   check((await page.locator("#peek").isHidden()) && (await page.locator("#panel").isHidden()), "nothing replays on load: no peek for the session that finished before the page connected");
   await page.evaluate(() => document.fonts.ready);
-  await d.fits("idle");
-  await d.shot("idle-nothing");
+  const quiet = await d.fits("idle");
+  check(quiet.height <= 16, `with nothing going on the idle pill is ${quiet.height}px tall`);
+  check(quiet.width <= 40, `and, with nothing going on, ${quiet.width}px wide: a sliver`);
+  await d.shot("idle-nothing", false);
 
   // ---- a session runs, finishes and peeks ----
   const prompt = "Tell me about docks";
   const first = await runner.startSession(prompt);
   await page.locator("#pill-text", { hasText: "1 running" }).waitFor();
-  check((await page.locator("#pill-dot").getAttribute("data-status")) === "running" && (await page.locator("#pill-dot").isVisible()), "idle says '1 running' with the running dot while a session runs");
+  check((await page.locator("#pill-dot").getAttribute("data-status")) === "running" && (await page.locator("#pill-text").isVisible()), "idle says '1 running' with the running dot while a session runs");
   check((await d.lastCall()).state === "idle", "a running session changes the pill, not the state");
-  await d.fits("idle");
-  await d.shot("idle-running");
+  await d.settle("idle");
+  const busy = await d.fits("idle");
+  check(busy.width > quiet.width && busy.height <= 24 && busy.height === DOCK_SIZES.idle.height, `the pill is as wide as its words, ${busy.width}px for '1 running', and ${busy.height}px tall: at most 24`);
+  await d.shot("idle-running", false);
 
   await page.locator("#peek-title", { hasText: prompt }).waitFor();
   await d.settle("peek");
   const peekCall = await d.lastCall();
-  check(peekCall.state === "peek" && !peekCall.peekShown && peekCall.islandWidth === DOCK_SIZES.idle.width, "when it finishes the shell is told 'peek' first, before the island grows");
+  check(peekCall.state === "peek", "when it finishes the island peeks, and the shell is told 'peek'");
   check((await page.locator("#peek-title").textContent()) === prompt, "the peek shows the session's title");
-  check((await page.locator("#peek-body").textContent()) === `You said: ${prompt}`, "and the start of the answer, on one line");
+  check((await page.locator("#peek-body").textContent()) === `You said: ${prompt}`, "and the start of the answer, on the same line");
   check((await page.locator("#peek-label").textContent()) === "done" && (await page.locator("#pill").isHidden()), "it says 'done', in place of the pill");
-  await d.fits("peek");
-  await d.shot("peek-finished");
+  const peeked = await d.fits("peek");
+  check(peeked.height <= 52, `the peek is ${peeked.height}px tall: at most 52`);
+  check(await page.evaluate(() => {
+    const tops = [...document.querySelectorAll("#peek > *")].map((el) => el.getBoundingClientRect()).map((r) => Math.round(r.top + r.height / 2));
+    return tops.length === 4 && Math.max(...tops) - Math.min(...tops) <= 1;
+  }), "its dot, title, words and label are one line");
+  await d.shot("peek-finished", false);
   await page.locator("#pill").waitFor({ timeout: 8000 });
   await d.settle("idle");
   const backCall = await d.lastCall();
-  check(backCall.state === "idle" && backCall.islandWidth === DOCK_SIZES.idle.width && backCall.islandHeight === DOCK_SIZES.idle.height, "it returns to idle: the island shrinks first, and the shell is told once it is small");
-  check(backCall.at - peekCall.at >= 4800 && backCall.at - peekCall.at < 7000, `after about five seconds (${backCall.at - peekCall.at} ms)`);
-  check((await page.locator("#pill-text").textContent()) === "intuition", "and the pill is quiet again");
+  check(backCall.state === "idle" && backCall.at - peekCall.at >= 4800 && backCall.at - peekCall.at < 7000, `it returns to idle after about five seconds (${backCall.at - peekCall.at} ms)`);
+  check((await page.locator("#pill-text").isHidden()) && (await page.locator("#peek").isHidden()), "and the pill is the quiet dot again");
 
   // ---- a session that needs approval peeks and stays ----
   const needs = "this one needs approval";
@@ -207,16 +362,17 @@ try {
   check((await page.locator("#peek-body").textContent()) === `Write: ${runner.dir}/work/fake.txt`, "with the tool and its target");
   check((await page.locator("#pill-text").textContent()) === "needs you" && (await page.locator("#pill").getAttribute("data-tone")) === "needs", "and the pill behind it says 'needs you'");
   await d.fits("peek");
-  await d.shot("peek-approval");
+  await d.shot("peek-approval", false);
   await page.waitForTimeout(6000);
   check((await page.locator("#peek").isVisible()) && (await d.lastCall()).state === "peek", "six seconds later the peek is still there: it stays until answered or opened");
 
   // ---- hovering opens ----
+  const hoveredAt = Date.now();
   await d.hover();
   await page.locator("#panel").waitFor();
   await d.settle("open");
   const openCall = await d.lastCall();
-  check(openCall.state === "open" && !openCall.panelShown && openCall.islandHeight === DOCK_SIZES.peek.height, "hovering opens: setState('open') is called before the content shows");
+  check(openCall.state === "open" && openCall.at - hoveredAt >= 80, `hovering opens, after a moment's rest on the island (${openCall.at - hoveredAt} ms; the wait is 80)`);
   check((await page.locator('.session-row[aria-current="true"] .row-title').textContent()) === needs, "the session that peeked and needs approval is preselected");
   check((await d.text(".row-title")).join("|") === [needs, prompt, HOSTILE].join("|"), "the list has the sessions, newest activity first");
   check((await page.locator('.session-row[aria-current="true"] .row-workspace').textContent()) === "work" && (await d.text(".row-time")).join(",") === "now,now,3h", "each with its workspace and a short relative time");
@@ -228,16 +384,19 @@ try {
   check((await page.locator("#reply-text").isDisabled()) && (await page.locator("#reply-hint").textContent()) === "Waiting for your Allow or Deny above.", "the reply box is off, with a short hint, while it waits");
   check((await page.locator("#open-chat").getAttribute("href")) === `/?session=${waiting.id}` && (await page.locator("#open-chat").getAttribute("target")) === "_blank", "'Open in chat' is a new window on /?session=<id>");
   check((await page.locator(".panel-head a", { hasText: "New task" }).getAttribute("href")) === "/prompt" && (await page.locator(".panel-head a").getAttribute("target")) === "_blank", "'New task' is a new window on /prompt");
-  await d.fits("open");
+  await d.settle("open");
+  const opened = await d.fits("open");
+  const panelHeight = await page.locator("#panel").evaluate((el: Element) => el.getBoundingClientRect().height);
+  check(opened.height <= DOCK_SIZES.open.height && Math.abs(opened.height - panelHeight) <= 1, `open, the island is as tall as its content: ${opened.height}px for a panel of ${Math.round(panelHeight)}px (at most ${DOCK_SIZES.open.height})`);
   await d.shot("open-approval");
 
   // ---- leaving closes; unanswered, the pill says so ----
+  const leftAt = Date.now();
   await d.leave();
   await page.locator("#pill").waitFor();
   await d.settle("idle");
   const closedCall = await d.lastCall();
-  check(closedCall.islandHeight === DOCK_SIZES.idle.height, "the pointer leaves and the dock closes: the island shrinks, then the shell is told 'idle'");
-  check(closedCall.at - openCall.at >= 400, "not sooner than 400 ms after the pointer left");
+  check(closedCall.state === "idle" && closedCall.at - leftAt >= 380, `the pointer leaves and the dock closes, not sooner than 400 ms after (${closedCall.at - leftAt} ms)`);
   check((await page.locator("#pill-text").textContent()) === "needs you" && (await page.locator("#pill-dot").getAttribute("data-status")) === "waiting_approval", "opened but not answered: no peek again, and the pill says 'needs you'");
   const warn = await page.evaluate(() => {
     const probe = document.createElement("i");
@@ -249,7 +408,7 @@ try {
   });
   check((await page.locator("#pill-text").evaluate((el: Element) => getComputedStyle(el).color)) === warn, "in the approval colour");
   await d.fits("idle");
-  await d.shot("idle-needs-you");
+  await d.shot("idle-needs-you", false);
 
   // ---- Allow in the dock ----
   await d.hover();
@@ -293,7 +452,9 @@ try {
     const s = document.getElementById("scroller")!;
     return s.scrollHeight - s.scrollTop - s.clientHeight < 4;
   }), "and the stream is scrolled to the bottom");
-  await d.fits("open");
+  await d.settle("open");
+  const grown = await d.fits("open");
+  check(grown.height > opened.height - 200 && grown.height <= DOCK_SIZES.open.height, `the island followed its content: ${grown.height}px now`);
   await d.shot("open-replied");
 
   // ---- what keeps it open ----
@@ -314,7 +475,7 @@ try {
   await d.settle("idle");
   check(true, "and closes once the box is cleared and the pointer leaves");
 
-  // ---- the pointer held down, Esc, and a pointer that only passes ----
+  // ---- the pointer held down, a press beside it, Esc, and a pointer that only passes ----
   await d.hover();
   await page.locator("#panel").waitFor();
   await d.settle("open");
@@ -333,23 +494,58 @@ try {
   await page.locator("#pill").waitFor();
   await d.settle("idle");
   check(true, "Esc closes it, with the pointer still on it");
+  await page.mouse.move(d.middle + 3, 9);
+  await page.waitForTimeout(400);
+  check((await page.locator("#pill").isVisible()) && (await d.lastCall()).state === "idle", "and it stays closed while the pointer has not left the island");
   await d.leave();
   const before = (await d.calls()).length;
   await d.hover();
+  await page.waitForTimeout(30);
   await d.leave();
   await page.waitForTimeout(500);
-  check((await d.calls()).length === before && (await page.locator("#pill").isVisible()), "a pointer that only crosses the pill opens nothing");
+  check((await d.calls()).length === before && (await page.locator("#pill").isVisible()), "a pointer that only brushes past the pill opens nothing");
+  // The quiet pill is a dot: the whole idle rectangle is its handle, as it is the shell's.
+  await page.mouse.move(d.middle + DOCK_SIZES.idle.width / 2 - 4, 10);
+  await page.locator("#panel").waitFor();
+  await d.settle("open");
+  check(true, "resting anywhere in the idle rectangle opens it, also beside the dot");
+  await d.leave();
+  await page.locator("#pill").waitFor();
+  await d.settle("idle");
+
+  // ---- the motion: the frames of an open and a close ----
+  const opening = await recorded(d, "open", d.hover);
+  const closing = await recorded(d, "idle", d.leave);
+  const heights = opening.map((f) => f.height);
+  const final = heights.at(-1)!;
+  check(opening.length > 15 && worst(opening) < FRAME_LIMIT_MS, `opening: ${opening.length} frames, the worst ${worst(opening).toFixed(1)} ms (under ${FRAME_LIMIT_MS})`);
+  check(closing.length > 15 && worst(closing) < FRAME_LIMIT_MS, `closing: ${closing.length} frames, the worst ${worst(closing).toFixed(1)} ms (under ${FRAME_LIMIT_MS})`);
+  console.log(`  worst frame: ${Math.max(worst(opening), worst(closing)).toFixed(1)} ms (open ${worst(opening).toFixed(1)}, close ${worst(closing).toFixed(1)})`);
+  const between = heights.filter((h) => h > DOCK_SIZES.idle.height + 1 && h < final - 1).length;
+  check(between >= 5, `the island grows through ${between} frames between the pill and its full height: one shape, not a jump`);
+  check(heights.every((h, i) => i === 0 || h >= heights[i - 1]! - 0.5) && Math.max(...heights) <= DOCK_SIZES.open.height, "it only grows on the way, and never past its size: no bounce");
+  const closingHeights = closing.map((f) => f.height);
+  check(closingHeights.every((h, i) => i === 0 || h <= closingHeights[i - 1]! + 0.5) && closingHeights.at(-1)! <= DOCK_SIZES.idle.height, "closing, it only shrinks, back to the pill");
+  const span = (frames: Frame[], from: number, to: number) => {
+    const lo = Math.min(from, to) + 1;
+    const hi = Math.max(from, to) - 1;
+    return frames.filter((f) => f.height > lo && f.height < hi).reduce((sum, f) => sum + f.ms, 0);
+  };
+  const [openMs, closeMs] = [span(opening, DOCK_SIZES.idle.height, final), span(closing, final, DOCK_SIZES.idle.height)];
+  check(openMs >= 150 && openMs <= 350 && closeMs < openMs, `the shape is on its way for ${Math.round(openMs)} ms opening (a 320 ms curve with a long settle) and ${Math.round(closeMs)} ms closing: closing is quicker`);
+  check(await page.evaluate(([w, h]: number[]) => window.innerWidth === w && window.innerHeight === h, [DOCK_WINDOW.width, DOCK_WINDOW.height]), `through all of it the window stayed ${DOCK_WINDOW.width}x${DOCK_WINDOW.height}`);
 
   // ---- a failed session ----
   const failing = await runner.startSession("please fail");
   await page.locator("#peek-title", { hasText: "please fail" }).waitFor();
   await d.settle("peek");
   check((await page.locator("#peek-label").textContent()) === "failed" && (await page.locator("#peek-body").textContent()) === "the fake agent failed", "a failed session peeks with the error's message");
-  await d.shot("peek-error");
+  await d.shot("peek-error", false);
   await page.locator("#pill").waitFor({ timeout: 8000 });
   await d.settle("idle");
-  check((await page.locator("#pill-text").textContent()) === "failed" && (await page.locator("#pill-dot").getAttribute("data-status")) === "error", "and the pill then carries an error mark: the newest finished one failed");
-  await d.shot("idle-failed");
+  check((await page.locator("#pill-text").textContent()) === "failed" && (await page.locator("#pill-text").isVisible()) && (await page.locator("#pill-dot").getAttribute("data-status")) === "error", "and the pill then carries an error mark: the newest finished one failed");
+  await d.fits("idle");
+  await d.shot("idle-failed", false);
   await d.hover();
   await page.locator("#panel").waitFor();
   await d.settle("open");
@@ -357,6 +553,7 @@ try {
   await page.locator(".error", { hasText: "the fake agent failed" }).waitFor();
   check((await page.locator("#reply-text").isEnabled()) && (await page.locator("#reply-hint").textContent()) === "The last turn failed. A reply tries again.", "its error is in the stream, and a reply may try again");
   void failing;
+  void first;
 
   // ---- untrusted text, and picking another session ----
   await page.locator(".session-row", { hasText: "<img" }).click();
@@ -367,11 +564,17 @@ try {
   check((await d.text(".tool-row .tool-line"))[0] === `/tmp/${HOSTILE}.txt` && (await d.text(".tool-row .tool-mark"))[0] === "failed", "a failed tool call is marked on its row");
   check((await page.locator(".approval").getAttribute("data-state")) === "deny" && (await page.locator(".approval button").count()) === 0 && (await page.locator(".approval-tool").textContent()) === HOSTILE, "a decided approval is a quiet card without buttons");
   check((await d.text(".msg.assistant p code"))[0] === "bun test" && (await d.text(".msg.assistant pre.code-block"))[0] === `const html = '${HOSTILE}';`, "inline code and a code block are rendered");
-  await d.fits("open");
+  await d.settle("open");
+  const full = await d.fits("open");
+  check(full.height >= DOCK_SIZES.open.height - 1 && (await page.evaluate(() => {
+    const s = document.getElementById("scroller")!;
+    return s.scrollHeight > s.clientHeight;
+  })), `a long session fills the island to its ${DOCK_SIZES.open.height}px and the stream scrolls inside it`);
   await d.shot("open-hostile");
   await d.leave();
   await page.locator("#pill").waitFor();
   await d.settle("idle");
+  check((await d.calls()).every((c, i, all) => i === 0 || c.state !== all[i - 1]!.state), "the shell was told each change of state once, as it happened");
   await d.context.close();
 
   // ================= dark: the three states again =================
@@ -380,46 +583,103 @@ try {
   await k.page.locator("#pill-text", { hasText: "failed" }).waitFor();
   await k.settle("idle");
   await k.page.evaluate(() => document.fonts.ready);
+  await k.shot("idle-failed", false);
   const darkPrompt = "A second look, in the dark";
   await runner.startSession(darkPrompt);
   await k.page.locator("#pill-text", { hasText: "1 running" }).waitFor();
   check((await k.page.locator("#pill-failed").isVisible()) && (await k.page.locator("#pill-dot").getAttribute("data-status")) === "running", "beside '1 running' a red dot still marks that the newest finished one failed");
+  await k.settle("idle");
   await k.fits("idle");
-  await k.shot("idle-running");
+  await k.shot("idle-running", false);
   await k.page.locator("#peek-title", { hasText: darkPrompt }).waitFor();
   await k.settle("peek");
   await k.fits("peek");
-  await k.shot("peek-finished");
+  await k.shot("peek-finished", false);
   await k.hover();
   await k.page.locator("#panel").waitFor();
-  await k.settle("open");
   await k.page.locator(".note", { hasText: "Done" }).waitFor();
+  await k.settle("open");
   check((await k.page.locator('.session-row[aria-current="true"] .row-title').textContent()) === darkPrompt, "dark: opened from a peek, its session is selected");
   await k.fits("open");
   await k.shot("open");
-  const colours = (p: Any) => p.evaluate(() => [getComputedStyle(document.getElementById("island")!).backgroundColor, getComputedStyle(document.body).color]) as Promise<string[]>;
+  const colours = (p: Any) => p.evaluate(() => [getComputedStyle(document.querySelector(".surface")!).backgroundColor, getComputedStyle(document.body).color]) as Promise<string[]>;
   const darkColours = await colours(k.page);
   await k.page.emulateMedia({ colorScheme: "light" });
   check((await colours(k.page)).join() === darkColours.join() && darkColours[0] === "rgb(15, 15, 17)", `the island is the same dark in both schemes (${darkColours.join(" on ")})`);
+  await k.leave();
+  await k.page.locator("#pill").waitFor();
+  await k.settle("idle");
+  await k.shot("idle-nothing", false);
   await k.context.close();
 
+  // ================= the frames: an open and a close, held at moments along the way =================
+  const f = await dock("dark", { scale: 1 });
+  await f.page.goto(`${runner.url}/dock`);
+  await f.page.locator("#pill").waitFor();
+  await f.settle("idle");
+  await f.page.evaluate(() => document.fonts.ready);
+  const openStrip = await strip(f, "open", "open", f.hover, [0, 40, 80, 120, 160, 200, 240, 280, 320, 360]);
+  const closeStrip = await strip(f, "close", "idle", async () => {
+    await f.leave();
+    await f.page.waitForTimeout(450);
+  }, [0, 20, 40, 60, 80, 110, 140, 170, 200, 240]);
+  check(readFileSync(openStrip).length > 10_000 && readFileSync(closeStrip).length > 10_000, "a strip of ten frames through the open and through the close is saved, to be looked at");
+  await f.context.close();
+
+  // ================= reduced motion: a plain fade =================
+  const q = await dock("dark", { reducedMotion: "reduce" });
+  await q.page.goto(`${runner.url}/dock`);
+  await q.page.locator("#pill").waitFor();
+  await q.settle("idle");
+  await q.page.evaluate(() => (window as Any).__record());
+  await q.hover();
+  await q.page.locator("#panel").waitFor();
+  const fade = await q.page.locator("#panel").evaluate((el: Element) => el.getAnimations().map((a) => (a as CSSAnimation).animationName).join());
+  await q.settle("open");
+  const still = (await q.page.evaluate(() => (window as Any).__stop())) as Frame[];
+  const steps = new Set(still.map((frame) => frame.height));
+  const moves = await q.page.locator("#island").evaluate((el: Element) => [el, el.firstElementChild!].map((e) => getComputedStyle(e).transitionProperty + " " + getComputedStyle(e).transitionDuration).join());
+  // A step for the shape and one for each time the content under it grew: none of them a frame on the way.
+  check(fade === "layer-fade" && moves === "none 0s,none 0s" && steps.size <= 5, `prefers-reduced-motion: no transition on the shape, which changes in steps (${[...steps].join(" then ")}px), and the content fades in plainly (${fade})`);
+  await q.context.close();
+
   // ================= a normal browser: no bridge =================
-  const b = await dock("light", false);
+  const b = await dock("light", { bridge: false, scale: 1 });
   await b.page.goto(`${runner.url}/dock`);
-  await b.page.locator("#pill-text", { hasText: "intuition" }).waitFor();
-  const rect = () => b.page.locator("#island").evaluate((el: Element) => {
+  await b.page.locator("#pill").waitFor();
+  await b.settle("idle");
+  const islandBox = () => b.page.locator("#island").evaluate((el: Element) => {
     const r = el.getBoundingClientRect();
     return [r.left, r.top, r.width, r.height];
   }) as Promise<number[]>;
-  check((await rect()).join() === [360, 0, 280, 40].join(), "without the bridge the pill hangs from the top of the page, in the middle");
-  await b.page.mouse.move(500, 20);
+  check((await islandBox()).join() === [270, 0, DOCK_WINDOW.width, DOCK_WINDOW.height].join(), "without the bridge the island's box hangs from the top of the page, in the middle");
+  await b.fits("idle");
+  await b.page.mouse.move(500, 10);
   await b.page.locator("#panel").waitFor();
-  await b.page.waitForFunction(() => document.getElementById("island")!.getBoundingClientRect().height === 600);
-  check((await rect()).join() === [270, 0, 460, 600].join(), "and opens on hover just the same");
+  await b.settle("open");
+  await b.fits("open");
+  check(true, "and opens on hover just the same");
+  // A press beside the open dock: here the page around the island; in the shell, the clear part of the window under a short panel.
+  const draft = b.page.locator("#reply-text");
+  await b.page.locator("#reply-text:not([disabled])").waitFor();
+  await draft.fill("a draft that stays");
+  await b.page.waitForTimeout(600);
+  const pressedAt = Date.now();
+  await b.page.mouse.click(900, 650);
+  await b.page.locator('#island[data-state="idle"]').waitFor();
+  check(Date.now() - pressedAt < 380, "a press beside the open dock closes it at once, even with text in the box");
+  await b.settle("idle");
+  await b.page.mouse.move(500, 10);
+  await b.page.locator("#panel").waitFor();
+  await b.settle("open");
+  check((await draft.inputValue()) === "a draft that stays", "and the draft is still there when it opens again");
+  await draft.fill("");
+  await b.page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
   await b.page.mouse.move(900, 650);
   await b.page.locator("#pill").waitFor();
+  await b.settle("idle");
   check(true, "and closes when the pointer leaves the island");
-  await b.shot("browser");
+  await b.shot("browser", false);
   await b.context.close();
 
   const elsewhere = requested.filter((u) => !/^(?:data|blob|about):/.test(u) && new URL(u).hostname !== "127.0.0.1");

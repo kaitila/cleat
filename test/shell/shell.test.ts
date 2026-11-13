@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, DOCK_SIZES, DOCK_STATES, dockBounds, dockFocusable, isDockState } from "../../shell/src/dock";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
 import { centred, iconBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
 import { chatUrl, dockUrl, promptUrl, sameOrigin, sessionOf, windowTarget } from "../../shell/src/origin";
@@ -238,29 +238,101 @@ describe("the dock", () => {
   const display = { x: 0, y: 0, width: 1920, height: 1080 };
   const sender = { fromDock: true, mainFrame: true, url: "http://127.0.0.1:4777/dock" };
 
-  test("three states, each an exact size", () => {
+  test("three states, one window, and the most the island covers in each", () => {
     expect([...DOCK_STATES]).toEqual(["idle", "peek", "open"]);
-    expect(DOCK_SIZES).toEqual({ idle: { width: 280, height: 40 }, peek: { width: 420, height: 76 }, open: { width: 460, height: 600 } });
+    expect(DOCK_WINDOW).toEqual({ width: 460, height: 480 });
+    expect(DOCK_SIZES).toEqual({ idle: { width: 128, height: 22 }, peek: { width: 380, height: 40 }, open: { width: 460, height: 480 } });
   });
 
-  test("the bounds in each state: the top edge of the display, centred", () => {
-    expect(dockBounds(display, "idle")).toEqual({ x: 820, y: 0, width: 280, height: 40 });
-    expect(dockBounds(display, "peek")).toEqual({ x: 750, y: 0, width: 420, height: 76 });
-    expect(dockBounds(display, "open")).toEqual({ x: 730, y: 0, width: 460, height: 600 });
+  test("the window's bounds: the top edge of the display, centred, and no state in it", () => {
+    expect(dockBounds(display)).toEqual({ x: 730, y: 0, width: 460, height: 480 });
+    expect(dockBounds.length).toBe(1);
   });
 
   test("on a primary display that does not start at 0,0, of an odd width, or smaller than the dock", () => {
-    expect(dockBounds({ x: -1280, y: 200, width: 1280, height: 1024 }, "idle")).toEqual({ x: -780, y: 200, width: 280, height: 40 });
-    // An odd width: whole pixels, and the same middle in every state to within one.
-    const odd = { x: 0, y: 0, width: 1367, height: 768 };
-    for (const state of DOCK_STATES) {
-      const b = dockBounds(odd, state);
-      expect(Number.isInteger(b.x)).toBe(true);
-      expect(Math.abs(b.x + b.width / 2 - 1367 / 2)).toBeLessThanOrEqual(0.5);
-      expect(b.y).toBe(0);
-    }
+    expect(dockBounds({ x: -1280, y: 200, width: 1280, height: 1024 })).toEqual({ x: -870, y: 200, width: 460, height: 480 });
+    const odd = dockBounds({ x: 0, y: 0, width: 1367, height: 768 });
+    expect(Number.isInteger(odd.x)).toBe(true);
+    expect(Math.abs(odd.x + odd.width / 2 - 1367 / 2)).toBeLessThanOrEqual(0.5);
     // The size never gives way: the contract says exactly this size.
-    expect(dockBounds({ x: 0, y: 0, width: 400, height: 300 }, "open")).toEqual({ x: -30, y: 0, width: 460, height: 600 });
+    expect(dockBounds({ x: 0, y: 0, width: 400, height: 300 })).toEqual({ x: -30, y: 0, width: 460, height: 480 });
+  });
+
+  test("the island's rectangle in each state hangs from the top centre of the window", () => {
+    expect(islandRect("idle")).toEqual({ x: 166, y: 0, width: 128, height: 22 });
+    expect(islandRect("peek")).toEqual({ x: 40, y: 0, width: 380, height: 40 });
+    expect(islandRect("open")).toEqual({ x: 0, y: 0, width: 460, height: 480 });
+    for (const state of DOCK_STATES) {
+      const r = islandRect(state);
+      expect(r.x + r.width / 2).toBe(DOCK_WINDOW.width / 2);
+      expect(r.x >= 0 && r.x + r.width <= DOCK_WINDOW.width && r.height <= DOCK_WINDOW.height).toBe(true);
+    }
+  });
+
+  test("the hit test: the window takes the mouse only on the island of the state the page last reported", () => {
+    const win = dockBounds(display); // x 730..1189, y 0..479
+    // Idle: 128x22 at 896..1023.
+    expect(takesMouse(win, "idle", { x: 960, y: 10 })).toBe(true);
+    expect(takesMouse(win, "idle", { x: 896, y: 0 })).toBe(true);
+    expect(takesMouse(win, "idle", { x: 1023, y: 21 })).toBe(true);
+    // One pixel off each edge, all of them inside the window.
+    expect(takesMouse(win, "idle", { x: 895, y: 10 })).toBe(false);
+    expect(takesMouse(win, "idle", { x: 1024, y: 10 })).toBe(false);
+    expect(takesMouse(win, "idle", { x: 960, y: 22 })).toBe(false);
+    expect(takesMouse(win, "idle", { x: 960, y: -1 })).toBe(false);
+    // The middle of the window, where the open island would be: through, in idle and in peek.
+    expect(takesMouse(win, "idle", { x: 960, y: 200 })).toBe(false);
+    expect(takesMouse(win, "peek", { x: 960, y: 200 })).toBe(false);
+    expect(takesMouse(win, "peek", { x: 770, y: 39 })).toBe(true);
+    expect(takesMouse(win, "peek", { x: 769, y: 39 })).toBe(false);
+    expect(takesMouse(win, "peek", { x: 960, y: 40 })).toBe(false);
+    expect(takesMouse(win, "open", { x: 960, y: 200 })).toBe(true);
+    expect(takesMouse(win, "open", { x: 730, y: 479 })).toBe(true);
+    expect(takesMouse(win, "open", { x: 729, y: 200 })).toBe(false);
+    expect(takesMouse(win, "open", { x: 1190, y: 200 })).toBe(false);
+    expect(takesMouse(win, "open", { x: 960, y: 480 })).toBe(false);
+    // On a display that does not start at 0,0 the rectangle moves with the window.
+    const left = dockBounds({ x: -1280, y: 200, width: 1280, height: 1024 });
+    expect(takesMouse(left, "idle", { x: -640, y: 210 })).toBe(true);
+    expect(takesMouse(left, "idle", { x: 960, y: 10 })).toBe(false);
+  });
+
+  test("click-through is the default: with no state reported, nothing takes the mouse, wherever the cursor is", () => {
+    const win = dockBounds(display);
+    for (const cursor of [{ x: 960, y: 0 }, { x: 960, y: 10 }, { x: 960, y: 200 }, { x: 730, y: 479 }, { x: 0, y: 0 }]) expect(takesMouse(win, null, cursor)).toBe(false);
+    // And the watching is slow: there is no island to be near.
+    expect(watchMs(win, null, { x: 960, y: 10 })).toBe(DOCK_WATCH_FAR_MS);
+  });
+
+  test("the cursor is watched closely near the island and slowly far from it", () => {
+    const win = dockBounds(display);
+    expect(islandDistance(win, "idle", { x: 960, y: 10 })).toBe(0);
+    expect(islandDistance(win, "idle", { x: 960, y: 31 })).toBe(10);
+    expect(islandDistance(win, "idle", { x: 885, y: 10 })).toBe(11);
+    expect(islandDistance(win, "idle", { x: 1026, y: 25 })).toBe(5);
+    expect(watchMs(win, "idle", { x: 960, y: 10 })).toBe(DOCK_WATCH_NEAR_MS);
+    expect(watchMs(win, "idle", { x: 960, y: 21 + DOCK_NEAR })).toBe(DOCK_WATCH_NEAR_MS);
+    expect(watchMs(win, "idle", { x: 960, y: 22 + DOCK_NEAR })).toBe(DOCK_WATCH_FAR_MS);
+    expect(watchMs(win, "open", { x: 100, y: 900 })).toBe(DOCK_WATCH_FAR_MS);
+    // About a frame or two near, and a handful of looks a second far.
+    expect(DOCK_WATCH_NEAR_MS).toBeGreaterThanOrEqual(16);
+    expect(DOCK_WATCH_NEAR_MS).toBeLessThanOrEqual(30);
+    expect(DOCK_WATCH_FAR_MS).toBeGreaterThan(DOCK_WATCH_NEAR_MS);
+    expect(DOCK_WATCH_FAR_MS).toBeLessThanOrEqual(250);
+  });
+
+  test("the shell never resizes or moves the dock for a state: setBounds is called in one place, and never setSize", () => {
+    const main = readFileSync(join(import.meta.dir, "..", "..", "shell", "src", "main.ts"), "utf8");
+    const body = (name: string) => main.match(new RegExp("function " + name + "\\([^)]*\\)[^{]*\\{[\\s\\S]*?\\n\\}"))?.[0] ?? "";
+    expect(body("placeDock")).toContain("dock.setBounds(dockBounds(screen.getPrimaryDisplay().bounds))");
+    for (const name of ["setDockState", "onDockState", "watchDockMouse", "setDockMouse", "forgetDockState"]) {
+      expect(body(name).length).toBeGreaterThan(40);
+      expect(name + ": " + /setBounds|setSize|setPosition|setContentSize|placeDock/.test(body(name))).toBe(name + ": false");
+    }
+    expect(main.match(/dock\.setBounds\(/g)).toHaveLength(1);
+    expect(main).not.toMatch(/dock\.(setSize|setContentSize|setPosition)\(/);
+    // The window is told to let the mouse through the moment it is created, before any page.
+    expect(body("createDock")).toContain("win.setIgnoreMouseEvents(true, { forward: true })");
   });
 
   test("only open can take the keyboard", () => {
@@ -357,9 +429,12 @@ describe("self-test runner", () => {
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
     noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
     dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock", dockVisible: true, dockBridge: "object:setState:undefined:undefined",
-    primaryDisplay: display, dockIdleBounds: { x: 1140, y: 0, width: 280, height: 40 }, dockIdleFocusable: false, dockIdleFocused: false,
-    dockOpenBounds: { x: 1050, y: 0, width: 460, height: 600 }, dockOpenFocusable: true, dockOtherValueIgnored: true,
-    dockBackBounds: { x: 1140, y: 0, width: 280, height: 40 }, dockBackFocusable: false, dockForeignOriginIgnored: true,
+    primaryDisplay: display, dockIgnoresMouseBeforeLoad: true, dockIdleBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockIdleFocusable: false, dockIdleFocused: false,
+    dockMouseOnIdleIsland: true, dockMouseAwayIgnored: true, dockMouseBelowPillIgnored: true,
+    dockPeekBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockPeekFocusable: false, dockMouseOnPeekIsland: true,
+    dockOpenBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockOpenFocusable: true, dockMouseOnOpenIsland: true, dockOtherValueIgnored: true,
+    dockBackBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockBackFocusable: false, dockForeignOriginIgnored: true,
+    dockIgnoresMouseUnreported: true, dockIgnoresMouseAfterCrash: true,
     dockOpenedChatUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, dockOpenedPromptUrl: "http://127.0.0.1:5000/prompt",
     dockOtherWindowRefused: true, dockHiddenWithoutRunner: true, dockShownAgain: true, errors: [],
   };
@@ -386,16 +461,24 @@ describe("self-test runner", () => {
   });
 
   test("the dock's bounds are judged against the display the shell reported", () => {
-    // The same dock on another display is in the wrong place three times: at first, open, and back.
-    expect(check({ ...good, primaryDisplay: { ...display, width: 1920 } })).toHaveLength(3);
+    // The same dock on another display is in the wrong place four times: idle, peek, open, and back.
+    expect(check({ ...good, primaryDisplay: { ...display, width: 1920 } })).toHaveLength(4);
     // On the display's top edge, wherever that is.
     const lower = { ...display, y: 300 };
-    expect(check({ ...good, primaryDisplay: lower })).toHaveLength(3);
-    expect(check({ ...good, primaryDisplay: lower, dockIdleBounds: { ...good.dockIdleBounds!, y: 300 }, dockOpenBounds: { ...good.dockOpenBounds!, y: 300 }, dockBackBounds: { ...good.dockBackBounds!, y: 300 } })).toEqual([]);
-    for (const bad of [null, {}, { x: 0, y: 0, width: 0, height: 0 }, { x: "0", y: 0, width: 100, height: 100 }]) expect(check({ ...good, primaryDisplay: bad as never }).length).toBeGreaterThanOrEqual(4);
-    // One pixel off, or one pixel too tall, is a failure: the contract says exactly.
-    expect(check({ ...good, dockOpenBounds: { ...good.dockOpenBounds!, height: 601 } })).toHaveLength(1);
-    expect(check({ ...good, dockBackBounds: good.dockOpenBounds })).toHaveLength(1);
+    expect(check({ ...good, primaryDisplay: lower })).toHaveLength(4);
+    const at = { ...good.dockIdleBounds!, y: 300 };
+    expect(check({ ...good, primaryDisplay: lower, dockIdleBounds: at, dockPeekBounds: at, dockOpenBounds: at, dockBackBounds: at })).toEqual([]);
+    for (const bad of [null, {}, { x: 0, y: 0, width: 0, height: 0 }, { x: "0", y: 0, width: 100, height: 100 }]) expect(check({ ...good, primaryDisplay: bad as never }).length).toBeGreaterThanOrEqual(5);
+    // The window is the same in every state: one that grew, shrank or moved for a state is a failure.
+    expect(check({ ...good, dockOpenBounds: { ...good.dockOpenBounds!, height: 481 } })).toHaveLength(1);
+    expect(check({ ...good, dockPeekBounds: { x: 1070, y: 0, width: 420, height: 76 } })).toHaveLength(1);
+    expect(check({ ...good, dockBackBounds: { x: 1140, y: 0, width: 280, height: 40 } })).toHaveLength(1);
+    expect(check({ ...good, dockPeekBounds: null })).toHaveLength(1);
+    // The mouse: each of these alone is a failure.
+    for (const key of ["dockIgnoresMouseBeforeLoad", "dockMouseOnIdleIsland", "dockMouseAwayIgnored", "dockMouseBelowPillIgnored", "dockMouseOnPeekIsland", "dockMouseOnOpenIsland", "dockIgnoresMouseUnreported", "dockIgnoresMouseAfterCrash"] as const) {
+      expect(check({ ...good, [key]: false })).toHaveLength(1);
+    }
+    expect(check({ ...good, dockPeekFocusable: true })).toHaveLength(1);
     // The bridge with anything more on it, or Node in the page.
     for (const bridge of ["object:setState,resize:undefined:undefined", "undefined::undefined:undefined", "object:setState:function:undefined", "object:setState:undefined:object"]) expect(check({ ...good, dockBridge: bridge })).toHaveLength(1);
   });

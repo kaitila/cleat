@@ -3,7 +3,7 @@
 // It installs the shell, starts a stub runner, runs electron.exe --self-test and checks every field it wrote.
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { dockBounds, type DockState } from "../../shell/src/dock";
+import { dockBounds } from "../../shell/src/dock";
 import type { Area } from "../../shell/src/geometry";
 import type { SelfTestResult } from "../../shell/src/result";
 import { HOST, type ClipboardPostRequest } from "../shared/protocol";
@@ -20,6 +20,7 @@ const PAGE = "<!doctype html><meta charset=utf-8><title>intuition self-test</tit
 const DOCK_PAGE = `<!doctype html><meta charset=utf-8><title>intuition self-test dock</title>
 <style>html, body { margin: 0; background: transparent; }</style>
 <script>window.intuitionDock?.setState("idle");</script>`;
+const SILENT_DOCK_PAGE = DOCK_PAGE.replace(/<script>.*<\/script>/, "");
 
 /** The session the dock's link opens in the self-test. The shell's self-test names the same one. */
 export const STUB_SESSION = "self-test-session";
@@ -39,7 +40,8 @@ export function stubRunner() {
       const path = new URL(req.url).pathname;
       if (req.method === "GET" && path === "/health") return Response.json({ ok: true, version: "self-test" });
       if (req.method === "GET" && (path === "/" || path === "/prompt")) return new Response(PAGE, { headers: { "content-type": "text/html" } });
-      if (req.method === "GET" && path === "/dock") return new Response(DOCK_PAGE, { headers: { "content-type": "text/html" } });
+      // /dock?silent: the same page without its call, as a page that never got as far as reporting a state.
+      if (req.method === "GET" && path === "/dock") return new Response(new URL(req.url).search === "?silent" ? SILENT_DOCK_PAGE : DOCK_PAGE, { headers: { "content-type": "text/html" } });
       if (req.method === "POST" && path === "/api/clipboard") {
         const body = (await req.json()) as ClipboardPostRequest;
         posts.push(body);
@@ -98,19 +100,30 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   // The same pure function the shell uses, run here on the display the shell reported.
   const display = isArea(r.primaryDisplay) && r.primaryDisplay.width > 0 && r.primaryDisplay.height > 0 ? r.primaryDisplay : null;
   need(display, `the primary display's bounds are ${JSON.stringify(r.primaryDisplay)}`);
-  const at = (bounds: unknown, state: DockState, when: string) => {
-    const want = display ? dockBounds(display, state) : null;
+  // One place and one size, whatever the state: the window is never resized or moved.
+  const want = display ? dockBounds(display) : null;
+  const at = (bounds: unknown, when: string) => {
     need(want && isArea(bounds) && bounds.x === want.x && bounds.y === want.y && bounds.width === want.width && bounds.height === want.height,
-      `${when}, the dock is at ${JSON.stringify(bounds)}, not the ${state} bounds at the top centre of the primary display, ${JSON.stringify(want)}`);
+      `${when}, the dock's window is at ${JSON.stringify(bounds)}, not its one place at the top centre of the primary display, ${JSON.stringify(want)}`);
   };
-  at(r.dockIdleBounds, "idle", "at first");
+  need(r.dockIgnoresMouseBeforeLoad, "the dock's window did not ignore the mouse before its page had loaded");
+  at(r.dockIdleBounds, "at first");
   need(r.dockIdleFocusable === false, "the dock is focusable in idle");
   need(r.dockIdleFocused === false, "the dock took the focus when it was shown");
-  at(r.dockOpenBounds, "open", 'after setState("open")');
+  need(r.dockMouseOnIdleIsland, "idle: the cursor on the island was not taken");
+  need(r.dockMouseAwayIgnored, "idle: the cursor far from the island was not ignored");
+  need(r.dockMouseBelowPillIgnored, "idle: the cursor below the pill, inside the window, was not ignored");
+  at(r.dockPeekBounds, 'after setState("peek")');
+  need(r.dockPeekFocusable === false, "the dock is focusable in peek");
+  need(r.dockMouseOnPeekIsland, "peek: the cursor on the island was not taken, or below it was not ignored");
+  at(r.dockOpenBounds, 'after setState("open")');
   need(r.dockOpenFocusable === true, "the dock is not focusable in open");
+  need(r.dockMouseOnOpenIsland, "open: the cursor on the island was not taken, or away from it was not ignored");
   need(r.dockOtherValueIgnored, "setState with a value that is not a state changed the dock");
-  at(r.dockBackBounds, "idle", 'after setState("idle")');
+  at(r.dockBackBounds, 'after setState("idle")');
   need(r.dockBackFocusable === false, "the dock is still focusable back in idle");
+  need(r.dockIgnoresMouseUnreported, "a page that loaded and reported no state did not leave the window ignoring the mouse");
+  need(r.dockIgnoresMouseAfterCrash, "after the page's process crashed the window did not hide and ignore the mouse");
   need(r.dockForeignOriginIgnored, "setState from a page on another origin changed the dock");
   need(r.dockOpenedChatUrl === `${runnerUrl}/?session=${STUB_SESSION}`, `the dock's link to a session opened ${r.dockOpenedChatUrl}, not ${runnerUrl}/?session=${STUB_SESSION}`);
   need(r.dockOpenedPromptUrl === `${runnerUrl}/prompt`, `the dock's link to /prompt opened ${r.dockOpenedPromptUrl}, not the pop-up on ${runnerUrl}/prompt`);

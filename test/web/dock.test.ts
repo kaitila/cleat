@@ -4,24 +4,29 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOCK_SIZES as SHELL_SIZES, DOCK_STATES } from "../../shell/src/dock";
+import { DOCK_SIZES as SHELL_SIZES, DOCK_STATES, DOCK_WINDOW as SHELL_WINDOW, islandRect as shellIslandRect } from "../../shell/src/dock";
 import {
   CLOSE_MS,
   DOCK_SIZES,
+  DOCK_WINDOW,
+  OPEN_MS,
   PEEK_MAX,
   PEEK_MS,
+  QUIET_HEIGHT,
   RECENT_EVENTS,
   asPeek,
   enqueue,
+  islandRect,
+  islandSize,
   mayClose,
   nextPeek,
+  onIsland,
   peekLabel,
   peekOver,
   peekStatus,
   pillOf,
   preselect,
   recentEvents,
-  resizeOrder,
   type Peek,
 } from "../../src/web/dock-state.js";
 import { testRunner } from "../runner/helpers";
@@ -72,20 +77,76 @@ describe("served by the runner", () => {
 });
 
 describe("the contract with the shell", () => {
-  test("the page's three sizes are the shell's", () => {
+  test("the page's window and island sizes are the shell's", () => {
     expect(Object.keys(DOCK_SIZES)).toEqual([...DOCK_STATES]);
     expect(DOCK_SIZES).toEqual(SHELL_SIZES);
-    expect(DOCK_SIZES).toEqual({ idle: { width: 280, height: 40 }, peek: { width: 420, height: 76 }, open: { width: 460, height: 600 } });
+    expect(DOCK_WINDOW).toEqual({ ...SHELL_WINDOW });
+    expect(DOCK_WINDOW).toEqual({ width: 460, height: 480 });
+    expect(DOCK_SIZES).toEqual({ idle: { width: 128, height: 22 }, peek: { width: 380, height: 40 }, open: { width: 460, height: 480 } });
+    // The owner's limits: a pill of at most 24, a peek of at most 52, and nothing larger than the window.
+    expect(DOCK_SIZES.idle.height).toBeLessThanOrEqual(24);
+    expect(QUIET_HEIGHT).toBeLessThan(DOCK_SIZES.idle.height);
+    expect(DOCK_SIZES.peek.height).toBeLessThanOrEqual(52);
+    for (const state of DOCK_STATES) {
+      expect(DOCK_SIZES[state].width).toBeLessThanOrEqual(DOCK_WINDOW.width);
+      expect(DOCK_SIZES[state].height).toBeLessThanOrEqual(DOCK_WINDOW.height);
+      expect(islandRect(state)).toEqual(shellIslandRect(state));
+    }
   });
 
-  test("growing, the shell is told before the island animates; shrinking, after", () => {
-    expect(resizeOrder("idle", "peek")).toBe("before");
-    expect(resizeOrder("idle", "open")).toBe("before");
-    expect(resizeOrder("peek", "open")).toBe("before");
-    expect(resizeOrder("open", "idle")).toBe("after");
-    expect(resizeOrder("open", "peek")).toBe("after");
-    expect(resizeOrder("peek", "idle")).toBe("after");
-    for (const state of DOCK_STATES) expect(resizeOrder(state, state)).toBe("same");
+  test("the island is drawn no larger than its state's rectangle: idle as wide as its words, open as tall as its content", () => {
+    expect(islandSize("idle", { pill: 90.2 })).toEqual({ width: 91, height: 22 });
+    expect(islandSize("idle", { pill: 500 })).toEqual({ width: 128, height: 22 });
+    // Nothing going on: shorter still, and never narrower than it is tall.
+    expect(islandSize("idle", { pill: 31, quiet: true })).toEqual({ width: 31, height: QUIET_HEIGHT });
+    expect(islandSize("idle", { pill: 0, quiet: true })).toEqual({ width: QUIET_HEIGHT, height: QUIET_HEIGHT });
+    expect(islandSize("idle")).toEqual({ width: 22, height: 22 });
+    expect(islandSize("peek", { pill: 5, panel: 5 })).toEqual({ width: 380, height: 40 });
+    expect(islandSize("open", { panel: 353.4 })).toEqual({ width: 460, height: 354 });
+    expect(islandSize("open", { panel: 2000 })).toEqual({ width: 460, height: 480 });
+    // Before the panel has a height (or with one that is not a number) it is at least a peek tall.
+    expect(islandSize("open", { panel: 0 })).toEqual({ width: 460, height: 40 });
+    expect(islandSize("open", { panel: Number.NaN })).toEqual({ width: 460, height: 40 });
+  });
+
+  test("the pointer is on the island where it is drawn, and, closed, anywhere in the rectangle the shell takes the mouse in", () => {
+    const dot = { width: 31, height: 16 };
+    expect(onIsland("idle", dot, 0, 5)).toBe(true);
+    // Beside and below the dot, still in the idle rectangle (128x22): the handle.
+    expect(onIsland("idle", dot, 60, 20)).toBe(true);
+    expect(onIsland("idle", dot, 65, 5)).toBe(false);
+    expect(onIsland("idle", dot, 0, 22)).toBe(false);
+    expect(onIsland("idle", dot, 0, -1)).toBe(false);
+    expect(onIsland("peek", { width: 380, height: 40 }, -190, 39)).toBe(true);
+    expect(onIsland("peek", { width: 380, height: 40 }, 0, 40)).toBe(false);
+    // Open, only what is drawn: under a short panel the window is clear, and a press there puts the dock away.
+    const short = { width: 460, height: 354 };
+    expect(onIsland("open", short, 0, 353)).toBe(true);
+    expect(onIsland("open", short, 0, 354)).toBe(false);
+    expect(onIsland("open", short, 231, 10)).toBe(false);
+  });
+
+  test("opening waits for the pointer to rest: about 80 ms", () => {
+    expect(OPEN_MS).toBeGreaterThanOrEqual(60);
+    expect(OPEN_MS).toBeLessThanOrEqual(120);
+  });
+
+  test("a change of state animates the island's clip and the content's opacity and transform, and nothing else", () => {
+    const css = noComments(source("dock.css"));
+    // Every transition names what it moves: the clip, and the island's opacity.
+    const transitions = [...css.matchAll(/transition:([^;}]*)/g)].map((m) => m[1]!.trim());
+    expect(transitions.length).toBeGreaterThan(0);
+    for (const t of transitions) for (const part of t.split(",")) expect(part.trim()).toMatch(/^(clip-path|opacity) /);
+    expect(css).not.toMatch(/transition-property|transition:\s*all\b/);
+    // The keyframes move opacity and transform only.
+    const frames = [...css.matchAll(/@keyframes [\w-]+ \{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)].map((m) => m[1]!);
+    expect(frames.length).toBeGreaterThan(0);
+    for (const body of frames) for (const prop of body.matchAll(/([\w-]+)\s*:/g)) expect(["opacity", "transform"]).toContain(prop[1]!);
+    // No shadow, filter or blur anywhere on the dock, and no size that changes with the state.
+    expect(css).not.toMatch(/box-shadow|backdrop-filter|\bfilter\b/);
+    expect(css).toMatch(/prefers-reduced-motion: reduce/);
+    // The page never asks the shell for anything but the state: no size, and no call that waits for an animation.
+    expect(noComments(source("dock.js"))).not.toMatch(/resizeTo|resizeBy|innerWidth|innerHeight/);
   });
 
   test("the bridge is used for setState and nothing else, and the page works without it", () => {

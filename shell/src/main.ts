@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, session, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, type DockState, dockBounds, dockFocusable } from "./dock";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, takesMouse, watchMs } from "./dock";
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, promptUrl, sameOrigin, windowTarget } from "./origin";
@@ -338,51 +338,110 @@ function createTray(): Tray {
 
 // --- Dock ---
 
-let dockState: DockState = "idle";
+/** The state the page last reported through setState. Null until it has: not loaded yet, failed, crashed, reloading. */
+let dockState: DockState | null = null;
 /** True while the dock's page is loaded and its window shown. */
 let dockLoaded = false;
 let dockLoading: Promise<void> | null = null;
 /** The HTTP status of the dock window's last navigation. */
 let dockStatus = 0;
+/** What the window was last told: true, the mouse goes through it. Electron has no getter for this. */
+let dockIgnoresMouse = true;
+/** Where the cursor is. The self-test puts a made-up one here. */
+let dockCursor = (): Electron.Point => screen.getCursorScreenPoint();
+let dockWatch: ReturnType<typeof setTimeout> | null = null;
 
-/** Puts the dock's window where its state says, on the primary display as it is now. */
+/** Puts the dock's window in its one place, on the primary display as it is now. Never called for a change of state. */
 function placeDock(): void {
   if (!dock || dock.isDestroyed()) return;
   // The display's bounds, not its work area: the dock touches the very top edge.
-  dock.setBounds(dockBounds(screen.getPrimaryDisplay().bounds, dockState));
+  dock.setBounds(dockBounds(screen.getPrimaryDisplay().bounds));
 }
 
-/** Resizes the dock at once, keeps it centred, and lets it take the keyboard only in "open". */
+/** Tells the window whether to take the mouse, when that changes. */
+function setDockMouse(win: BrowserWindow, takes: boolean): void {
+  if (dockIgnoresMouse === !takes) return;
+  dockIgnoresMouse = !takes;
+  // Ignoring, mouse moves are still forwarded to the page, so it sees the pointer arrive and leave.
+  if (takes) win.setIgnoreMouseEvents(false);
+  else win.setIgnoreMouseEvents(true, { forward: true });
+}
+
+/**
+ * Looks at the cursor once: the window takes the mouse only while the cursor is on the island of
+ * the state the page last reported, and lets it through everywhere else. Returns how long until
+ * the next look.
+ */
+function watchDockMouse(): number {
+  const win = dock;
+  if (!win || win.isDestroyed()) return DOCK_WATCH_FAR_MS;
+  const bounds = win.getBounds();
+  const cursor = dockCursor();
+  // A page that has reported nothing, or a window that is not shown, takes nothing.
+  const state = dockLoaded ? dockState : null;
+  setDockMouse(win, takesMouse(bounds, state, cursor));
+  return watchMs(bounds, state, cursor);
+}
+
+/** Looks at the cursor now and again after a while, for as long as the shell runs. */
+function watchDockMouseLoop(): void {
+  if (dockWatch) clearTimeout(dockWatch);
+  let wait = DOCK_WATCH_FAR_MS;
+  try {
+    wait = watchDockMouse();
+  } catch (e) {
+    console.error("watching the cursor for the dock failed", e);
+  }
+  dockWatch = setTimeout(watchDockMouseLoop, wait);
+}
+
+/** The page is gone or starting over: no state, so the window lets the mouse through until the page reports one. */
+function forgetDockState(): void {
+  dockState = null;
+  const win = dock;
+  if (!win || win.isDestroyed()) return;
+  setDockMouse(win, false);
+  if (win.isFocused()) win.blur();
+  if (win.isFocusable()) {
+    win.setFocusable(false);
+    win.setSkipTaskbar(true);
+  }
+}
+
+/** Takes the page's state: where the island is for the mouse, and the keyboard only in "open". The window stays as it is. */
 function setDockState(state: DockState): void {
   const win = dock;
   if (!win || win.isDestroyed()) return;
   dockState = state;
   const focusable = dockFocusable(state);
-  // Shrinking with the keyboard in it: the focus goes back to the window below.
+  // Closing with the keyboard in it: the focus goes back to the window below.
   if (!focusable && win.isFocused()) win.blur();
   if (win.isFocusable() !== focusable) {
     win.setFocusable(focusable);
     // On Windows, making a window focusable puts it back in the taskbar.
     win.setSkipTaskbar(true);
   }
-  placeDock();
+  // At once, not at the next look: the island just changed under the cursor.
+  watchDockMouseLoop();
 }
 
 /** No dock on screen. Its window stays, hidden, for when the runner answers again. */
 function hideDock(): void {
   dockLoaded = false;
+  forgetDockState();
   if (dock && !dock.isDestroyed()) dock.hide();
 }
 
 function closeDock(): void {
   dockLoaded = false;
+  dockState = null;
   if (dock && !dock.isDestroyed()) dock.destroy();
   dock = null;
 }
 
 function createDock(): BrowserWindow {
   const win = new BrowserWindow({
-    ...dockBounds(screen.getPrimaryDisplay().bounds, "idle"),
+    ...dockBounds(screen.getPrimaryDisplay().bounds),
     show: false,
     frame: false,
     transparent: true,
@@ -403,13 +462,22 @@ function createDock(): BrowserWindow {
     title: "intuition dock",
     webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) },
   });
+  // The default, before any page: every click goes through the window to what is under it.
+  dockState = null;
+  dockIgnoresMouse = true;
+  win.setIgnoreMouseEvents(true, { forward: true });
   // Fixed in size by refusing the drag, as the pop-up is (see there for why not resizable: false).
   win.on("will-resize", (event) => event.preventDefault());
   win.on("closed", () => {
     if (dock === win) {
       dock = null;
       dockLoaded = false;
+      dockState = null;
     }
+  });
+  // A page that starts over (a reload, a new load) has reported nothing yet.
+  win.webContents.on("did-start-navigation", (details) => {
+    if (dock === win && details.isMainFrame && !details.isSameDocument) forgetDockState();
   });
   win.webContents.on("did-navigate", (_event, _url, code) => {
     dockStatus = code;
@@ -420,15 +488,14 @@ function createDock(): BrowserWindow {
     if (isMainFrame && code !== -3) hideDock();
   });
   win.webContents.on("render-process-gone", () => hideDock());
-  dockState = "idle";
   return win;
 }
 
 async function loadDock(): Promise<void> {
   const win = (dock ??= createDock());
   try {
-    // A page that loads starts over, so the window does too.
-    setDockState("idle");
+    // A page that loads starts over: it has no state until it reports one.
+    forgetDockState();
     dockStatus = 0;
     await win.loadURL(dockUrl(settings.runnerUrl));
     if (win.isDestroyed() || dock !== win) return;
@@ -437,6 +504,7 @@ async function loadDock(): Promise<void> {
     dockLoaded = true;
     // Never activated: showing the dock takes nothing from what the person is doing.
     win.showInactive();
+    watchDockMouseLoop();
   } catch (e) {
     console.error("loading the dock failed", e);
     hideDock();
@@ -473,9 +541,10 @@ function onDockState(event: Electron.IpcMainEvent, value: unknown): void {
   if (state) setDockState(state);
 }
 
-/** Listens for the page's setState and for the displays changing. */
+/** Listens for the page's setState and for the displays changing, and starts watching the cursor. */
 function dockEvents(): void {
   ipcMain.on(DOCK_CHANNEL, onDockState);
+  watchDockMouseLoop();
   // A display added or removed, a new resolution or scale: centred again on the primary display.
   screen.on("display-metrics-changed", placeDock);
   screen.on("display-added", placeDock);
@@ -508,9 +577,12 @@ async function selfTest(): Promise<SelfTestResult> {
     popupVisible: false, popupCentred: false, foreignNavigationRefused: false, foreignWindowRefused: false, pageClosedPopup: false,
     noWindowWithoutRunner: false, clipboardRestored: false, loginItemRead: false, openAtLogin: null,
     dockOffNoWindow: false, dockCreated: false, dockUrl: null, dockVisible: false, dockBridge: null, primaryDisplay: null,
-    dockIdleBounds: null, dockIdleFocusable: null, dockIdleFocused: null, dockOpenBounds: null, dockOpenFocusable: null, dockOtherValueIgnored: false,
+    dockIgnoresMouseBeforeLoad: false, dockIdleBounds: null, dockIdleFocusable: null, dockIdleFocused: null, dockMouseOnIdleIsland: false,
+    dockMouseAwayIgnored: false, dockMouseBelowPillIgnored: false, dockPeekBounds: null, dockPeekFocusable: null, dockMouseOnPeekIsland: false,
+    dockOpenBounds: null, dockOpenFocusable: null, dockMouseOnOpenIsland: false, dockOtherValueIgnored: false,
     dockBackBounds: null, dockBackFocusable: null, dockForeignOriginIgnored: false, dockOpenedChatUrl: null, dockOpenedPromptUrl: null,
-    dockOtherWindowRefused: false, dockHiddenWithoutRunner: false, dockShownAgain: false, errors: [],
+    dockOtherWindowRefused: false, dockIgnoresMouseUnreported: false, dockIgnoresMouseAfterCrash: false,
+    dockHiddenWithoutRunner: false, dockShownAgain: false, errors: [],
   };
   const step = async (name: string, run: () => Promise<void>) => {
     try {
@@ -596,31 +668,65 @@ async function selfTest(): Promise<SelfTestResult> {
     }
   });
   await step("dock", async () => {
+    // The cursor is made up from here on: the self-test cannot move the real one. The watching is the real loop.
+    const display = screen.getPrimaryDisplay().bounds;
+    const windowAt = dockBounds(display);
+    /** A point on the screen from one inside the dock's window. */
+    const spot = (x: number, y: number): Electron.Point => ({ x: windowAt.x + x, y: windowAt.y + y });
+    const middle = (state: DockState) => {
+      const island = islandRect(state);
+      return spot(Math.floor(island.x + island.width / 2), Math.floor(island.height / 2));
+    };
+    /** Puts the made-up cursor somewhere and waits for the loop to have looked. Returns whether the window ignores the mouse. */
+    const cursorAt = async (point: Electron.Point) => {
+      dockCursor = () => point;
+      await sleep(DOCK_WATCH_FAR_MS * 3);
+      return dockIgnoresMouse;
+    };
+    const away = spot(-400, 700);
+    // Below the pill and the peek, inside the window: on the island only when it is open.
+    const below = spot(Math.floor(windowAt.width / 2), 200);
+
+    // A window with no page in it yet: the cursor right where the island will be goes through.
+    dock = createDock();
+    r.dockIgnoresMouseBeforeLoad = await cursorAt(middle("idle"));
+
     await showDock();
     const win = dock;
     if (!win || win.isDestroyed()) throw new Error("the dock was not created");
     r.dockCreated = true;
     r.dockUrl = win.webContents.getURL();
     r.dockVisible = win.isVisible();
-    r.primaryDisplay = screen.getPrimaryDisplay().bounds;
+    r.primaryDisplay = display;
     const run = (code: string) => win.webContents.executeJavaScript(code, true);
     r.dockBridge = String(await run("typeof window.intuitionDock + ':' + Object.keys(window.intuitionDock ?? {}).join(',') + ':' + typeof window.require + ':' + typeof window.process"));
-    const same = (a: Electron.Rectangle, b: Electron.Rectangle) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-    /** Asks through the page, as the page would, and waits for the window to get there (or not). */
+    /** Asks through the page, as the page would, and waits for the shell to take it (or not). */
     const ask = async (state: string, expect: DockState | null) => {
-      const before = win.getBounds();
+      const before = { state: dockState, focusable: win.isFocusable() };
       await run(`window.intuitionDock.setState(${JSON.stringify(state)}); 0`);
-      const want = expect ? dockBounds(screen.getPrimaryDisplay().bounds, expect) : null;
       // A refused call changes nothing: there is nothing to wait for but time.
-      for (let i = 0; i < (want ? 30 : 6) && !(want && same(win.getBounds(), want)); i++) await sleep(100);
-      return { bounds: win.getBounds(), focusable: win.isFocusable(), unchanged: same(win.getBounds(), before) };
+      for (let i = 0; i < (expect ? 30 : 6) && !(expect && dockState === expect); i++) await sleep(100);
+      return { bounds: win.getBounds(), focusable: win.isFocusable(), unchanged: dockState === before.state && win.isFocusable() === before.focusable };
     };
+    // The stub's page reported "idle" as it loaded.
+    for (let i = 0; i < 30 && dockState !== "idle"; i++) await sleep(100);
     r.dockIdleBounds = win.getBounds();
     r.dockIdleFocusable = win.isFocusable();
     r.dockIdleFocused = win.isFocused();
+    r.dockMouseOnIdleIsland = !(await cursorAt(middle("idle")));
+    r.dockMouseAwayIgnored = await cursorAt(away);
+    r.dockMouseBelowPillIgnored = await cursorAt(below);
+    const peek = await ask("peek", "peek");
+    r.dockPeekBounds = peek.bounds;
+    r.dockPeekFocusable = peek.focusable;
+    // Still below the peek: ignored. On it: taken.
+    r.dockMouseOnPeekIsland = (await cursorAt(below)) && !(await cursorAt(middle("peek")));
+    await cursorAt(below);
     const open = await ask("open", "open");
     r.dockOpenBounds = open.bounds;
     r.dockOpenFocusable = open.focusable;
+    // The same point, without the cursor moving: on the island now that it is open.
+    r.dockMouseOnOpenIsland = !(await cursorAt(below)) && (await cursorAt(away));
     // Another value: refused, still open.
     const other = await ask("huge", null);
     r.dockOtherValueIgnored = other.unchanged && other.focusable;
@@ -652,6 +758,17 @@ async function selfTest(): Promise<SelfTestResult> {
     await sleep(500);
     r.dockOtherWindowRefused = BrowserWindow.getAllWindows().length === windows;
 
+    // A page that loads and never reports a state (the stub's /dock?silent): the cursor on the island goes through.
+    await cursorAt(middle("idle"));
+    await win.loadURL(`${dockUrl(real)}?silent`);
+    r.dockIgnoresMouseUnreported = (await cursorAt(middle("idle"))) && dockState === null && !win.isFocusable();
+    // The page's process dies: the window hides and ignores the mouse. The next check loads the page again.
+    win.webContents.forcefullyCrashRenderer();
+    for (let i = 0; i < 40 && win.isVisible(); i++) await sleep(100);
+    r.dockIgnoresMouseAfterCrash = (await cursorAt(middle("open"))) && !win.isVisible();
+    dockCursor = () => away;
+    await checkDock();
+
     // The runner goes away (port 9, discard: nothing answers): after two checks the dock is hidden, not left
     // empty on screen. It answers again: the next check loads the page and shows the dock, idle.
     settings = { ...settings, runnerUrl: "http://127.0.0.1:9" };
@@ -666,6 +783,7 @@ async function selfTest(): Promise<SelfTestResult> {
     await checkDock();
     r.dockShownAgain = win.isVisible() && win.webContents.getURL() === r.dockUrl && !win.isFocusable();
     closeDock();
+    dockCursor = () => screen.getCursorScreenPoint();
   });
   await step("no runner", async () => {
     const real = settings.runnerUrl;
