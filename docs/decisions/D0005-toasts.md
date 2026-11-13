@@ -1,6 +1,6 @@
 # D0005: How notifications become toasts
 
-Date: 2026-11-13. Status: active.
+Date: 2026-11-13. Status: replaced in part by [D0008](D0008-dock.md). The shell no longer polls or shows toasts: the dock shows notifications as peeks. What the runner records, and each notification's body, still stand as written here.
 
 ## Decision
 - The runner keeps notifications in memory only (`src/runner/notifications.ts`): the newest 200, with a seq that starts at 1 each time the runner starts. `Sessions` records them where a turn's state changes: `needs_approval` when an approval opens, `finished` for a result that is ok, `error` for a result that is not ok, an `error` event, a driver that throws or ends without a result.

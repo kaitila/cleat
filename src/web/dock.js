@@ -204,7 +204,7 @@ let loadErrorEl = null;
 const typed = new Map();
 let sending = false;
 let replyError = "";
-/** True after a reply was sent from the box: the focus goes back to it when the turn ends. */
+/** True when the box was switched off while it had the focus: the focus goes back to it when the turn ends. */
 let wantFocus = false;
 /** True while the person is at the bottom of the stream: new events keep it there. */
 let stick = true;
@@ -500,13 +500,15 @@ function renderReply() {
   const session = selected ? sessions.get(selected) : undefined;
   const replying = replyState(session);
   const enabled = replying.enabled && !sending;
+  // Switched off under the person's caret (their reply was sent): the focus comes back with the box.
+  if (!enabled && document.activeElement === els.text) wantFocus = true;
   els.text.disabled = !enabled;
   els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : sending ? "Sending." : replying.hint;
-  // Back to the box after a turn the person started from it, unless they have moved on.
+  // Back to the box after the turn, unless the person has moved on or the dock has closed.
   if (enabled && wantFocus) {
     wantFocus = false;
     const active = document.activeElement;
-    if (state === "open" && (active === null || active === document.body)) els.text.focus();
+    if (state === "open" && (active === null || active === document.body || active === els.text)) els.text.focus();
   }
   // The box may have lost the focus by being switched off: nothing else says so.
   scheduleClose();
@@ -518,7 +520,6 @@ async function send() {
   if (!id || sending || !prompt.trim() || !replyState(sessions.get(id)).enabled) return;
   sending = true;
   replyError = "";
-  wantFocus = true;
   renderReply();
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/messages`, {

@@ -7,6 +7,7 @@ The runner is one bun process on `127.0.0.1:4777` (`port` in the config file). I
 |---|---|
 | `/` | Chat view: sessions in a sidebar, the selected one streaming. `/?session=<id>` opens one. |
 | `/prompt` | Pop-up prompt: workspace picker, task box, the clipboard attachment. |
+| `/dock` | The dock: a pill, a peek and an open view of the sessions. See "Dock". |
 | `/assets/<file>` | Files from `src/web/`. |
 
 Pages are plain HTML, CSS and JavaScript modules served from `src/web/` with no build step.
@@ -26,7 +27,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 | `GET /api/clipboard` | | The latest `ClipboardCapture`, or `{}` before the first one |
 | `POST /api/clipboard` | `ClipboardPostRequest` | 200 the stored `ClipboardCapture`, which replaces the one before (an empty body stores an empty capture). Sent by the Windows shell on the hotkey. `text` is cut to 20,000 characters. 400 for an `imagePath` that is refused, and the capture before it stays. |
 | `GET /api/clipboard/image` | | The latest capture's PNG (`image/png`), for the pop-up's thumbnail. 404 when the latest capture has no image or its file is gone. The request names no file. |
-| `GET /api/notifications?after=<seq>` | | `NotificationsResponse`. Polled by the Windows shell for toasts. |
+| `GET /api/notifications?after=<seq>` | | `NotificationsResponse`: the kept notifications with a higher seq, and the newest seq given out. For a client that polls; the dock gets them on the WebSocket. |
 
 ## WebSocket
 `GET /ws`. The runner sends `ServerMessage`s; clients send nothing.
@@ -34,6 +35,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 - `session` whenever a session's metadata changes (status, title, lastSeq).
 - `event` for every stored event, for all sessions. A client that reconnects fetches what it missed with `GET /api/sessions/:id/events?after=<seq>`.
 - `delta` for assistant text as it streams. Deltas aren't stored; the complete text follows as an `assistant_text` event, and the client replaces the streamed text with it.
+- `notification` for each `Notification`, at the moment it is recorded. None is sent again on connect: a client shows only what arrives while it is connected. It follows the `session` message that carries the status it is about (`waiting_approval`, `idle` or `error`).
 
 ## Sessions and events
 - A session is one Claude Code conversation in one workspace. The runner keeps its own id and stores Claude Code's session id once known, to resume with it.
@@ -54,7 +56,20 @@ The capture is kept in memory only, the latest one. The pop-up asks for it on lo
 A session started, or replied to, with `imagePath` gets the path in the prompt Claude sees, after the task: a blank line, then `Attached image (read this file): <path>`, so Claude reads the file. The stored `user` event keeps `text` and `imagePath` apart. Reading a file outside the workspace is a tool call like any other: it may need the person's approval.
 
 ## Notifications
-The runner records a `Notification` when a session finishes a turn (`finished`), opens an approval (`needs_approval`) or fails (`error`). The shell polls `GET /api/notifications?after=<seq>` every two seconds and shows each one as a Windows toast. Its first poll only reads `latest`, so old notifications don't replay.
+The runner records a `Notification` when a session finishes a turn (`finished`), opens an approval (`needs_approval`) or fails (`error`). Its `title` is the session's; its `body` is one line of at most 140 characters: the start of the answer, the tool and its target (`Write: /path`), or the error's message. Each one is pushed to the WebSocket clients as a `notification` message, which the dock shows as a peek, and the newest 200 are kept in memory for `GET /api/notifications?after=<seq>`. The seq starts at 1 each time the runner starts.
+
+## Dock
+The contract between the dock's page and the Windows shell. The shell's half is in [windows-shell](windows-shell.md) ("The dock"), the reasons in [D0008](decisions/D0008-dock.md).
+- The dock is the page `/dock`, served by the runner, shown by the shell in a frameless, transparent, always-on-top window that touches the top edge of the primary display, centred.
+- It has three states. The window is exactly this size in each (CSS pixels): idle 280x40, peek 420x76, open 460x600. The page fills the window, its own background transparent, and draws the island inside it.
+- The page decides the state and tells the shell through `window.intuitionDock.setState("idle" | "peek" | "open")`, the only thing the bridge exposes. The shell resizes the window at once and keeps it centred. Growing, the page calls `setState` first and then animates; shrinking, it animates and then calls `setState`. In a normal browser the bridge is absent and the page works the same without it.
+- Only in "open" can the window take keyboard focus. In idle and peek it never takes focus from what the person is doing.
+- A link the page opens in a new window to `/?session=<id>` opens the chat window on that session, and one to `/prompt` opens the pop-up.
+
+What the page does in each state (`src/web/dock.js`; the rules are pure functions in `src/web/dock-state.js`):
+- **Idle**, the pill: one line from the sessions on the WebSocket. `needs you` when any session waits for approval; else `2 running`; else `failed` when the newest session that finished its turn failed; else `intuition`. Beside `needs you` or `2 running` a red dot marks that the newest finished one failed.
+- **Peek**: a `notification` grows the island to show the session's title and the notification's body for five seconds. One for an approval stays until its session no longer waits or the dock is opened. Others wait their turn behind it, newest last, at most five; a session's newer one replaces its older one that still waits. While the dock is open nothing peeks.
+- **Open**: when the pointer has rested on the island for 120 ms. It closes 400 ms after the pointer left, or at once on Esc, but not while the pointer is held down, or while the reply box has the focus or text in it. It lists the sessions, newest activity first, and shows the last 30 events of one: the session peeking when it opened, else the newest that waits for approval, else the one that peeked last, else the newest. Allow and Deny answer through `POST /api/sessions/:id/approvals/:approvalId`, and the reply box continues the session through `POST /api/sessions/:id/messages`, as in the chat view.
 
 ## Guarding the port
 The runner binds `127.0.0.1` only. A web page in any browser can still send requests to a local port, so every request is checked:

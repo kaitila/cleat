@@ -38,6 +38,8 @@ body { display: flex; justify-content: center; align-items: flex-start; }
   animation: dock-in calc(var(--motion) * 2) var(--ease);
 }
 @keyframes dock-in { from { opacity: 0; } }
+/* The dock's own chrome is not text to select: a drag that starts on it selects nothing. The stream is. */
+.pill, .peek, .panel-head, .sessions, .session-head { user-select: none; }
 
 /* Idle: one quiet line. */
 .pill { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0 var(--space-4); white-space: nowrap; }
