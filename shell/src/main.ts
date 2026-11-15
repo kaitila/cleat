@@ -1,19 +1,23 @@
 // The Windows shell: Electron's main process. It lives in the tray, opens the pop-up on the global
 // hotkey with the clipboard captured, freezes the screens for a snip on the second hotkey, shows the
-// runner's pages in small windows, and keeps the dock at the top of the screen.
+// runner's pages in small windows, and keeps the dock at the top of the screen. Its settings (the
+// hotkeys, the dock, start on login, the theme) are the runner's: it reads them on a WebSocket and
+// applies each change at once.
 // Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
 import { spawn } from "node:child_process";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, Notification, screen, session, shell, Tray } from "electron";
+import { existsSync, readFileSync } from "node:fs";
+import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, nativeTheme, net, Notification, screen, session, shell, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
 import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, takesMouse, watchMs } from "./dock";
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, loginItem, type LoginResult } from "./login";
-import { chatUrl, dockUrl, externalLink, promptUrl, sameOrigin, windowTarget } from "./origin";
+import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
+import { hotkeyNotice, migratedPrefs, releaseBoth, parseRunnerSettings, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PATH, SETTINGS_WINDOW, SHELL_DEFAULTS, type ShellPrefs, settingsMessage, socketUrl, swapHotkey, withShell } from "./prefs";
 import type { SelfTestResult } from "./result";
-import { loadSettings, PID_FILE, saveDock, SETTINGS_FILE, type Settings } from "./settings";
+import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Settings } from "./settings";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
 import { RUNNER_START_MS, runnerCommand } from "./wsl";
 
@@ -21,17 +25,23 @@ const POPUP = { width: 560, height: 380 };
 const CHAT = { width: 1100, height: 720 };
 const ICON_SIZE = 32;
 /** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
-const SELF_TEST_HOTKEY = "Control+Alt+Shift+F11";
-const SELF_TEST_SNIP_HOTKEY = "Control+Alt+Shift+F10";
+const SELF_TEST_HOTKEY = SELF_TEST_PREFS.hotkey;
+const SELF_TEST_SNIP_HOTKEY = SELF_TEST_PREFS.snipHotkey;
 /** Pages get no Node and their own sandboxed process. Only the dock and the snip overlays add a preload, each for its own small bridge. */
 const WEB_PREFERENCES = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } as const;
 
 const args = parseArgs(process.argv);
+/** The shell's own file: where the runner is. */
 let settings: Settings;
+/** What the shell applies: the runner's, once it has answered; until then the old file's values or the defaults. */
+let prefs: ShellPrefs = { ...SHELL_DEFAULTS, startOnLogin: false };
+/** The runner's settings as last received. Null until it has sent them (or when it has no settings API). */
+let remote: RunnerSettings | null = null;
 let tray: Tray | null = null;
 let popup: BrowserWindow | null = null;
 let popupOpening = false;
 let chat: BrowserWindow | null = null;
+let settingsWindow: BrowserWindow | null = null;
 let dock: BrowserWindow | null = null;
 
 type Clip = { kind: "image"; png: Buffer } | { kind: "text"; text: string } | { kind: "empty" };
@@ -40,9 +50,13 @@ function icon() {
   return nativeImage.createFromBitmap(iconBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE });
 }
 
+/** What the self-test would have shown as notifications: it puts none on the person's screen. */
+const noticesShown: string[] = [];
+
 /** The shell's own trouble only (the runner is not running, the hotkey is taken). Sessions show in the dock. */
 function notify(title: string, body: string): void {
-  if (Notification.isSupported()) new Notification({ title, body, icon: icon() }).show();
+  if (args.selfTest) noticesShown.push(`${title}: ${body}`);
+  else if (Notification.isSupported()) new Notification({ title, body, icon: icon() }).show();
   else console.error(`${title}: ${body}`);
 }
 
@@ -109,19 +123,27 @@ function startsOnLogin(): boolean {
   return app.getLoginItemSettings(loginItem(process.execPath, app.getAppPath())).openAtLogin;
 }
 
-/** Only the tray's checkbox and `--login on|off` come here. */
+/** Only the runner's settings (the tray's checkbox and the Settings page write them) and `--login on|off` come here. */
 function setStartOnLogin(on: boolean): void {
   app.setLoginItemSettings({ ...loginItem(process.execPath, app.getAppPath()), openAtLogin: on, name: APP_ID });
 }
 
-/** --login on|off|status: does it, writes the outcome, tells a running shell to redraw its menu, and quits. */
-function loginCommand(action: "on" | "off" | "status"): void {
+/**
+ * --login on|off|status: does it, tells the runner (when it answers) so its setting agrees and a
+ * running shell does not turn it back, writes the outcome, tells a running shell to redraw its menu, and quits.
+ */
+async function loginCommand(action: "on" | "off" | "status"): Promise<void> {
   let result: LoginResult;
   try {
     if (action !== "status") setStartOnLogin(action === "on");
     result = { openAtLogin: startsOnLogin(), error: null };
   } catch (e) {
     result = { openAtLogin: null, error: e instanceof Error ? e.message : String(e) };
+  }
+  if (action !== "status" && result.openAtLogin !== null) {
+    settings = loadSettings(join(app.getPath("userData"), SETTINGS_FILE));
+    const current = await fetchSettings();
+    if (current?.shell && current.shell.startOnLogin !== result.openAtLogin) await putSettings(withShell(current, { ...current.shell, startOnLogin: result.openAtLogin }));
   }
   if (args.loginResult) writeFileSync(args.loginResult, JSON.stringify(result));
   // Asking for the lock hands this command line to a running shell: its checkbox follows.
@@ -184,7 +206,15 @@ function guard(): void {
     };
     // A link followed in the page to http:, https: or mailto: elsewhere goes to the default browser. A redirect never does.
     contents.on("will-navigate", (event) => {
-      if (sameOrigin(event.url, settings.runnerUrl)) return;
+      if (sameOrigin(event.url, settings.runnerUrl)) {
+        // A link to the Settings page followed in another window opens the Settings window instead.
+        const inSettings = settingsWindow !== null && !settingsWindow.isDestroyed() && contents === settingsWindow.webContents;
+        if (!inSettings && isSettingsLink(event.url, settings.runnerUrl)) {
+          event.preventDefault();
+          void openSettings(Boolean(args.selfTest));
+        }
+        return;
+      }
       event.preventDefault();
       openExternal(event.url);
     });
@@ -195,6 +225,7 @@ function guard(): void {
       // the pop-up, as the hotkey does. Nothing else opens. The self-test opens them without taking the focus.
       const target = windowTarget(url, settings.runnerUrl, dock !== null && !dock.isDestroyed() && contents === dock.webContents);
       if (target?.kind === "chat") void openChat(target.session, Boolean(args.selfTest));
+      else if (target?.kind === "settings") void openSettings(Boolean(args.selfTest));
       else if (target?.kind === "prompt") args.selfTest ? void openPopup(true) : newTask();
       else openExternal(url);
       return { action: "deny" };
@@ -323,6 +354,43 @@ async function openChat(sessionId?: string, inactive = false): Promise<void> {
   }
 }
 
+/** Opens the Settings window on the runner's Settings page, or focuses it when it is open. `inactive`: without taking the focus (the self-test). */
+async function openSettings(inactive = false): Promise<BrowserWindow | null> {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    if (settingsWindow.isMinimized()) settingsWindow.restore();
+    if (inactive) settingsWindow.showInactive();
+    else {
+      settingsWindow.show();
+      settingsWindow.focus();
+    }
+    return settingsWindow;
+  }
+  if (!(await ensureRunner())) {
+    runnerDown();
+    return null;
+  }
+  try {
+    const win = new BrowserWindow({ ...SETTINGS_WINDOW, show: false, title: "intuition settings", icon: icon(), autoHideMenuBar: true, webPreferences: WEB_PREFERENCES });
+    win.on("closed", () => {
+      if (settingsWindow === win) settingsWindow = null;
+    });
+    settingsWindow = win;
+    await win.loadURL(settingsUrl(settings.runnerUrl));
+    if (win.isDestroyed()) return null;
+    if (inactive) win.showInactive();
+    else {
+      win.show();
+      win.focus();
+    }
+    return win;
+  } catch (e) {
+    console.error("opening the settings failed", e);
+    settingsWindow?.destroy();
+    runnerDown();
+    return null;
+  }
+}
+
 /** The tray's menu. */
 function trayMenu(): Menu {
   let onLogin = false;
@@ -335,22 +403,11 @@ function trayMenu(): Menu {
     { label: "New task", click: newTask },
     { label: "Snip", click: () => void snip() },
     { label: "Open chat", click: () => void openChat() },
+    { label: "Settings…", click: () => void openSettings() },
     { type: "separator" },
-    { label: "Show dock", type: "checkbox", checked: settings.dock, click: (item) => setDock(item.checked) },
-    {
-      label: "Start on login",
-      type: "checkbox",
-      checked: onLogin,
-      click: (item) => {
-        try {
-          setStartOnLogin(item.checked);
-        } catch (e) {
-          notify("intuition: start on login was not changed", e instanceof Error ? e.message : String(e));
-        }
-        // Drawn again from what Windows now says.
-        tray?.setContextMenu(trayMenu());
-      },
-    },
+    // Both written to the runner, like the Settings page: the change comes back as a 'settings' message and is applied from there.
+    { label: "Show dock", type: "checkbox", checked: prefs.dock, click: (item) => void changePrefs({ dock: item.checked }) },
+    { label: "Start on login", type: "checkbox", checked: onLogin, click: (item) => void changePrefs({ startOnLogin: item.checked }) },
     { type: "separator" },
     { label: "Quit", click: () => app.quit() },
   ]);
@@ -817,24 +874,11 @@ async function loadDock(): Promise<void> {
 
 /** Loads the dock's page and shows it, unless the setting is off or it is already up. Calls at the same moment share one load. */
 function showDock(): Promise<void> {
-  if (!settings.dock || dockLoaded) return Promise.resolve();
+  if (!prefs.dock || dockLoaded) return Promise.resolve();
   dockLoading ??= loadDock().finally(() => {
     dockLoading = null;
   });
   return dockLoading;
-}
-
-/** The tray's "Show dock": at once, and written to the settings file so the next start remembers. */
-function setDock(on: boolean): void {
-  settings = { ...settings, dock: on };
-  try {
-    saveDock(join(app.getPath("userData"), SETTINGS_FILE), on);
-  } catch (e) {
-    console.error("writing the dock setting failed", e);
-  }
-  if (on) void showDock();
-  else closeDock();
-  tray?.setContextMenu(trayMenu());
 }
 
 /** The page's setState, through the preload's bridge. Taken only from the dock's own main frame on the runner's origin. */
@@ -859,7 +903,7 @@ let dockMisses = 0;
 
 /** One check: is the runner there? Gone (two checks in a row), the dock hides; back, its page loads again and it shows. */
 async function checkDock(): Promise<void> {
-  if (!settings.dock) return;
+  if (!prefs.dock) return;
   if (await runnerAnswers()) {
     dockMisses = 0;
     await showDock();
@@ -870,6 +914,203 @@ async function checkDock(): Promise<void> {
 function watchDock(): void {
   const tick = () => void checkDock().catch((e) => console.error("checking the dock failed", e)).finally(() => setTimeout(tick, DOCK_CHECK_MS));
   tick();
+}
+
+// --- Settings ---
+
+/** GET /api/settings. Null when the runner does not answer, or has no settings yet (older than the shell). */
+async function fetchSettings(): Promise<RunnerSettings | null> {
+  try {
+    const res = await fetch(new URL(SETTINGS_PATH, settings.runnerUrl), { signal: AbortSignal.timeout(3000) });
+    return res.ok ? parseRunnerSettings(await res.json()) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** PUT /api/settings with the whole settings: what the runner stored, or why not. */
+async function putSettings(body: RunnerSettings): Promise<{ settings: RunnerSettings } | { error: string }> {
+  try {
+    const res = await fetch(new URL(SETTINGS_PATH, settings.runnerUrl), {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(3000),
+    });
+    const answer = (await res.json().catch(() => null)) as unknown;
+    if (!res.ok) {
+      const o = (answer ?? {}) as { error?: unknown; field?: unknown };
+      return { error: `${typeof o.field === "string" ? `${o.field}: ` : ""}${typeof o.error === "string" ? o.error : `the runner answered ${res.status}`}` };
+    }
+    const stored = parseRunnerSettings(answer);
+    return stored ? { settings: stored } : { error: "the runner's answer was not settings" };
+  } catch (e) {
+    return { error: `nothing answered at ${settings.runnerUrl} (${e instanceof Error ? e.message : String(e)})` };
+  }
+}
+
+/** The settings file, which keeps runnerUrl and wsl. */
+const settingsFile = () => join(app.getPath("userData"), SETTINGS_FILE);
+
+/** The hotkeys as registered now. Null when none is (not yet, or the first one failed). */
+let activeHotkey: string | null = null;
+let activeSnipHotkey: string | null = null;
+/** The last hotkey of each that could not be registered and was said: said once, not at every settings message. */
+const hotkeySaid: Record<"hotkey" | "snip hotkey", string | null> = { hotkey: null, "snip hotkey": null };
+
+/** Registers the two hotkeys of `prefs`. A change moves the shortcut; one that cannot be registered keeps the old one working, and a notification names it. */
+function registerHotkeys(): void {
+  const ops = (press: () => void) => ({
+    register: (accelerator: string) => globalShortcut.register(accelerator, press),
+    unregister: (accelerator: string) => globalShortcut.unregister(accelerator),
+    isRegistered: (accelerator: string) => globalShortcut.isRegistered(accelerator),
+  });
+  const one = (which: "hotkey" | "snip hotkey", current: string | null, wanted: string, press: () => void): string | null => {
+    const { active, failed } = swapHotkey(current, wanted, ops(press));
+    if (!failed) hotkeySaid[which] = null;
+    else if (hotkeySaid[which] !== failed) {
+      hotkeySaid[which] = failed;
+      const n = hotkeyNotice(which, failed, active);
+      notify(n.title, n.body);
+    }
+    return active;
+  };
+  // One takes the other's key as that one moves away (the two traded, say): both are let go first, or each would find the other holding it.
+  if (releaseBoth({ hotkey: activeHotkey, snipHotkey: activeSnipHotkey }, prefs)) {
+    for (const held of [activeHotkey, activeSnipHotkey]) if (held) globalShortcut.unregister(held);
+    activeHotkey = activeSnipHotkey = null;
+  }
+  activeHotkey = one("hotkey", activeHotkey, prefs.hotkey, newTask);
+  activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, () => void snip());
+}
+
+/** Takes the shell's part of the settings: the hotkeys, the dock, start on login, and the tray drawn again. */
+function applyPrefs(next: ShellPrefs): void {
+  prefs = next;
+  registerHotkeys();
+  // At once: on loads the page and shows it (when the runner answers), off closes the window.
+  if (next.dock) void showDock();
+  else closeDock();
+  // The self-test only reads start on login: it never changes it on this machine.
+  if (!args.selfTest) {
+    try {
+      if (startsOnLogin() !== next.startOnLogin) setStartOnLogin(next.startOnLogin);
+    } catch (e) {
+      notify("intuition: start on login was not changed", e instanceof Error ? e.message : String(e));
+    }
+  }
+  tray?.setContextMenu(trayMenu());
+}
+
+let migrating = false;
+
+/** Stores the shell's part in the runner, applies what it stored, and drops the file's old values once the runner has them. */
+async function saveShell(current: RunnerSettings, shellPrefs: ShellPrefs): Promise<string | null> {
+  const saved = await putSettings(withShell(current, shellPrefs));
+  if ("error" in saved) return saved.error;
+  if (hasLegacy(settings)) {
+    try {
+      dropLegacy(settingsFile());
+      settings = { ...settings, legacy: {} };
+    } catch (e) {
+      console.error("rewriting the settings file failed", e);
+    }
+  }
+  applySettings(saved.settings);
+  return null;
+}
+
+/**
+ * The migration, once: the runner has no shell settings yet, so the shell sends its own, the values
+ * the person had in its file. Should the runner refuse them (a hotkey it does not take), the defaults.
+ */
+async function migrate(current: RunnerSettings): Promise<void> {
+  if (migrating) return;
+  migrating = true;
+  try {
+    let login = false;
+    try {
+      login = startsOnLogin();
+    } catch (e) {
+      console.error("reading start on login failed", e);
+    }
+    const error = await saveShell(current, migratedPrefs(settings.legacy, login));
+    if (error) {
+      console.error(`the runner refused the shell's settings (${error}); sending the defaults`);
+      const again = await saveShell(current, migratedPrefs({}, login));
+      if (again) console.error(`the runner refused the defaults too: ${again}`);
+    }
+  } finally {
+    migrating = false;
+  }
+}
+
+/** Takes settings from the runner: the theme of the shell's windows, then the shell's part, or the migration when there is none. */
+function applySettings(next: RunnerSettings): void {
+  remote = next;
+  // Window chrome, scrollbars and the pages' prefers-color-scheme follow it.
+  nativeTheme.themeSource = next.theme;
+  if (next.shell) applyPrefs(next.shell);
+  else void migrate(next);
+}
+
+/**
+ * The tray's checkboxes: the change goes to the runner, as the Settings page's would, and is applied
+ * from what it stored. Fresh settings are asked for first, so nothing the page just saved is undone.
+ */
+async function changePrefs(change: Partial<ShellPrefs>): Promise<void> {
+  const current = await fetchSettings();
+  let error: string | null;
+  if (!current) error = `The runner at ${settings.runnerUrl} did not give its settings, which it keeps: it is not running, or older than the shell. In WSL: intuition up, then try again.`;
+  else {
+    let login = false;
+    try {
+      login = startsOnLogin();
+    } catch {
+      // Only for a runner that has no shell settings yet; the checkbox says what the person wants.
+    }
+    error = await saveShell(current, { ...(current.shell ?? migratedPrefs(settings.legacy, login)), ...change });
+  }
+  if (error) notify("intuition: the setting was not changed", error);
+  // Drawn again from what is so now, whichever way it went.
+  tray?.setContextMenu(trayMenu());
+}
+
+let syncSocket: Electron.WebSocket | null = null;
+
+/**
+ * One WebSocket to the runner's /ws for as long as the shell runs: on every connect it asks for the
+ * settings, and it applies each 'settings' message. When it closes (the runner stopped or restarted)
+ * it connects again, quietly: one second, then doubling up to fifteen. It never starts the runner.
+ */
+function syncSettings(): void {
+  let attempt = 0;
+  const again = () => void setTimeout(connect, reconnectMs(attempt++));
+  function connect(): void {
+    let ws: Electron.WebSocket;
+    try {
+      ws = new net.WebSocket(socketUrl(settings.runnerUrl));
+    } catch (e) {
+      console.error("opening the settings socket failed", e);
+      return again();
+    }
+    syncSocket = ws;
+    ws.addEventListener("open", () => {
+      attempt = 0;
+      void fetchSettings().then((s) => s && applySettings(s));
+    });
+    ws.addEventListener("message", (event) => {
+      const s = settingsMessage((event as Event & { data?: unknown }).data);
+      if (s) applySettings(s);
+    });
+    // An error is followed by close: that is where it connects again.
+    ws.addEventListener("error", () => {});
+    ws.addEventListener("close", () => {
+      if (syncSocket === ws) syncSocket = null;
+      again();
+    });
+  }
+  connect();
 }
 
 // --- Self-test ---
@@ -889,6 +1130,9 @@ async function selfTest(): Promise<SelfTestResult> {
     dockHiddenWithoutRunner: false, dockShownAgain: false,
     snipHotkeyRegistered: false, snipDisplays: null, snipOverlayBounds: null, snipOverlaysShown: false, snipUrl: null, snipMs: null, snipPhases: null,
     snipCaptured: null, snipBridge: null, snipCropRect: null, snipCropPath: null, snipBadRectsRefused: false, snipClosed: false, snipEscClosed: false,
+    settingsFileKeys: null, settingsHotkeyRegistered: false, settingsHotkeyChanged: false, settingsInvalidHotkeyKept: false, settingsTakenHotkeyKept: false,
+    settingsNotices: [], settingsDockShown: false, settingsDockHidden: false, settingsTheme: null, settingsOpenAtLogin: null,
+    settingsWindowUrl: null, settingsWindowWidth: 0, settingsWindowHeight: 0, settingsWindowReused: false, settingsLinkOpened: null,
     externalLinks: [], errors: [],
   };
   const step = async (name: string, run: () => Promise<void>) => {
@@ -968,13 +1212,13 @@ async function selfTest(): Promise<SelfTestResult> {
     if (!win.isDestroyed()) win.destroy();
   });
   await step("dock off", async () => {
-    // "dock": false in the settings: no window at all.
-    settings = { ...settings, dock: false };
+    // The dock off in the settings: no window at all.
+    prefs = { ...prefs, dock: false };
     try {
       await showDock();
       r.dockOffNoWindow = dock === null && BrowserWindow.getAllWindows().length === 0;
     } finally {
-      settings = { ...settings, dock: true };
+      prefs = { ...prefs, dock: true };
     }
   });
   await step("dock", async () => {
@@ -1150,6 +1394,84 @@ async function selfTest(): Promise<SelfTestResult> {
     await warming;
     dropOverlays();
   });
+  await step("settings", async () => {
+    const until = async (done: () => boolean, ms = 5000) => {
+      for (let waited = 0; !done() && waited < ms; waited += 100) await sleep(100);
+      return done();
+    };
+    /** Changes the settings as the Settings page does: GET, change, PUT. The shell hears of it only through the socket. */
+    const asPage = async (change: (s: RunnerSettings) => RunnerSettings) => {
+      const url = new URL(SETTINGS_PATH, settings.runnerUrl);
+      const current = parseRunnerSettings(await (await fetch(url)).json());
+      if (!current) throw new Error("the stub runner's settings are not settings");
+      const res = await fetch(url, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(change(current)) });
+      if (!res.ok) throw new Error(`the stub runner answered ${res.status} to a PUT`);
+    };
+    const shellPart = (s: RunnerSettings) => s.shell ?? (() => { throw new Error("the stub runner has no shell settings"); })();
+
+    // A file as an older shell wrote it, with the self-test's own hotkeys and the dock off. The stub runner has no shell settings yet.
+    const file = settingsFile();
+    writeFileSync(file, JSON.stringify({ runnerUrl: settings.runnerUrl, hotkey: SELF_TEST_HOTKEY, snipHotkey: SELF_TEST_SNIP_HOTKEY, dock: false }, null, 2));
+    settings = { ...loadSettings(file), runnerUrl: settings.runnerUrl };
+    prefs = { ...SHELL_DEFAULTS, ...settings.legacy, startOnLogin: false };
+    // As at the shell's start.
+    registerHotkeys();
+    syncSettings();
+    // The migration: the file's values go to the runner, come back as its settings, and the file keeps its two keys.
+    await until(() => remote?.shell != null && !hasLegacy(settings));
+    r.settingsFileKeys = existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, "utf8")) as object).sort() : null;
+    r.settingsHotkeyRegistered = activeHotkey === SELF_TEST_HOTKEY && globalShortcut.isRegistered(SELF_TEST_HOTKEY) && globalShortcut.isRegistered(SELF_TEST_SNIP_HOTKEY);
+
+    // A new hotkey: registered without a restart, and the old one released.
+    await asPage((s) => withShell(s, { ...shellPart(s), hotkey: SELF_TEST_PREFS.changed }));
+    r.settingsHotkeyChanged = (await until(() => activeHotkey === SELF_TEST_PREFS.changed))
+      && globalShortcut.isRegistered(SELF_TEST_PREFS.changed) && !globalShortcut.isRegistered(SELF_TEST_HOTKEY);
+    // One that is not an accelerator, and one that is taken (the snip hotkey holds it): the last one keeps working, and a notice names each.
+    const said = noticesShown.length;
+    await asPage((s) => withShell(s, { ...shellPart(s), hotkey: SELF_TEST_PREFS.invalid }));
+    r.settingsInvalidHotkeyKept = (await until(() => prefs.hotkey === SELF_TEST_PREFS.invalid)) && activeHotkey === SELF_TEST_PREFS.changed && globalShortcut.isRegistered(SELF_TEST_PREFS.changed);
+    await asPage((s) => withShell(s, { ...shellPart(s), hotkey: SELF_TEST_SNIP_HOTKEY }));
+    r.settingsTakenHotkeyKept = (await until(() => prefs.hotkey === SELF_TEST_SNIP_HOTKEY)) && activeHotkey === SELF_TEST_PREFS.changed
+      && globalShortcut.isRegistered(SELF_TEST_PREFS.changed) && activeSnipHotkey === SELF_TEST_SNIP_HOTKEY;
+    r.settingsNotices = noticesShown.slice(said);
+
+    // The dock: on through the tray's checkbox (which writes to the runner), off from the page. Each at once.
+    await changePrefs({ dock: true });
+    r.settingsDockShown = await until(() => dock !== null && !dock.isDestroyed() && dock.isVisible() && dockLoaded);
+    await asPage((s) => withShell(s, { ...shellPart(s), dock: false }));
+    r.settingsDockHidden = await until(() => dock === null && !prefs.dock);
+
+    // The theme of the shell's windows, then back.
+    await asPage((s) => ({ ...s, theme: "dark" }));
+    await until(() => nativeTheme.themeSource === "dark");
+    r.settingsTheme = nativeTheme.themeSource;
+    await asPage((s) => ({ ...s, theme: "system" }));
+    await until(() => nativeTheme.themeSource === "system");
+    // Read again after all that: still what it was. The self-test never changes it.
+    r.settingsOpenAtLogin = startsOnLogin();
+
+    // The Settings window, then the same window again rather than a second one.
+    const win = await openSettings(true);
+    if (!win) throw new Error("the Settings window did not open");
+    r.settingsWindowUrl = win.webContents.getURL();
+    // The outer bounds: the window is made that size, title bar and all.
+    const bounds = win.getBounds();
+    r.settingsWindowWidth = bounds.width;
+    r.settingsWindowHeight = bounds.height;
+    const windows = BrowserWindow.getAllWindows().length;
+    r.settingsWindowReused = (await openSettings(true)) === win && BrowserWindow.getAllWindows().length === windows;
+    win.destroy();
+    // A page's link to /settings opens it.
+    await openChat(undefined, true);
+    if (!chat) throw new Error("the chat window did not open");
+    await chat.webContents.executeJavaScript(`window.open(${JSON.stringify(new URL("/settings", settings.runnerUrl).href)}); 0`, true);
+    await until(() => settingsWindow !== null && !settingsWindow.isDestroyed() && settingsWindow.isVisible());
+    r.settingsLinkOpened = settingsWindow?.webContents.getURL() ?? null;
+    settingsWindow?.destroy();
+    chat?.destroy();
+    syncSocket?.close();
+    globalShortcut.unregisterAll();
+  });
   r.externalLinks = [...externalOpened];
   return r;
 }
@@ -1157,8 +1479,10 @@ async function selfTest(): Promise<SelfTestResult> {
 // --- Start ---
 
 function start(): void {
-  settings = loadSettings(join(app.getPath("userData"), SETTINGS_FILE));
+  settings = loadSettings(settingsFile());
   if (args.runnerUrl) settings = { ...settings, runnerUrl: new URL(args.runnerUrl).origin };
+  // Until the runner sends its settings: the file's old values, if it still has them, or the defaults.
+  prefs = { ...SHELL_DEFAULTS, ...settings.legacy, startOnLogin: false };
   Menu.setApplicationMenu(null);
   guard();
   dockEvents();
@@ -1170,7 +1494,7 @@ function start(): void {
       writeFileSync(file, JSON.stringify(result, null, 2));
       app.exit(0);
     };
-    setTimeout(() => done({ errors: ["the self-test did not finish in 60 seconds"] }), 60_000);
+    setTimeout(() => done({ errors: ["the self-test did not finish in 90 seconds"] }), 90_000);
     void selfTest().then(done, (e) => done({ errors: [String(e)] }));
     return;
   }
@@ -1185,12 +1509,9 @@ function start(): void {
 
   tray = createTray();
   snipKeepWarm = true;
-  if (!globalShortcut.register(settings.hotkey, newTask)) {
-    notify("intuition: the hotkey is taken", `${settings.hotkey} could not be registered. Change "hotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
-  }
-  if (!globalShortcut.register(settings.snipHotkey, () => void snip())) {
-    notify("intuition: the snip hotkey is taken", `${settings.snipHotkey} could not be registered. Change "snipHotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
-  }
+  registerHotkeys();
+  // The runner's settings, at once and at every change; the hotkeys above move if they differ.
+  syncSettings();
   // The runner is started here when it is not up: after a login, nobody has started it yet.
   if (args.session) void openChat(args.session);
   else void ensureRunner().then((up) => (up ? undefined : runnerDown()));
@@ -1211,7 +1532,10 @@ if (args.login) {
   // Before the single-instance lock: this works beside a running shell. The app id names the login item.
   const action = args.login;
   app.setAppUserModelId(APP_ID);
-  void app.whenReady().then(() => loginCommand(action));
+  void app.whenReady().then(() => loginCommand(action)).catch((e) => {
+    console.error("--login failed", e);
+    app.exit(1);
+  });
 } else if (!shouldRun()) {
   app.exit(0);
 } else {

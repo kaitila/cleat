@@ -20,12 +20,17 @@ Small, clean and calm: a tool that lives in the tray. Everything is in `src/web/
 | `--ease-gentle`, `--ease-bouncy`, `--ease-snappy` with `--dur-gentle`, `--dur-bouncy`, `--dur-snappy` | The springs, below ("Motion") |
 | `--dur-fade`, `--dur-out`, `--rise`, `--pop` | 120ms for a fade in, 110ms for the way out; how far a thing that springs in travels (6px) and the scale it grows from (0.96) |
 | `--device-px`, `--snip-line`, `--snip-mark`, `--snip-mark-w`, `--snip-label`, `--snip-dim`, `--snip-edge` | The snip overlay, the same in both schemes (below) |
-| `--island-open`, `--island-close`, `--settle`, `--island-quiet` | The dock's island: 320ms to grow, on a curve that leaves fast and settles long without passing its size; 220ms to shrink; how much of it shows (0.55) while nothing is going on |
+| `--island-quiet` | How much of the dock's island shows (0.55) while nothing is going on |
 | `--sidebar`, `--measure` | Chat view: the sidebar's width; the widest the stream gets |
 
-Light and dark come from `prefers-color-scheme`, each with its own values: in both the page is the middle surface, the sidebar sits behind it and cards in front.
+Light and dark each have their own values: in both the page is the middle surface, the sidebar sits behind it and cards in front.
 
-`.dark` gives everything inside it the dark values whatever the scheme. Only the dock's page uses it (`<html class="dark">`). It repeats the dark scheme's values, and `test/web/dock.test.ts` fails when the two differ: change both together.
+## Themes
+The setting `theme` (Settings, Appearance) is `system`, `light` or `dark` ([D0018](decisions/D0018-themes-and-settings-page.md)). `src/web/theme.js` sets it on the page: `data-theme="light"` or `"dark"` on `<html>`, and no attribute for `system`, which leaves it to `prefers-color-scheme`. A page that follows the setting loads it first, as a plain script before its stylesheets: `<script src="/assets/theme.js"></script>`. It applies the value cached in `localStorage` at once, so a page never flashes the other theme, then the runner's (`GET /api/settings`), then each `settings` message on `/ws`, live. The pop-up, the snip and the settings page follow it; the chat view and the dock follow in T-0042.
+
+base.css has four sets of the colour tokens: `:root` (light), `prefers-color-scheme: dark`, `:root[data-theme="light"]` and `:root[data-theme="dark"]`. The forced sets are the schemes' own values, so one palette is designed per scheme and its contrasts (below, in `design.test.ts`) hold for both ways of choosing it; `test/web/theme.test.ts` fails when they differ and checks the contrasts again. An attribute on `:root` outranks the media rule's plain `:root`, so the order in the file doesn't matter. Change a colour in all of its sets together.
+
+`.dark` and `.light` give everything inside them one scheme whatever the theme: the settings page's previews, and the snip's dim and labels. The dock's page is `<html class="dark">`. `.dark` repeats the dark scheme's values, and `test/web/dock.test.ts` fails when the two differ.
 
 ## Type
 Inter for the interface, JetBrains Mono for code (`--font`, `--mono`), both variable and served from `/assets/fonts`; the pages ask no other host for anything. Weights are `--regular` 400, `--medium` 500 and `--semibold` 600, never synthesised; an `<em>` in a message is slanted by the browser (D0013).
@@ -52,6 +57,7 @@ Every border is `var(--hairline) solid` a line colour: one device pixel, so 1px,
 - **Well**: `.well`, a sunken block for code and output.
 - **Tool call**: `<details class="tool">` with `.tool-name`, `.tool-line`, `.tool-mark` in its summary and a `.tool-body`: one 28px row until opened.
 - **Approval card**: `.approval` with `data-state` `open`, `allow`, `deny` or `unanswered`; `.approval-head`, `-tool`, `-state`, `-path`, `-input`, `-reason`, `-actions`. Open, it is the one amber thing on the page; decided, it is as quiet as a tool call.
+- **Setting**: `.setting` in a `.card`, the settings page's row: a name over one muted line on the left, its control on the right, rows a hairline apart. A choice of two is a `.segmented` radio group; on or off is a `.switch` (a checkbox, `role="switch"`); a shortcut is its keycaps on a quiet button that records the next keys pressed. A 400's error is a `.field-error` line in `--danger` right under the field it names, and the field's border turns red; "Saved" is a muted word at the top that fades.
 - **Markdown**: `.md` on an assistant's message, drawn by `markdown.js` ([D0013](decisions/D0013-markdown-renderer.md)). Compact, a chat and not a document: blocks `--space-2` apart, headings at `--text-m` semibold (`h1` at `--text-l`, `h5`/`h6` muted), lists indented by one and a half times the type size with muted markers, task marks as small boxes (done: filled with the accent), quotes behind a `--line-strong` hairline in `--muted`, rules and table rows as hairlines, code blocks as `.well` that scroll sideways with their language as a quiet caption. Links are the accent, underlined in `--accent-soft`. `<em>` is the browser's slanted Inter, the one synthesis allowed. The person's own messages stay plain text.
 
 ## Motion
