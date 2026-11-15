@@ -33,7 +33,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("wslPath", () => {
   test("a Windows path becomes its WSL path: drive lowercased, backslashes to slashes", () => {
-    expect(wslPath("C:\\Users\\arttu\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe("/mnt/c/Users/arttu/AppData/Local/Temp/intuition/clip-1.png");
+    expect(wslPath("C:\\Users\\someone\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe("/mnt/c/Users/someone/AppData/Local/Temp/intuition/clip-1.png");
     expect(wslPath("d:/shots/a b.PNG")).toBe("/mnt/d/shots/a b.PNG");
   });
   test("is normalised", () => {

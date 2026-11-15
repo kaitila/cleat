@@ -32,6 +32,11 @@ export function errorText(status, body) {
   return text || `the runner answered ${status}`;
 }
 
+/** Why no workspace can be picked: there are none yet, or none of their folders exists. Settings (the tray menu) adds and fixes them. */
+export function noWorkspaceText(workspaces) {
+  return workspaces.length === 0 ? "no workspaces yet: add one in Settings, from the tray menu" : "no workspace folder exists: fix the paths in Settings, from the tray menu";
+}
+
 /** A capture older than this was not made for this pop-up, and is not attached. */
 export const FRESH_MS = 30_000;
 /** When the page asks for the capture, in ms after it loads: the shell posts it while the window opens. */
@@ -139,7 +144,7 @@ function start() {
     markAt = null;
     placeMark();
     loaded = true;
-    if (selected === null) say("no workspace folder exists: check the config file", "error");
+    if (selected === null) say(noWorkspaceText(workspaces), "error");
   }
 
   async function load() {

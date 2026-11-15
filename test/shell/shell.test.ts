@@ -1039,12 +1039,12 @@ describe("self-test runner", () => {
 });
 
 describe("starting the runner from Windows", () => {
-  const wsl = { distro: "Ubuntu", repo: "/root/projects/intuition", bun: "/root/.bun/bin/bun" };
+  const wsl = { distro: "Ubuntu", repo: "/home/you/intuition", bun: "/home/you/.bun/bin/bun" };
 
   test("wsl.exe -d <distro> --exec <bun> <repo>/src/cli.ts start --login-env, as an array", () => {
     expect(runnerCommand(wsl)).toEqual({
       file: "C:\\Windows\\System32\\wsl.exe",
-      args: ["-d", "Ubuntu", "--exec", "/root/.bun/bin/bun", "/root/projects/intuition/src/cli.ts", "start", "--login-env"],
+      args: ["-d", "Ubuntu", "--exec", "/home/you/.bun/bin/bun", "/home/you/intuition/src/cli.ts", "start", "--login-env"],
     });
     expect(runnerCommand(wsl, "D:\\WINNT\\").file).toBe("D:\\WINNT\\System32\\wsl.exe");
     expect(runnerCommand({ ...wsl, repo: "/repo/" }).args[4]).toBe("/repo/src/cli.ts");
@@ -1060,7 +1060,7 @@ describe("starting the runner from Windows", () => {
     const { args } = runnerCommand({ ...wsl, repo });
     expect(args).toHaveLength(7);
     expect(args[4]).toBe(`${repo}/src/cli.ts`);
-    expect(args.slice(0, 4)).toEqual(["-d", "Ubuntu", "--exec", "/root/.bun/bin/bun"]);
+    expect(args.slice(0, 4)).toEqual(["-d", "Ubuntu", "--exec", "/home/you/.bun/bin/bun"]);
     expect(args.slice(5)).toEqual(["start", "--login-env"]);
     // Never the default shell (no --exec, or `--`, `-c`, `bash`), which would read the line as a script.
     expect(args.filter((a) => a.startsWith("-"))).toEqual(["-d", "--exec", "--login-env"]);

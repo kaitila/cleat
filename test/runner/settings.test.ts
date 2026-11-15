@@ -109,6 +109,16 @@ describe("PUT /api/settings", () => {
     expect((await r.post("/api/sessions", { workspace: "gone", prompt: "hi" })).status).toBe(400);
   });
 
+  test("takes an empty list of workspaces: the pages then say to add one", async () => {
+    const r = runner();
+    const res = await put(r, { ...(await settings(r)), workspaces: [] });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(readFileSync(file(r), "utf8")).workspaces).toEqual([]);
+    const ws = (await (await r.get("/api/workspaces")).json()) as { workspaces: unknown[] };
+    expect(ws.workspaces).toEqual([]);
+    expect((await r.post("/api/sessions", { workspace: "work", prompt: "hi" })).status).toBe(400);
+  });
+
   test("a missing folder already in the settings doesn't block another change", async () => {
     const r = runner();
     const res = await put(r, { ...(await settings(r)), theme: "light" });
@@ -120,7 +130,6 @@ describe("PUT /api/settings", () => {
     ["a theme it doesn't know", (s) => ({ ...s, theme: "blue" }), "theme"],
     ["a permission mode other than auto or default", (s) => ({ ...s, permissionMode: "bypassPermissions" }), "permissionMode"],
     ["such a mode on a workspace", (s) => ({ ...s, workspaces: [{ ...s.workspaces[0]!, permissionMode: "acceptEdits" }] }), "workspaces.0.permissionMode"],
-    ["no workspaces", (s) => ({ ...s, workspaces: [] }), "workspaces"],
     ["a workspace without a name", (s) => ({ ...s, workspaces: [{ ...s.workspaces[0]!, name: "" }] }), "workspaces.0.name"],
     ["a name listed twice", (s) => ({ ...s, workspaces: [s.workspaces[0]!, { ...s.workspaces[0]!, path: s.workspaces[1]!.path }] }), "workspaces.1.name"],
     ["a relative path", (s) => ({ ...s, workspaces: [...s.workspaces, { name: "rel", path: "work" }] }), "workspaces.2.path"],

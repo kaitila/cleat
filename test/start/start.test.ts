@@ -432,7 +432,7 @@ describe("the runner's command line", () => {
   const main = join(REPO, "src", "runner", "main.ts");
 
   test("plain: bun on the runner's main file", () => {
-    expect(runnerCommand(false, "/usr/bin/zsh", "/root/.bun/bin/bun")).toEqual(["/root/.bun/bin/bun", main]);
+    expect(runnerCommand(false, "/usr/bin/zsh", "/home/you/.bun/bin/bun")).toEqual(["/home/you/.bun/bin/bun", main]);
   });
 
   test("--login-env: through the login shell, which execs the runner; the paths are arguments, not script", () => {

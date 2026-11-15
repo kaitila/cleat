@@ -17,7 +17,7 @@ export const DEFAULT_PERMISSION_MODE: PermissionMode = "auto";
 export const SettingsSchema = z.object({
   theme: z.enum(["system", "light", "dark"]).default("system"),
   permissionMode: Mode.default(DEFAULT_PERMISSION_MODE),
-  workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1), permissionMode: Mode.optional() })).min(1),
+  workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1), permissionMode: Mode.optional() })),
   shell: z
     .object({ hotkey: z.string().min(1), snipHotkey: z.string().min(1), dock: z.boolean(), startOnLogin: z.boolean() })
     .nullable()
@@ -50,10 +50,8 @@ export interface Config {
 
 export const DEFAULT_CONFIG = {
   port: DEFAULT_PORT,
-  workspaces: [
-    { name: "agents", path: "/root/agents" },
-    { name: "theta", path: "~/.projects/theta" },
-  ],
+  // None: the first run, `intuition setup` and the Settings window ask for them.
+  workspaces: [] as { name: string; path: string }[],
 };
 
 /** The permission mode a session in this workspace asks for: the workspace's own, else the top-level one. */

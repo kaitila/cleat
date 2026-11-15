@@ -370,7 +370,7 @@ try {
   check((await text(".msg.assistant pre.code-block"))[0] === `const html = '${HOSTILE}';`, "a fenced code block is rendered");
   // ---- every markdown construct, in light and dark ----
   await page.goto(`${runner.url}/?session=${markdownId}`);
-  await page.locator(".msg.assistant.md", { hasText: "CREANDUM" }).waitFor();
+  await page.locator(".msg.assistant.md", { hasText: "SPRING MEETUP" }).waitFor();
   const mdWrong = (await page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
   check(mdWrong.length === 0, `every markdown construct is drawn, links only to http(s) and mailto, and nothing widens the stream (${mdWrong.join("; ") || "all there"})`);
   check((await page.evaluate(() => (window as Any).__xss)) === undefined, "and nothing in it ran");

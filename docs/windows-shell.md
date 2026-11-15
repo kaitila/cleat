@@ -44,8 +44,8 @@ What the shell applies, from the runner's settings:
   "runnerUrl": "http://127.0.0.1:4777",
   "wsl": {
     "distro": "Ubuntu",
-    "repo": "/root/projects/intuition",
-    "bun": "/root/.bun/bin/bun"
+    "repo": "/home/you/intuition",
+    "bun": "/home/you/.bun/bin/bun"
   }
 }
 ```

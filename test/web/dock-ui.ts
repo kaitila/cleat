@@ -666,7 +666,7 @@ try {
   await d.shot("open-hostile");
   // ---- every markdown construct, in the open dock, light here and dark below ----
   await page.locator(".session-row", { hasText: "Markdown sample" }).click();
-  await page.locator(".msg.assistant.md", { hasText: "CREANDUM" }).waitFor();
+  await page.locator(".msg.assistant.md", { hasText: "SPRING MEETUP" }).waitFor();
   const mdWrong = (await page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
   check(mdWrong.length === 0, `light: every markdown construct is drawn in the dock, links only to http(s) and mailto, nothing wider than the stream (${mdWrong.join("; ") || "all there"})`);
   check((await page.evaluate(() => (window as Any).__xss)) === undefined && (await d.text(".msg.user"))[0] === "Show me **every** construct", "nothing in it ran, and the user's markdown stays plain text");
@@ -704,7 +704,7 @@ try {
   await k.fits("open");
   await k.shot("open");
   await k.page.locator(".session-row", { hasText: "Markdown sample" }).click();
-  await k.page.locator(".msg.assistant.md", { hasText: "CREANDUM" }).waitFor();
+  await k.page.locator(".msg.assistant.md", { hasText: "SPRING MEETUP" }).waitFor();
   const mdDark = (await k.page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
   check(mdDark.length === 0, `dark: every markdown construct is drawn in the dock (${mdDark.join("; ") || "all there"})`);
   await k.settle("open");

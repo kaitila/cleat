@@ -3,8 +3,8 @@ import type { Store } from "../../src/runner/store";
 // (chat-ui.ts and dock-ui.ts) to draw and screenshot, and links that must not become links.
 export const MARKDOWN_SAMPLE = [
   "# Plan for Thursday",
-  "**CREANDUM DAY ZERO DRINKS**",
-  "- **FR8 Demo Day**, 17:00-19:00",
+  "**SPRING MEETUP**",
+  "- **Lightning Talks**, 17:00-19:00",
   "- Dinner with *the team* and _guests_, ~~18:00~~ 19:30",
   "  - nested: bring `badge.pdf`",
   "    1. print it",
@@ -66,7 +66,7 @@ export function seedMarkdown(store: Store): string {
 
 /** In the page: what is missing from the drawn sample, and any link to somewhere other than http(s) or mailto. */
 export function markdownProblems([expected]: [[string, number][]]): string[] {
-  const msg = [...document.querySelectorAll(".msg.assistant.md")].find((el) => el.textContent?.includes("CREANDUM"));
+  const msg = [...document.querySelectorAll(".msg.assistant.md")].find((el) => el.textContent?.includes("SPRING MEETUP"));
   if (!msg) return ["the sample is not on the page"];
   const why: string[] = [];
   for (const [selector, count] of expected) {

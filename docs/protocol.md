@@ -128,12 +128,12 @@ The runner owns the user's settings ([D0022](decisions/D0022-runner-owns-the-set
 `Settings = { theme, permissionMode, workspaces, shell, port }`:
 - `theme`: `"system"` (the default), `"light"` or `"dark"`.
 - `permissionMode`: `"auto"` (the default) or `"default"`, and per workspace in `workspaces[].permissionMode` (see "Permissions").
-- `workspaces`: `{ name, path, permissionMode? }[]`, at least one, names unique, in order: the first is the default when none was used. `path` is as written in the file (it may start with `~/`).
+- `workspaces`: `{ name, path, permissionMode? }[]`, names unique, in order: the first is the default when none was used. It may be empty: a new config file has none (the first run and `intuition setup` ask for them), and the pop-up and the snip then say to add one in Settings. `path` is as written in the file (it may start with `~/`).
 - `shell`: `{ hotkey, snipHotkey, dock, startOnLogin }` or `null`. The runner only stores it. It is `null` until something sets it: the shell then sends its own local values once (migration) and from then on reads them from the runner.
 - `port`: the port the runner serves on. Read-only: a `port` in a PUT body is ignored, and the file's is changed only by hand (a page served on that port can't move it).
 
 `PUT /api/settings` takes a whole `Settings` (a key left out takes its default, as in the file). It refuses, with 400 and the field:
-- anything the schema refuses (an unknown theme or mode, an empty name or hotkey, a `dock` that isn't a boolean, no workspaces);
+- anything the schema refuses (an unknown theme or mode, an empty name or hotkey, a `dock` that isn't a boolean);
 - a workspace name listed twice;
 - a workspace `path` that isn't absolute (after `~/`) or isn't an existing folder. A path the current settings already have is not checked again, so a folder that went missing doesn't block other changes.
 

@@ -64,13 +64,17 @@ function start() {
     chip.title = `Workspace${i >= 0 ? ` ${i + 1} of ${workspaces.length}` : ""} (Tab, Alt+1..9)`;
   }
 
+  /** As noWorkspaceText in prompt.js. */
+  const noWorkspaceText = (list) =>
+    list.length === 0 ? "no workspaces yet: add one in Settings, from the tray menu" : "no workspace folder exists: fix the paths in Settings, from the tray menu";
+
   async function loadWorkspaces() {
     const { workspaces: list, lastUsed } = await api("/api/workspaces");
     workspaces = list;
     workspace = initialWorkspace(list, lastUsed);
     loaded = true;
     drawWorkspace();
-    if (workspace === null) say("no workspace folder exists: check the config file", "error");
+    if (workspace === null) say(noWorkspaceText(list), "error");
   }
 
   /**

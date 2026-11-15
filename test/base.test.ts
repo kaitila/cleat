@@ -9,11 +9,10 @@ const dir = mkdtempSync(join(tmpdir(), "intuition-test-"));
 const env = { INTUITION_CONFIG: join(dir, "config.json"), INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" };
 
 describe("config", () => {
-  test("writes the default file with the two workspaces, and marks a missing folder", () => {
+  test("writes the default file with no workspaces: the first run and intuition setup ask for them", () => {
     const config = loadConfig(env);
-    expect(config.workspaces.map((w) => w.name)).toEqual(["agents", "theta"]);
-    expect(JSON.parse(readFileSync(env.INTUITION_CONFIG, "utf8")).workspaces).toHaveLength(2);
-    expect(config.workspaces.every((w) => w.path.startsWith("/"))).toBe(true);
+    expect(config.workspaces).toEqual([]);
+    expect(JSON.parse(readFileSync(env.INTUITION_CONFIG, "utf8")).workspaces).toEqual([]);
     expect(loadConfig({ ...env, INTUITION_CONFIG: join(dir, "c2.json") }).port).toBe(0);
   });
 });
