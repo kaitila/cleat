@@ -19,7 +19,7 @@ From a clone of the repo:
 4. `intuition up`: starts the runner, installs the shell with Electron for this OS (about 130 MB the first time), writes where the runner lives into the shell's settings, and starts the shell.
 5. Optional: `intuition shell login on`, so the shell starts when you log in.
 
-`intuition doctor` again should show only `ok` lines. A `--` line is a part that is not up yet (the runner, the shell, start at login, a display), with the one command that brings it up. Those don't change the exit code.
+`intuition doctor` again should show only `ok` lines. The settings page's Setup section shows the same from the running app: the layout, the runner, the shell, start at login, the shortcuts and, on a Mac, Screen Recording, each with what to do when it is not ok. A `--` line is a part that is not up yet (the runner, the shell, start at login, a display), with the one command that brings it up. Those don't change the exit code.
 
 ## Windows with WSL
 As before this change; everything about it is in [the Windows shell](windows-shell.md). Electron is fetched for Windows x64 from WSL (`npm_config_platform=win32`), with WSL's npm and node. The shell's settings get `wsl: { distro, repo, bun }`, and nothing else is added. The shell on Windows starts the runner through `wsl.exe`. Start at login is the shell's Electron login item (the `Run` registry key).
@@ -30,7 +30,7 @@ As before this change; everything about it is in [the Windows shell](windows-she
 - **The menu bar.** The tray is a template icon in the menu bar, and the shell hides itself from the Dock and the app switcher.
 - **Hotkeys** default to Command+Shift+Space (new task) and Command+Shift+S (snip). The shell sends its defaults to the runner once; after that the settings page changes them.
 - **The dock** hangs from the top of the work area, so it sits below the menu bar (and below the notch on a display that has one), centred on the display, on every Space.
-- **Screen Recording.** The snip captures the screens with Electron's desktopCapturer, which macOS allows only with Screen Recording. The shell checks it (`systemPreferences.getMediaAccessStatus("screen")`) at start and at each snip; when it is missing it says so once, and clicking the notification opens System Settings > Privacy & Security > Screen Recording. Allow "Electron" there (the shell runs as npm's Electron.app), then quit the shell and start it again. Until then a snip shows only the wallpaper. A line for it in the settings page is a later task.
+- **Screen Recording.** The snip captures the screens with Electron's desktopCapturer, which macOS allows only with Screen Recording. The shell checks it (`systemPreferences.getMediaAccessStatus("screen")`) at start and at each snip; when it is missing it says so once, and clicking the notification opens System Settings > Privacy & Security > Screen Recording. Allow "Electron" there (the shell runs as npm's Electron.app), then quit the shell and start it again. Until then a snip shows only the wallpaper. The settings page's Setup section has a line for it, with a button that asks the shell to open that pane ([protocol](protocol.md), "Platform").
 - **Start at login** is a launch agent, `~/Library/LaunchAgents/dev.intuition.shell.plist`, that runs the installed Electron on the app folder, as `shell start` does. Electron's own login item would register npm's Electron.app, which starts Electron's default app without the shell ([D0023](decisions/D0023-native-shell.md)). The tray's checkbox, the settings page and `intuition shell login on|off|status` all write or read that file. macOS shows "Background Items Added" the first time.
 - Clipboard images and snips are saved in `$TMPDIR/intuition/`, and the runner takes only a PNG directly in that folder ([protocol](protocol.md), "Clipboard images").
 
@@ -64,7 +64,7 @@ It shares the runner (port 4777) with the Windows shell, and both shells registe
 ## The self-test, per layout
 `bun src/shell/selftest-run.ts` installs the shell for this machine's layout, starts a stub runner and runs the shell with `--self-test`, then checks every field it wrote against that layout: the paths it saves (`<temp>\intuition\` on Windows, `<temp>/intuition/` elsewhere), the dock's place (below the menu bar on a Mac, the island's size when opaque), and the rest as on Windows. It is skipped when `CI` is set; the CI jobs with a desktop run it with `env -u CI`. What it cannot judge for a known reason is printed as `skipped:` with why, and does not fail it: macOS without Screen Recording, and WSLg's empty captures.
 
-CI runs it on `macos-latest` (job `macos`, after the unit tests). An Ubuntu job under Xvfb was tried and left out: it got through the hotkeys, the tray, the clipboard, the pop-up and every state of the opaque dock, then the dock's page crash was not noticed and the self-test ran out of time (T-0032's PR, follow-up task).
+CI runs it on `macos-latest` (job `macos`, after the unit tests) and on `ubuntu-latest` under Xvfb with no window manager (job `linux-shell`: the opaque dock, Chromium's sandbox on, as a normal user). There `webContents.forcefullyCrashRenderer()` leaves the sandboxed page process running (`isCrashed()` stays false, no `render-process-gone`) and a load into that window hangs, so the self-test kills the dock's page process with SIGKILL itself and says so in its output; the shell's part is judged the same. The shell itself replaces a dock window whose page process died instead of loading into it, hides a crashed dock at the next check if the event was missed, and gives up on a dock page that has not loaded in 15 s (the window goes, the next check makes a new one).
 
 ## What was tried where
 | What | Where | When | Seen |
@@ -76,6 +76,8 @@ CI runs it on `macos-latest` (job `macos`, after the unit tests). An Ubuntu job 
 | `shell login on|status|off`, linux | WSLg, temp HOME | 2026-11-15 | Wrote, read and removed `~/.config/autostart/intuition.desktop` |
 | `intuition doctor`, linux | WSLg | 2026-11-15 | Exit 0 with nothing installed (parts shown with `--` and their fix), and with the shell installed and running |
 | The shell's self-test, linux | WSLg, as root (`--no-sandbox`), X11 through XWayland | 2026-11-15 | Passed. Hotkeys, tray, clipboard text and image, the pop-up (placed again once shown: WSLg's window manager put it at 0,0), the dock (transparent), the snip's overlays and bridge, start on login read. The capture came back empty after about 3 s: skipped |
+| The shell's self-test, linux | WSLg's Xvfb (`xvfb-run`, no window manager), as root | 2026-11-15 | Passed, the dock opaque |
+| The shell's self-test, linux | CI `linux-shell` (ubuntu-latest, Xvfb, sandbox on), PR #36 | 2026-11-15 | Passed. The renderer crash was not taken by `forcefullyCrashRenderer()` under the sandbox: the self-test kills it |
 | The shell's self-test, windows-wsl | this machine | 2026-11-15 | Passed, after the change: the same checks as before |
 
 ## What nobody has seen

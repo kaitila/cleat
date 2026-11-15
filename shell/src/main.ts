@@ -16,7 +16,8 @@ import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MIS
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
-import { hotkeyNotice, migratedPrefs, releaseBoth, parseRunnerSettings, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PATH, SETTINGS_WINDOW, SHELL_DEFAULTS, type ShellPrefs, settingsMessage, socketUrl, swapHotkey, withShell } from "./prefs";
+import { hotkeyNotice, migratedPrefs, releaseBoth, parseRunnerSettings, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PATH, SETTINGS_WINDOW, SHELL_DEFAULTS, type ShellPrefs, settingsMessage, swapHotkey, withShell } from "./prefs";
+import { REPORT_PATH, type ShellReport, shellAction, shellReport, shellSocketUrl } from "./report";
 import type { SelfTestResult } from "./result";
 import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Settings } from "./settings";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
@@ -29,6 +30,8 @@ const ICON_SIZE = 32;
 const OS = shellOs();
 /** False on a Linux X11 desktop without a compositor: the dock is then an opaque window the island's size. */
 const DOCK_TRANSPARENT = dockTransparent(OS);
+/** A dock page that has not loaded in this long is given up on, and its window replaced at the next check: a stuck page process must not wedge the dock. */
+const DOCK_LOAD_MS = 15_000;
 /** What an opaque dock (and the snip, before its page draws) shows behind the page. */
 const OPAQUE_BACKGROUND = "#0f0f11";
 /** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
@@ -411,6 +414,8 @@ async function openSettings(inactive = false): Promise<BrowserWindow | null> {
     win.on("closed", () => {
       if (settingsWindow === win) settingsWindow = null;
     });
+    // Back from System Settings, say: the Setup section shows what is so now.
+    win.on("focus", () => reportShell());
     settingsWindow = win;
     await win.loadURL(settingsUrl(settings.runnerUrl));
     if (win.isDestroyed()) return null;
@@ -615,6 +620,11 @@ function snip(inactive = false): Promise<SnipOpened | null> {
   return snipOpening;
 }
 
+/** System Settings at Screen Recording: from the notice's click, and when the settings page asks (a shell_action). The pane is the shell's own constant. */
+function openScreenRecordingPane(): void {
+  void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e));
+}
+
 /** Says once per start that macOS has not given Screen Recording, with a click that opens its pane. True when the snip can see the screens. */
 let screenSaid = false;
 function checkScreenAccess(): boolean {
@@ -622,9 +632,10 @@ function checkScreenAccess(): boolean {
   if (!ok && !screenSaid && !args.selfTest && Notification.isSupported()) {
     screenSaid = true;
     const n = new Notification({ title: SCREEN_RECORDING_NOTICE.title, body: SCREEN_RECORDING_NOTICE.body });
-    n.on("click", () => void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e)));
+    n.on("click", openScreenRecordingPane);
     n.show();
   }
+  reportShell();
   return ok;
 }
 
@@ -921,13 +932,28 @@ function createDock(): BrowserWindow {
 /** True once the stale-runner notification was shown; a dock that loads clears it. */
 let staleRunnerSaid = false;
 
+/** True when the dock's window has a page process that died: it is replaced, not loaded into (a load into it can hang). */
+function dockCrashed(): boolean {
+  return dock !== null && !dock.isDestroyed() && dock.webContents.isCrashed();
+}
+
 async function loadDock(): Promise<void> {
+  if (dockCrashed()) closeDock();
   const win = (dock ??= createDock());
   try {
     // A page that loads starts over: it has no state until it reports one.
     forgetDockState();
     dockStatus = 0;
-    await win.loadURL(dockUrl(settings.runnerUrl));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), DOCK_LOAD_MS);
+    });
+    const loaded = await Promise.race([win.loadURL(dockUrl(settings.runnerUrl)), late]).finally(() => clearTimeout(timer));
+    if (loaded === "late") {
+      // Its page process is stuck: the window goes, and the next check starts over in a new one.
+      if (dock === win) closeDock();
+      throw new Error(`the dock's page did not load in ${DOCK_LOAD_MS / 1000} s`);
+    }
     if (win.isDestroyed() || dock !== win) return;
     // A runner without the page answers 404 with a body, which loads: that is not the dock.
     if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl)} answered ${dockStatus}`);
@@ -980,6 +1006,8 @@ let dockMisses = 0;
 /** One check: is the runner there? Gone (two checks in a row), the dock hides; back, its page loads again and it shows. */
 async function checkDock(): Promise<void> {
   if (!prefs.dock) return;
+  // The page's process died and 'render-process-gone' was not seen (or hiding did not take): it goes now.
+  if (dockCrashed() && dockLoaded) hideDock();
   if (await runnerAnswers()) {
     dockMisses = 0;
     await showDock();
@@ -1076,6 +1104,7 @@ function applyPrefs(next: ShellPrefs): void {
     }
   }
   tray?.setContextMenu(trayMenu());
+  reportShell();
 }
 
 let migrating = false;
@@ -1154,6 +1183,66 @@ async function changePrefs(change: Partial<ShellPrefs>): Promise<void> {
 
 let syncSocket: Electron.WebSocket | null = null;
 
+// --- The shell's report, for the settings page's Setup section ---
+
+/** The last report the runner took, as JSON: the same one is not sent again. */
+let reportSent: string | null = null;
+let reporting = false;
+let reportAgain = false;
+
+function currentReport(): ShellReport {
+  let login: boolean | null = null;
+  try {
+    login = startsOnLogin();
+  } catch (e) {
+    console.error("reading start on login failed", e);
+  }
+  return shellReport({
+    os: OS,
+    startOnLogin: login,
+    hotkey: { wanted: prefs.hotkey, active: activeHotkey },
+    snipHotkey: { wanted: prefs.snipHotkey, active: activeSnipHotkey },
+    dockTransparent: DOCK_TRANSPARENT,
+    screen: OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted",
+  });
+}
+
+/**
+ * PUT /api/platform/shell with the shell's side, when it differs from the last one the runner took
+ * (or always, with `force`). One at a time; a failure is only logged, and the next change tries again.
+ */
+function reportShell(force = false): void {
+  if (force) reportSent = null;
+  if (reporting) {
+    reportAgain = true;
+    return;
+  }
+  const body = JSON.stringify(currentReport());
+  if (body === reportSent) return;
+  reporting = true;
+  void fetch(new URL(REPORT_PATH, settings.runnerUrl), { method: "PUT", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(3000) })
+    .then((res) => {
+      if (res.ok) reportSent = body;
+      // An older runner (or the self-test's stub) has no such route: nothing to do about it.
+      else if (res.status !== 404) console.error(`the runner refused the shell's report: ${res.status}`);
+    })
+    .catch(() => {
+      // The runner is not up: the socket's next open sends it.
+    })
+    .finally(() => {
+      reporting = false;
+      if (reportAgain) {
+        reportAgain = false;
+        reportShell();
+      }
+    });
+}
+
+/** What the runner asks on the shell's socket, from the settings page. Only the actions shellAction knows get here. */
+function doShellAction(action: "open_screen_recording"): void {
+  if (action === "open_screen_recording" && OS === "macos") openScreenRecordingPane();
+}
+
 /**
  * One WebSocket to the runner's /ws for as long as the shell runs: on every connect it asks for the
  * settings, and it applies each 'settings' message. When it closes (the runner stopped or restarted)
@@ -1165,7 +1254,7 @@ function syncSettings(): void {
   function connect(): void {
     let ws: Electron.WebSocket;
     try {
-      ws = new net.WebSocket(socketUrl(settings.runnerUrl));
+      ws = new net.WebSocket(shellSocketUrl(settings.runnerUrl));
     } catch (e) {
       console.error("opening the settings socket failed", e);
       return again();
@@ -1173,11 +1262,18 @@ function syncSettings(): void {
     syncSocket = ws;
     ws.addEventListener("open", () => {
       attempt = 0;
-      void fetchSettings().then((s) => s && applySettings(s));
+      // A runner that just started knows nothing of the shell: the report goes again, whatever was sent before.
+      void fetchSettings().then((s) => {
+        if (s) applySettings(s);
+        reportShell(true);
+      });
     });
     ws.addEventListener("message", (event) => {
-      const s = settingsMessage((event as Event & { data?: unknown }).data);
+      const data = (event as Event & { data?: unknown }).data;
+      const s = settingsMessage(data);
       if (s) applySettings(s);
+      const action = shellAction(data);
+      if (action) doShellAction(action);
     });
     // An error is followed by close: that is where it connects again.
     ws.addEventListener("error", () => {});
@@ -1404,25 +1500,47 @@ async function selfTest(): Promise<SelfTestResult> {
     await win.loadURL(`${dockUrl(real)}?silent`);
     r.dockIgnoresMouseUnreported = (await cursorAt(middle("idle"))) && dockState === null && !win.isFocusable();
     // The page's process dies: the window hides and ignores the mouse. The next check loads the page again.
+    let gone: string | null = null;
+    win.webContents.once("render-process-gone", (_event, details) => {
+      gone = details.reason;
+    });
     win.webContents.forcefullyCrashRenderer();
+    for (let i = 0; i < 20 && !win.webContents.isCrashed(); i++) await sleep(100);
+    // Under Chromium's sandbox on Linux (a CI runner, not root in WSL) the call can leave the process running:
+    // the self-test kills it itself, as a crash would. The shell's part, hiding and replacing the window, is the same.
+    if (!win.webContents.isCrashed()) {
+      r.dockCrashKilledBySelfTest = true;
+      try {
+        process.kill(win.webContents.getOSProcessId(), "SIGKILL");
+      } catch (e) {
+        r.errors.push(`dock: the page's process could not be killed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     for (let i = 0; i < 40 && win.isVisible(); i++) await sleep(100);
     r.dockIgnoresMouseAfterCrash = (await cursorAt(middle("open"))) && !win.isVisible();
+    if (!r.dockIgnoresMouseAfterCrash) {
+      r.errors.push(`dock: after the crash, 'render-process-gone' ${gone ? `came (${gone})` : "never came"}, isCrashed ${win.webContents.isCrashed()}, visible ${win.isVisible()}, ignoring the mouse ${dockIgnoresMouse}`);
+    }
     dockCursor = () => away;
+    // The crashed window is replaced, not loaded into: from here the dock is a new window.
     await checkDock();
+    if (!win.isDestroyed()) r.errors.push("dock: the crashed window was loaded into again, not replaced");
+    const current = (): BrowserWindow | null => (dock && !dock.isDestroyed() ? dock : null);
 
     // The runner goes away (port 9, discard: nothing answers): after two checks the dock is hidden, not left
     // empty on screen. It answers again: the next check loads the page and shows the dock, idle.
     settings = { ...settings, runnerUrl: "http://127.0.0.1:9" };
     try {
       await checkDock();
-      const afterOne = win.isVisible();
+      const afterOne = current()?.isVisible() ?? false;
       await checkDock();
-      r.dockHiddenWithoutRunner = afterOne && !win.isVisible();
+      r.dockHiddenWithoutRunner = afterOne && !(current()?.isVisible() ?? false);
     } finally {
       settings = { ...settings, runnerUrl: real };
     }
     await checkDock();
-    r.dockShownAgain = win.isVisible() && win.webContents.getURL() === r.dockUrl && !win.isFocusable();
+    const again = current();
+    r.dockShownAgain = again !== null && again.isVisible() && again.webContents.getURL() === r.dockUrl && !again.isFocusable();
     closeDock();
     dockCursor = () => screen.getCursorScreenPoint();
   });
@@ -1660,7 +1778,10 @@ if (args.login) {
     const second = parseArgs(argv);
     if (second.quit) app.quit();
     // `--login on|off` from the command line: the checkbox is drawn again.
-    else if (second.login) tray?.setContextMenu(trayMenu());
+    else if (second.login) {
+      tray?.setContextMenu(trayMenu());
+      reportShell();
+    }
     else void openChat(second.session);
   });
   void app.whenReady().then(start);

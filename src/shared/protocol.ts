@@ -97,7 +97,14 @@ export type ServerMessage =
   /** A notification as it is recorded. Not replayed on connect: GET /api/notifications has the kept ones. */
   | { type: "notification"; notification: Notification }
   /** The whole Settings, after every change (PUT /api/settings). Not sent on connect: GET /api/settings has them. */
-  | { type: "settings"; settings: Settings };
+  | { type: "settings"; settings: Settings }
+  /** GET /api/platform's answer, whenever the shell's side changes: a report, or the shell connecting or going. */
+  | { type: "platform"; platform: PlatformResponse }
+  /**
+   * Something the shell is asked to do (POST /api/platform/open-screen-recording). Sent only to the
+   * sockets that connected as the shell (/ws?client=shell), never to the pages.
+   */
+  | { type: "shell_action"; action: ShellAction };
 
 export type Theme = "system" | "light" | "dark";
 
@@ -122,6 +129,41 @@ export interface Settings {
   /** null until something sets it: the shell then sends its local values once and reads them from here after. */
   shell: ShellSettings | null;
   port: number;
+}
+
+/** The three layouts (docs/platforms.md; src/shell/platform.ts detectLayout). */
+export type Layout = "windows-wsl" | "macos" | "linux";
+
+/** macOS's answer for Screen Recording (Electron's systemPreferences.getMediaAccessStatus("screen")). */
+export type ScreenAccess = "not-determined" | "granted" | "denied" | "restricted" | "unknown";
+
+/** The shell's side, as it reports it with PUT /api/platform/shell: at its start and whenever any of it changes. */
+export interface ShellReport {
+  /** The OS the shell runs on. */
+  os: "windows" | "macos" | "linux";
+  /** Whether start on login is set now (Electron's login item, the launch agent or the autostart file); null when it could not be read. */
+  startOnLogin: boolean | null;
+  /** Whether each of the two hotkeys of the settings is registered now. False: another program holds it, or the desktop refuses global shortcuts. */
+  hotkeys: { hotkey: boolean; snipHotkey: boolean };
+  /** False when the dock is an opaque window the island's size (Linux on X11 without a compositor). */
+  dockTransparent: boolean;
+  /** macOS only: whether the snip may capture the screens. Absent elsewhere. */
+  screenRecording?: ScreenAccess;
+}
+
+/** What the shell can be asked to do through the runner: open System Settings at Screen Recording (macOS). */
+export type ShellAction = "open_screen_recording";
+
+/** GET /api/platform: this machine's layout, the runner (running, since it answers) and the shell as it last reported. */
+export interface PlatformResponse {
+  /** Null only when INTUITION_PLATFORM names no layout (docs/platforms.md). */
+  layout: Layout | null;
+  runner: { running: true; version: string };
+  /**
+   * connected: a shell holds a socket at /ws?client=shell now. report: its last report, kept while it
+   * is connected; null before its first, and once its last socket closed.
+   */
+  shell: { connected: boolean; report: (ShellReport & { reportedAt: string }) | null };
 }
 
 export interface Notification {
@@ -172,5 +214,9 @@ export interface NotificationsResponse { notifications: Notification[]; latest: 
 export interface ErrorResponse { error: string }
 /** The body of PUT /api/settings: a whole Settings. A port in it is ignored. */
 export type SettingsRequest = Omit<Settings, "port"> & { port?: number };
+/** The 409 of POST /api/platform/open-screen-recording when no shell on macOS is connected to open it. */
+export const NO_MAC_SHELL = "no shell on macOS is connected to open System Settings";
+/** POST /api/platform/open-screen-recording's 202: the connected shells were asked. */
+export interface SentResponse { sent: true }
 /** The 400 of PUT /api/settings: the first bad field as a dotted path ("workspaces.1.path"), and why. */
 export interface SettingsErrorResponse { error: string; field: string }

@@ -18,6 +18,14 @@
     </header>
     <p id="load-error" class="load-error small" role="alert" hidden></p>
 
+    <section class="section" aria-labelledby="h-setup">
+      <h2 id="h-setup" class="label">Setup</h2>
+      <div class="card">
+        <ul id="setup" class="setup" aria-label="Setup"></ul>
+      </div>
+      <p id="setup-error" class="field-error small" role="alert" hidden></p>
+    </section>
+
     <section class="section" aria-labelledby="h-workspaces">
       <h2 id="h-workspaces" class="label">Workspaces</h2>
       <div class="card" data-field="workspaces">
@@ -134,6 +142,20 @@
       </div>
     </section>
   </main>
+
+  <template id="setup-row">
+    <li class="setting setup-line">
+      <span class="setting-text">
+        <span class="strong setup-name"></span>
+        <span class="muted small setup-detail"></span>
+      </span>
+      <span class="setup-end">
+        <button class="small setup-action" type="button" hidden>Open System Settings</button>
+        <span class="small setup-value"></span>
+        <span class="dot" aria-hidden="true"></span>
+      </span>
+    </li>
+  </template>
 
   <template id="workspace-row">
     <li class="workspace">
