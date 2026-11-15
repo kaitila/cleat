@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_SETTINGS } from "../shell/src/settings";
 import { checks, doctor, nodeIsNew, type Probes, report } from "../src/cli/doctor";
+import { makeUi } from "../src/cli/ui";
 import { autostart, BUNDLE, withLocalRunner, writeRunnerLocation } from "../src/shell/install";
 import type { ShellPaths } from "../src/shell/paths";
 import { autostartEntry, detectLayout, electronExe, LAYOUTS, nativeHome, parseLocalRunner, platformFor } from "../src/shell/platform";
@@ -178,6 +179,9 @@ describe("intuition doctor", () => {
     ...over,
   });
   const display = { DISPLAY: ":0" };
+  /** No terminal, no colour: what doctor prints into a pipe. */
+  const ui = makeUi({ term: { interactive: false, color: false, unicode: true, columns: 80 }, write: () => {} });
+  const has = (lines: string[], mark: string, name: string) => lines.findIndex((l) => new RegExp(`^${mark} ${name.replace(/[()]/g, "\\$&")} +\\S`).test(l));
 
   test("Node 22.12 or later", () => {
     for (const v of ["v22.12.0", "v22.23.0", "v23.0.0", "24.1.0"]) expect(nodeIsNew(v)).toBe(true);
@@ -186,12 +190,12 @@ describe("intuition doctor", () => {
 
   test("everything there: exit 0, the layout first, no fixes", async () => {
     const lines: string[] = [];
-    expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), all())).toBe(0);
+    expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), all(), {}, ui)).toBe(0);
     expect(lines[0]).toBe("layout: linux (the runner and the shell on this machine)");
     expect(lines.join("\n")).not.toContain("fix:");
-    expect(lines.at(-1)).toBe("everything needed is there");
+    expect(lines.at(-1)).toBe("✓ everything needed is there");
     for (const name of ["git", "bun", "node and npm", "Claude Code", "Claude Code login", "config", "display", "runner", "shell installed", "shell running", "start at login", "Codex", "Codex login"]) {
-      expect(lines.some((l) => l.startsWith(`  ok    ${name}: `))).toBe(true);
+      expect(`${name}: ${has(lines, "✓", name) > 0}`).toBe(`${name}: true`);
     }
   });
 
@@ -205,24 +209,24 @@ describe("intuition doctor", () => {
       ["broken config", all({ config: () => ({ ok: false, error: "/c/config.json is not valid JSON" }) }), "config"],
     ] as const) {
       const lines: string[] = [];
-      expect(`${what}: ${await doctor(display, (l) => lines.push(l), platformFor("linux"), probes)}`).toBe(`${what}: 1`);
-      const at = lines.findIndex((l) => l.startsWith(`  MISS  ${name}: `));
+      expect(`${what}: ${await doctor(display, (l) => lines.push(l), platformFor("linux"), probes, {}, ui)}`).toBe(`${what}: 1`);
+      const at = has(lines, "✗", name);
       expect(at).toBeGreaterThan(0);
-      expect(lines[at + 1]).toStartWith("        fix: ");
-      expect(lines.at(-1)).toBe(`missing: ${name}`);
+      expect(lines[at + 1]).toMatch(/^ +fix: /);
+      expect(lines.at(-1)).toBe(`✗ missing: ${name}`);
     }
   });
 
   test("parts not up yet (runner, shell, start at login, a display) are shown with their fix, and are not a failure", async () => {
     const lines: string[] = [];
     const probes = all({ runner: async () => null, shellInstalled: () => false, shellPid: () => 42, login: async () => true });
-    expect(await doctor({}, (l) => lines.push(l), platformFor("linux"), probes)).toBe(0);
+    expect(await doctor({}, (l) => lines.push(l), platformFor("linux"), probes, {}, ui)).toBe(0);
     const text = lines.join("\n");
     for (const [name, fix] of [["display", "desktop session"], ["runner", "intuition start"], ["shell installed", "intuition shell install"], ["shell running", "intuition shell start"], ["start at login", "intuition shell login on"]]) {
-      expect(text).toMatch(new RegExp(`  --    ${name}: .*\\n        fix: .*${fix}`));
+      expect(text).toMatch(new RegExp(`– ${name} +.*\\n +fix: .*${fix}`));
     }
     // Not installed: neither its pid nor its login item is asked for.
-    expect(text).toContain("start at login: the shell is not installed");
+    expect(text).toMatch(/start at login +the shell is not installed/);
   });
 
   test("Codex is optional: not installed, or logged out, is shown with its fix and is not a failure", async () => {
@@ -231,8 +235,8 @@ describe("intuition doctor", () => {
     expect(missing.some((c) => c.name === "Codex login")).toBe(false);
     const out = all({ output: (cmd) => (cmd[0] === "/c/codex" && cmd[1] === "login" ? null : all().output(cmd)) });
     const lines: string[] = [];
-    expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), out)).toBe(0);
-    const at = lines.findIndex((l) => l.startsWith("  --    Codex login: not logged in"));
+    expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), out, {}, ui)).toBe(0);
+    const at = lines.findIndex((l) => /^– Codex login +not logged in/.test(l));
     expect(at).toBeGreaterThan(0);
     expect(lines[at + 1]).toContain("codex login");
   });
@@ -246,7 +250,7 @@ describe("intuition doctor", () => {
     expect(win.some((c) => c.name === "display")).toBe(false);
     const mac = await checks(platformFor("macos"), all({ shellInstalled: () => false }));
     expect(mac.some((c) => c.name === "Windows" || c.name === "display")).toBe(false);
-    expect(report(platformFor("macos"), mac)[0]).toBe("layout: macos (the runner and the shell on this Mac)");
+    expect(report(platformFor("macos"), mac, ui)[0]).toBe("layout: macos (the runner and the shell on this Mac)");
   });
 
   test("the command: a layout line first, and a fix under every line that is not ok; a wrong INTUITION_PLATFORM is refused", () => {
@@ -254,11 +258,11 @@ describe("intuition doctor", () => {
     const p = Bun.spawnSync([process.execPath, CLI, "doctor"], { cwd: REPO, env: { ...env, INTUITION_PLATFORM: "linux" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const lines = p.stdout.toString().trim().split("\n");
     expect(lines[0]).toBe("layout: linux (the runner and the shell on this machine)");
-    expect(lines.some((l) => l.startsWith("  --    shell installed: not in "))).toBe(true);
+    expect(lines.some((l) => /^– shell installed +not in /.test(l))).toBe(true);
     lines.forEach((l, i) => {
-      if (/^  (MISS|--  )  /.test(l)) expect(lines[i + 1]).toStartWith("        fix: ");
+      if (/^[✗–] (?!missing:)\S/.test(l)) expect(lines[i + 1]).toMatch(/^ +fix: /);
     });
-    expect(p.exitCode).toBe(lines.some((l) => l.startsWith("  MISS")) ? 1 : 0);
+    expect(p.exitCode).toBe(lines.some((l) => l.startsWith("✗ missing")) ? 1 : 0);
 
     const bad = Bun.spawnSync([process.execPath, CLI, "doctor"], { cwd: REPO, env: { ...env, INTUITION_PLATFORM: "beos" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     expect(bad.exitCode).toBe(1);

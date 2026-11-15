@@ -93,6 +93,8 @@ export interface Spinner {
   update(line: string): void;
   /** Ends it: the mark for the state, then the text (the title when none), and under it the extra lines. */
   end(state: State, text?: string, more?: string[]): void;
+  /** Ends it without a line: for a spinner that only showed something is happening. */
+  clear(): void;
 }
 
 export interface Ui {
@@ -105,6 +107,12 @@ export interface Ui {
   mark(state: State): string;
   /** A spinner on a terminal; without one, nothing until it ends, then one line. */
   spin(title: string): Spinner;
+  /** The frame's first line: the name, and what this run is. */
+  intro(title: string): void;
+  /** A numbered step's heading. */
+  step(n: number, title: string): void;
+  /** The frame's last line. */
+  outro(text: string): void;
   /** Runs one step under a spinner; what it returns ends the spinner. A throw ends it as a failure with the error's message. */
   task<T>(title: string, run: (update: (line: string) => void) => Promise<T>, done: (value: T) => Outcome, failed?: (error: unknown) => Outcome): Promise<T | undefined>;
 }
@@ -171,13 +179,16 @@ export function makeUi(options: UiOptions = {}): Ui {
           if (l.trim() !== "") line(`  ${l}`);
         },
         end: (state, text, more) => finish(state, text ?? title, more),
+        clear: () => {},
       };
     }
     let frame = 0;
     let detail = "";
+    const began = Date.now();
     showCursorOnExit(write);
     const draw = () => {
-      const head = `${c.cyan(m.frames[frame % m.frames.length]!)} ${title}`;
+      const secs = Math.floor((Date.now() - began) / 1000);
+      const head = `${c.cyan(m.frames[frame % m.frames.length]!)} ${title}${secs >= 3 ? c.dim(` ${secs}s`) : ""}`;
       const room = term.columns - width(prefix) - width(head) - 3;
       const tail = detail && room > 8 ? `  ${c.dim(fit(detail, room))}` : "";
       write(`\r\x1b[2K${prefix}${head}${tail}`);
@@ -206,6 +217,11 @@ export function makeUi(options: UiOptions = {}): Ui {
         write("\r\x1b[2K\x1b[?25h");
         finish(state, text ?? title, more);
       },
+      clear: () => {
+        clearInterval(timer);
+        process.removeListener("SIGINT", onInt);
+        write("\r\x1b[2K\x1b[?25h");
+      },
     };
   };
 
@@ -216,6 +232,15 @@ export function makeUi(options: UiOptions = {}): Ui {
     line,
     mark,
     spin,
+    intro: (title) => write(guide ? `${c.gray(m.start)}  ${c.bold(title)}\n${c.gray(m.bar)}\n` : `${title}\n\n`),
+    step: (n, title) => {
+      if (guide) write(`${c.gray(m.bar)}\n${c.cyan(m.step)}  ${c.bold(`${n}  ${title}`)}\n`);
+      else write(`\n${n}. ${title}\n`);
+    },
+    outro: (text) => {
+      if (guide) write(`${c.gray(m.bar)}\n${c.gray(m.end)}  ${text.split("\n").join(`\n   `)}\n`);
+      else write(`\n${text}\n`);
+    },
     task: async (title, run, done, failed) => {
       const s = spin(title);
       let value;
