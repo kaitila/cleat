@@ -170,7 +170,7 @@ label.setting { cursor: pointer; }
   .workspace-actions { justify-content: flex-end; }
   .themes { gap: var(--space-2); }
   .setting { align-items: flex-start; flex-direction: column; gap: var(--space-2); }
-  label.setting { flex-direction: row; align-items: center; }
+  label.setting, .about .setting { flex-direction: row; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .settings { animation: fade-in var(--dur-fade) var(--ease) backwards !important; }

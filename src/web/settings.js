@@ -226,7 +226,10 @@ list.addEventListener("input", (e) => {
   const i = rowIndex(e.target);
   if (i < 0) return;
   if (e.target.classList.contains("name")) state.workspaces[i].name = e.target.value;
-  if (e.target.classList.contains("path")) state.workspaces[i].path = e.target.value;
+  else if (e.target.classList.contains("path")) state.workspaces[i].path = e.target.value;
+  else return;
+  // The folder check was for the saved path: it comes back once this one is saved.
+  renderWorkspaces();
 });
 list.addEventListener("change", (e) => {
   const i = rowIndex(e.target);
@@ -239,6 +242,8 @@ list.addEventListener("change", (e) => {
     if (e.target.value) state.workspaces[i].permissionMode = e.target.value;
     else delete state.workspaces[i].permissionMode;
   }
+  // A new row is sent once it has a name and a folder: until then there is nothing to save.
+  if (isDraft(state.workspaces[i])) return;
   void save();
 });
 list.addEventListener("click", (e) => {
