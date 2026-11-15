@@ -3,6 +3,7 @@
 // settings (hotkeys, dock, start on login, theme) live in the runner: see prefs.ts.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { type LocalRunner, parseLocalRunner } from "./os";
 import type { ShellPrefs } from "./prefs";
 import { parseWsl, type WslSettings } from "./wsl";
 
@@ -12,8 +13,10 @@ export type LegacyPrefs = Partial<Omit<ShellPrefs, "startOnLogin">>;
 export interface Settings {
   /** Where the runner listens. The shell's windows load only this origin. */
   runnerUrl: string;
-  /** Where the runner lives in WSL, so the shell can start it. Absent until `shell install` has written it. */
+  /** Windows: where the runner lives in WSL, so the shell can start it. Absent until `shell install` has written it. */
   wsl?: WslSettings;
+  /** macOS and Linux: the repo and bun on this machine, so the shell can start the runner. Absent until `shell install` has written it. */
+  runner?: LocalRunner;
   /** hotkey, snipHotkey and dock as an older shell wrote them: present only while the file still has them. */
   legacy: LegacyPrefs;
 }
@@ -55,7 +58,8 @@ export function parseSettings(text: string): Settings {
   if (snipHotkey) legacy.snipHotkey = snipHotkey;
   if (typeof o.dock === "boolean") legacy.dock = o.dock;
   const wsl = parseWsl(o.wsl);
-  return { runnerUrl: httpUrl(o.runnerUrl) ?? DEFAULT_SETTINGS.runnerUrl, ...(wsl ? { wsl } : {}), legacy };
+  const runner = parseLocalRunner(o.runner);
+  return { runnerUrl: httpUrl(o.runnerUrl) ?? DEFAULT_SETTINGS.runnerUrl, ...(wsl ? { wsl } : {}), ...(runner ? { runner } : {}), legacy };
 }
 
 /** True while the file still has a value the runner should be given (the migration has not happened yet). */

@@ -1,11 +1,11 @@
 # intuition
 
-A Windows background app that fires tasks at Claude Code agents running in WSL2: a global hotkey opens a small pop-up with the clipboard attached, you pick a workspace and type a task, and a chat window shows every session streaming. Setup and layout: [README](README.md). The contract between the parts: [protocol](docs/protocol.md). Decisions: [decisions](docs/decisions/README.md).
+A background app that fires tasks at Claude Code agents: a global hotkey opens a small pop-up with the clipboard attached, you pick a workspace and type a task, and a chat window shows every session streaming. Setup and layout: [README](README.md). The contract between the parts: [protocol](docs/protocol.md). Decisions: [decisions](docs/decisions/README.md). It runs in one of three layouts ([platforms](docs/platforms.md), `src/shell/platform.ts`): `windows-wsl` (the runner in WSL 2, the shell on Windows; the owner's machine), `macos` and `linux` (the runner and the shell on one machine).
 
 Three parts:
-- **Runner** (`src/runner/`, bun + TypeScript, runs in WSL): a daemon on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, streams their events over a WebSocket and stores session metadata.
+- **Runner** (`src/runner/`, bun + TypeScript; in WSL for windows-wsl, on the machine itself otherwise): a daemon on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, streams their events over a WebSocket and stores session metadata.
 - **Web UI** (`src/web/`, served by the runner): the pop-up prompt (`/prompt`) and the chat view (`/`). Plain HTML, CSS and JavaScript modules, no build step.
-- **Windows shell** (`shell/`, Electron + TypeScript): tray icon, global hotkey, clipboard capture, the dock, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun; Electron itself is installed into a Windows folder from WSL.
+- **Shell** (`shell/`, Electron + TypeScript; on Windows, macOS or Linux): tray icon (the menu bar on a Mac), global hotkey, clipboard capture, the dock, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun, with what differs per OS in `shell/src/os.ts`; Electron itself is installed into the layout's shell folder by `intuition shell install`.
 
 ## Commands
 - `bun run check`: typecheck and tests. Run it before every commit; CI runs the same.
@@ -13,6 +13,7 @@ Three parts:
 - `bun run typecheck`.
 - `bun run dev`: the runner with reload on change. `bun run start`: without.
 - `bun src/cli.ts <command>`: the app's own commands (start, stop, status, and the shell's install and start), once their tasks have built them.
+- `bun src/shell/selftest-run.ts`: the shell's self-test on this machine's layout; `INTUITION_PLATFORM=linux` runs the linux layout under WSLg. Skipped when `CI` is set (CI's desktop jobs run it with `env -u CI`).
 - Windows programs run from WSL directly: `/mnt/c/.../electron.exe <args>` (start from a `/mnt/c` folder and pass Windows paths; `wslpath -w` converts).
 
 ## Tasks
@@ -25,15 +26,15 @@ Work here is tracked in foreman: the MCP server `foreman` in `.mcp.json`, or its
 - Never verify your own task, and never approve: a fresh session runs the `verify` skill, and a person signs off changes to the paths listed in `foreman.json`.
 
 ## Rules
-- **TypeScript only.** Runner, scripts, command line and the Windows shell are TypeScript run by bun or Electron; pages are plain JavaScript modules. No AutoHotkey, PowerShell, batch, bash or Rust files, and no Tauri. A step that seems to need one is done from TypeScript (spawn the Windows program, or use Electron's API).
+- **TypeScript only.** Runner, scripts, command line and the shell are TypeScript run by bun or Electron; pages are plain JavaScript modules. No AutoHotkey, PowerShell, batch, bash or Rust files, and no Tauri. A step that seems to need one is done from TypeScript (spawn the OS's program with an argument array, or use Electron's API).
 - Electron's API changes between versions (the clipboard API in 45 is not the old one). Before writing against it, read `node_modules/electron/electron.d.ts`; don't rely on memory.
-- Electron is installed for Windows from WSL (`npm_config_platform=win32`, then its `install.js`), into a folder under the Windows user's `AppData\Local\intuition`, never into the repo or a WSL path. The Windows side has Node 20, too old for Electron's installer: don't use it.
+- Electron is installed only by `intuition shell install`, for the layout's OS, into the layout's shell folder (`src/shell/platform.ts`): windows-wsl fetches it for Windows from WSL (`npm_config_platform=win32`, then its `install.js`) into the Windows user's `AppData\Local\intuition`; macOS into `~/Library/Application Support/intuition`; Linux into `~/.local/share/intuition`. Never into the repo, and for windows-wsl never into a WSL path. It needs Node 22.12 or later; the Windows side's Node 20 is too old: don't use it.
 - `src/shared/protocol.ts` and [protocol](docs/protocol.md) are the contract between runner, pages and shell. Follow them; a task that needs to change the contract changes both files and says so in its PR.
 - The Claude Agent SDK changes often. Before writing against it, read its types in `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts` (and its README there); don't rely on memory for its API.
 - Sessions run in the SDK's `auto` mode by default (config `permissionMode`, `"auto"` or `"default"`, per workspace too) and with the workspace's own settings. A call that reaches `canUseTool` still waits for the person's Allow or Deny in the chat view: never answer it without the person. Never pass `bypassPermissions`, `acceptEdits` or `allowDangerouslySkipPermissions`.
 - The runner binds `127.0.0.1` only, and every request passes `refusal()` in `src/runner/server.ts` (Host, Origin, JSON content type). New routes go through the same check.
 - Read configuration only through `src/runner/config.ts`. Tests set `INTUITION_CONFIG`, `INTUITION_DATA_DIR` and `INTUITION_PORT=0`, and never touch the real `~/.config/intuition` or `~/.local/share/intuition`.
-- Tests that run in CI use the fake agent (`INTUITION_FAKE_AGENT=1`): CI has no Claude Code login. A check that needs real Claude Code or Windows is a script under `scripts/` that a person or verifier runs on a machine that has them, and the test suite skips it when `CI` is set.
+- Tests that run in CI use the fake agent (`INTUITION_FAKE_AGENT=1`): CI has no Claude Code login. A check that needs real Claude Code, Windows or a desktop is a script under `scripts/` that a person or verifier runs on a machine that has them, and the test suite skips it when `CI` is set.
 - Never start a real Claude Code session in a real workspace from a test or a script. Use a throwaway folder made with `mkdtemp`.
 - Pages use only the tokens in `src/web/base.css`: no colours or font sizes anywhere else. The feel is small, clean and calm.
 - Don't add dependencies: `package.json` and `bun.lock` need a person's approval. Use bun's built-ins and what is installed.

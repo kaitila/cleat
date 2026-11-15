@@ -95,9 +95,12 @@ A session that asked for `auto` and runs in another mode gets one `permission_mo
 The pages show `auto_denied` and `permission_mode` as quiet notes, as any kind they don't know.
 
 ## Clipboard images
-The shell saves a clipboard image as a PNG under the Windows user's temp folder (`%TEMP%\\intuition\\clip-<time>.png`, the newest 20 kept) and posts its Windows path. The runner turns `C:\Users\x\...` into `/mnt/c/Users/x/...` (drive letter lowercased, backslashes to slashes, normalised) and stores that.
+The shell saves a clipboard image (and a snip) as a PNG in its OS's temp folder, under `intuition` (`clip-<time>.png` or `snip-<time>.png`, the newest 20 kept), and posts its path. Which paths the runner takes depends on the layout ([platforms](platforms.md)):
 
-An `imagePath`, on `POST /api/clipboard` and on a session or a reply, is accepted only when, once converted, it is an existing PNG file named `.png` under `/mnt/<drive>/`; a WSL path that passes the same test is taken as it is. A link is followed and its target must pass too. Anything else (`/etc/passwd`, a path that climbs out with `..`, a missing file, a file that doesn't start as a PNG) is a 400.
+- **windows-wsl.** The shell posts a Windows path (`%TEMP%\\intuition\\clip-<time>.png`). The runner turns `C:\Users\x\...` into `/mnt/c/Users/x/...` (drive letter lowercased, backslashes to slashes, normalised) and stores that. An `imagePath` is accepted only when, once converted, it is an existing PNG file named `.png` under `/mnt/<drive>/`; a WSL path that passes the same test is taken as it is. A link is followed and its target must pass too.
+- **macos and linux.** The shell and the runner share the machine and its temp folder (`os.tmpdir()`, which is `$TMPDIR` on a Mac and usually `/tmp` on Linux). An `imagePath` is accepted only when it is an absolute path to an existing PNG file named `.png` directly in `<temp>/intuition/`, once links are followed (the folder's own as well: `/var` is `/private/var` on a Mac). The runner stores that real path. A Windows path is refused.
+
+On every layout, anything else (`/etc/passwd`, a path that climbs out with `..`, a missing file, a file that doesn't start as a PNG) is a 400, and the error text names both rules.
 
 The capture is kept in memory only, the latest one. The pop-up asks for it on load and a few more times over its first two seconds, since the shell captures while the window opens, and attaches one whose `capturedAt` is within the last 30 seconds: a thumbnail for an image, the first lines for text, with a remove control (also Alt+Backspace). An attached image is sent as the session's `imagePath`; attached text goes into the prompt after the task, under a line `Clipboard:`.
 

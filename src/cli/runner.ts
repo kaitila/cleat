@@ -42,6 +42,25 @@ function read(file: string): string | null {
   return existsSync(file) ? readFileSync(file, "utf8").trim() : null;
 }
 
+/**
+ * A process's command line: from /proc on Linux, else from `ps` (macOS has no /proc). Null when
+ * neither can tell (the process is gone, or there is no ps).
+ */
+export function commandLine(pid: number): string | null {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ");
+  } catch {
+    // No /proc here: ps, with an argument array.
+  }
+  try {
+    const p = Bun.spawnSync(["ps", "-o", "command=", "-p", String(pid)], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const out = p.stdout.toString().trim();
+    return p.exitCode === 0 && out ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 /** True when the pid is a live runner. A pid file can outlive its process, and the number can be given to another one. */
 export function isRunner(pid: number): boolean {
   try {
@@ -49,12 +68,9 @@ export function isRunner(pid: number): boolean {
   } catch {
     return false;
   }
-  try {
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(join("runner", "main.ts"));
-  } catch {
-    // No /proc here: a live pid from our own file is taken at its word.
-    return true;
-  }
+  const command = commandLine(pid);
+  // Neither /proc nor ps answers: a live pid from our own file is taken at its word.
+  return command === null || command.includes(join("runner", "main.ts"));
 }
 
 export async function answers(url: string): Promise<boolean> {

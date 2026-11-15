@@ -1,4 +1,5 @@
 import type { Area } from "./geometry";
+import type { ShellOs } from "./os";
 
 // What the self-test writes. Shared with src/shell/selftest-run.ts, which asserts every field.
 export interface SelfTestResult {
@@ -11,7 +12,7 @@ export interface SelfTestResult {
   /** An image put on the clipboard was captured and saved as a PNG, and its path was posted. */
   imageCaptured: boolean;
   imagePosted: boolean;
-  /** Windows path of the saved PNG. */
+  /** Path of the saved PNG: a Windows path on Windows, a native one on macOS and Linux. */
   imagePath: string | null;
   notificationsSupported: boolean;
   popupCreated: boolean;
@@ -152,4 +153,12 @@ export interface SelfTestResult {
   externalLinks: string[];
   /** Anything that threw on the way. Empty on a clean run. */
   errors: string[];
+  /** The OS the shell ran on: what the other fields are judged against. */
+  os: ShellOs;
+  /** Whether the dock's window was transparent (false: an opaque window the island's size, on Linux without a compositor). */
+  dockTransparent: boolean;
+  /** The primary display's work area: on a Mac the dock hangs from its top, below the menu bar. */
+  primaryWorkArea: Area | null;
+  /** macOS's Screen Recording status for the shell ("granted", "denied", "not-determined", ...); "granted" elsewhere. Without it a snip captures no windows. */
+  screenAccess: string;
 }

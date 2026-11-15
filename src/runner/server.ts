@@ -21,7 +21,7 @@ import {
 } from "../shared/protocol";
 import { driverFor, type AgentDriver } from "./agent";
 import { buildId } from "./build";
-import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
+import { Clipboard, defaultImageRule, type ImageRule, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
 import { DELETING, Manage, fakeOps, sdkOps, type Refused, type TranscriptOps } from "./manage";
 import { applySettings, permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
@@ -78,8 +78,8 @@ interface App {
   manage: Manage;
   /** The build id of the code this process loaded, taken once at its start (build.ts). */
   build: string;
-  /** Where the Windows drives are mounted (/mnt). */
-  mounts: string;
+  /** Which image paths are taken: under the Windows drives' mounts (/mnt), or in the shell's temp folder on macOS and Linux. */
+  mounts: ImageRule;
   /** The port the server listens on (config.port may be 0 in tests). */
   port(): number;
   send(message: ServerMessage): void;
@@ -95,7 +95,7 @@ async function body(req: Request): Promise<Record<string, unknown> | null> {
   }
 }
 
-/** The request's imagePath as a WSL path, undefined without one, or null when it is refused. */
+/** The request's imagePath as the path Claude reads, undefined without one, or null when it is refused. */
 function imageOf(b: Record<string, unknown>, app: App): string | undefined | null {
   return b.imagePath === undefined ? undefined : imagePathOf(b.imagePath, app.mounts);
 }
@@ -277,15 +277,15 @@ async function handle(req: Request, app: App): Promise<Response> {
 const TOPIC = "all";
 
 /**
- * Starts the runner. `driver` replaces the agent the config asks for, `mounts` the folder the
- * Windows drives are mounted in, and `sync` the transcript sync's reader and timings (all for tests:
+ * Starts the runner. `driver` replaces the agent the config asks for, `mounts` the rule for image
+ * paths (by default this layout's: /mnt for windows-wsl, <temp>/intuition/ on macOS and Linux), and `sync` the transcript sync's reader and timings (all for tests:
  * CI has no /mnt/c and no transcripts). With the fake agent there are no transcripts to read.
  * `ops` replaces what renames, forks and deletes transcripts (manage.ts): with the fake agent, nothing does.
  */
 export function startServer(
   config: Config,
   driver: AgentDriver = driverFor(config),
-  mounts = MOUNTS,
+  mounts: ImageRule = defaultImageRule(),
   sync: Partial<SyncOptions> = {},
   ops: TranscriptOps = config.fakeAgent ? fakeOps() : sdkOps(),
 ): Runner {
