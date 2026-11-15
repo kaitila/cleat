@@ -28,9 +28,10 @@ describe("the runner serves the snip page", () => {
 
   test("every module it imports is served, and the page needs nothing else from the runner", async () => {
     const imports = (file: string) => [...source(file).matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports("snip.js")).toEqual(["snip-geometry.js"]);
+    expect(imports("snip.js")).toEqual(["agent.js", "snip-geometry.js"]);
     expect(imports("snip-geometry.js")).toEqual([]);
-    for (const file of ["snip.js", "snip-geometry.js"]) {
+    expect(imports("agent.js")).toEqual([]);
+    for (const file of ["snip.js", "snip-geometry.js", "agent.js"]) {
       const res = await runner.get(`/assets/${file}`);
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toContain("javascript");
@@ -189,5 +190,13 @@ describe("the workspace chip and the keys", () => {
     expect(errorText(400, { error: " imagePath is refused " })).toBe("imagePath is refused");
     expect(errorText(500, null)).toBe("the runner answered 500");
     expect(sessionBody("alpha", "what is this", "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\snip-1.png")).toEqual({ workspace: "alpha", prompt: "what is this", imagePath: "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\snip-1.png" });
+    expect(sessionBody("alpha", "what is this", "/tmp/s.png", "codex")).toEqual({ workspace: "alpha", prompt: "what is this", imagePath: "/tmp/s.png", agent: "codex" });
+    expect(sessionBody("alpha", "what is this", "/tmp/s.png", "gpt")).toEqual({ workspace: "alpha", prompt: "what is this", imagePath: "/tmp/s.png" });
+  });
+
+  test("the box has the agent switch beside the workspace, and its key in the hints", () => {
+    const html = source("snip.html");
+    expect(html).toMatch(/id="workspace"[\s\S]*<button id="agent" class="agent-switch[^"]*" type="button" aria-keyshortcuts="Alt\+A">/);
+    expect(html).toContain("<kbd>Alt</kbd><kbd>A</kbd><span>agent</span>");
   });
 });

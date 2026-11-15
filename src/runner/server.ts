@@ -8,6 +8,7 @@ import {
   NOT_RUNNING,
   OPEN_IN_TERMINAL,
   type AgentKind,
+  type AgentsResponse,
   type ClipboardCapture,
   type DeletedResponse,
   type ErrorResponse,
@@ -25,6 +26,7 @@ import {
   type WorkspacesResponse,
 } from "../shared/protocol";
 import { driverFor, type AgentDriver } from "./agent";
+import { fakeStatus, machineStatus, type AgentStatusSource } from "./agent-status";
 import { buildId } from "./build";
 import { Clipboard, defaultImageRule, type ImageRule, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
 import { DELETING, Manage, fakeOps, sdkOps, type Refused, type TranscriptOps } from "./manage";
@@ -88,6 +90,8 @@ interface App {
   mounts: ImageRule;
   /** The shell's side for GET /api/platform: its sockets and its last report. */
   shell: ShellState;
+  /** GET /api/agents: each agent's doctor status (agent-status.ts). */
+  agentStatus: AgentStatusSource;
   /** The port the server listens on (config.port may be 0 in tests). */
   port(): number;
   send(message: ServerMessage): void;
@@ -278,13 +282,14 @@ async function handle(req: Request, app: App): Promise<Response> {
   }
   if (req.method === "GET") {
     if (path === "/api/workspaces") {
-      const workspaces = app.config.workspaces.map((w) => ({ ...w, exists: existsSync(w.path) }));
+      const workspaces = app.config.workspaces.map((w) => ({ ...w, exists: existsSync(w.path), agent: agentFor(app.config, w.name) }));
       const last = app.store.lastWorkspace;
       const lastUsed = workspaces.some((w) => w.name === last) ? last : null;
       return json({ workspaces, lastUsed } satisfies WorkspacesResponse);
     }
     if (path === "/api/settings") return json(settingsOf(app.config.settings, app.port()) satisfies Settings);
     if (path === "/api/platform") return json(app.shell.response() satisfies PlatformResponse);
+    if (path === "/api/agents") return json((await app.agentStatus()) satisfies AgentsResponse);
     if (path === "/api/sessions") return listSessions(app, url);
     const events = /^\/api\/sessions\/([^/]+)\/events$/.exec(path);
     if (events) {
@@ -333,6 +338,7 @@ export function startServer(
   mounts: ImageRule = defaultImageRule(),
   sync: Partial<SyncOptions> = {},
   ops: TranscriptOps = config.fakeAgent ? fakeOps() : sdkOps(),
+  agentStatus: AgentStatusSource = config.fakeAgent ? fakeStatus() : machineStatus(),
 ): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
@@ -346,7 +352,7 @@ export function startServer(
   });
   sessions.watcher = transcriptSync;
   const manage = new Manage(store, sessions, transcriptSync, ops, send);
-  const app: App = { config, store, sessions, sync: transcriptSync, manage, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, shell, port: () => server.port ?? config.port, send, sendShell };
+  const app: App = { config, store, sessions, sync: transcriptSync, manage, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, shell, agentStatus, port: () => server.port ?? config.port, send, sendShell };
   const server = Bun.serve<SocketData>({
     hostname: HOST,
     port: config.port,

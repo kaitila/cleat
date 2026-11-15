@@ -1,9 +1,11 @@
 // The snip overlay (/assets/snip.html): the shell opens one per display on the snip hotkey, each on
 // its own frozen capture. Drag an area (a click takes the whole display), and a prompt box appears
 // under it, centred, with the focus in it: type the task, Enter starts the session with the area attached.
-// Tab or Alt+1..9 switches the workspace, Shift+Enter is a new line, Esc closes every overlay.
+// Tab or Alt+1..9 switches the workspace, Alt+A flips the agent (the workspace's own until flipped),
+// Shift+Enter is a new line, Esc closes every overlay.
 // The shell's half is window.intuitionSnip (shell/src/snip-preload.ts): getCapture(), crop(rect)
 // and close(). The runner's half is POST /api/sessions (docs/protocol.md).
+import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
 import { altDigit, anchorBox, anchorLabel, devicePixels, errorText, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, UNREACHABLE, wholeDisplay } from "./snip-geometry.js";
 
 /** A selection narrower or shorter than this, in CSS pixels, shows no corner marks: they would cover it. */
@@ -35,6 +37,7 @@ function start() {
   const chip = $("workspace");
   const chipName = $("workspace-name");
   const status = $("status");
+  const agentButton = $("agent");
 
   /** The selection, in CSS pixels of this window, or null before the first. */
   let sel = null;
@@ -42,6 +45,9 @@ function start() {
   let press = null;
   let workspaces = [];
   let workspace = null;
+  /** The agent the person flipped to, or null to follow the workspace's. */
+  let agentOverride = null;
+  const agent = () => pickAgent(workspaces, workspace, agentOverride);
   let loaded = false;
   let busy = false;
   /** The selection last cropped and the Windows path it was saved as, so sending again after an error doesn't save it twice. */
@@ -62,6 +68,27 @@ function start() {
     chipName.textContent = workspace ?? "no workspace";
     const i = workspaces.findIndex((w) => w.name === workspace);
     chip.title = `Workspace${i >= 0 ? ` ${i + 1} of ${workspaces.length}` : ""} (Tab, Alt+1..9)`;
+    drawAgent();
+  }
+
+  /** The switch shows the agent the task starts on: its glyph and name; the task box asks who does it. */
+  function drawAgent() {
+    const kind = agent();
+    agentButton.dataset.agent = kind;
+    const name = document.createElement("span");
+    name.textContent = agentName(kind);
+    agentButton.replaceChildren(agentSvg(document, kind), name);
+    agentButton.title = `Starts on ${agentName(kind)}. Alt+A switches to ${agentName(flipAgent(kind))}`;
+    agentButton.setAttribute("aria-label", `Agent: ${agentName(kind)}. Switch to ${agentName(flipAgent(kind))}`);
+    task.placeholder = taskPlaceholder(kind, true);
+  }
+
+  function flip() {
+    agentOverride = flipAgent(agent());
+    drawAgent();
+    agentButton.removeAttribute("data-in");
+    void agentButton.offsetWidth;
+    agentButton.setAttribute("data-in", "");
   }
 
   /** As noWorkspaceText in prompt.js. */
@@ -197,7 +224,7 @@ function start() {
       await api("/api/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(sessionBody(workspace, prompt, imagePath)),
+        body: JSON.stringify(sessionBody(workspace, prompt, imagePath, agent())),
       });
       say("Started");
       close();
@@ -229,6 +256,11 @@ function start() {
       task.focus();
       return;
     }
+    if (isAgentKey(e)) {
+      e.preventDefault();
+      if (!busy) flip();
+      return;
+    }
     const position = altDigit(e);
     if (position === null) return;
     e.preventDefault();
@@ -258,6 +290,10 @@ function start() {
   document.addEventListener("pointerup", onUp);
   document.addEventListener("keydown", onKey);
   task.addEventListener("input", fit);
+  agentButton.addEventListener("click", () => {
+    flip();
+    task.focus();
+  });
   chip.addEventListener("click", () => {
     workspace = stepWorkspace(workspaces, workspace, 1);
     drawWorkspace();

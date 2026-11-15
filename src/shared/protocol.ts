@@ -24,6 +24,8 @@ export interface Workspace {
   path: string;
   /** False when the folder is missing: the UI shows it disabled. */
   exists: boolean;
+  /** The agent a new session here runs on: the workspace's own `agent`, else the top-level one. Absent from a runner before it: read as "claude". */
+  agent?: AgentKind;
 }
 
 /**
@@ -230,6 +232,13 @@ export interface ApprovalRequest { decision: ApprovalDecision }
 export interface ClipboardPostRequest { text?: string; imagePath?: string }
 export interface NotificationsResponse { notifications: Notification[]; latest: number }
 export interface ErrorResponse { error: string }
+/**
+ * One agent as `intuition doctor` checks it: installed (its version) and logged in. `detail` is the
+ * line to show, `fix` what to do when it can't run (empty when it can).
+ */
+export interface AgentStatus { agent: AgentKind; installed: boolean; version: string | null; loggedIn: boolean; detail: string; fix: string }
+/** GET /api/agents: both agents, Claude Code first, and when they were checked (answers are kept 30 seconds). */
+export interface AgentsResponse { agents: AgentStatus[]; checkedAt: string }
 /** The body of PUT /api/settings: a whole Settings. A port in it is ignored. */
 /**
  * agent left out keeps the current one, at the top and on a workspace of the same name; a

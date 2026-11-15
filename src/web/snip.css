@@ -150,6 +150,10 @@ button.chip:hover { background: var(--ink); color: var(--ink-text); }
 .chip kbd { border-color: var(--ink-text); color: var(--ink-text); }
 .chip span { overflow: hidden; text-overflow: ellipsis; }
 .chip kbd { height: calc(var(--control-s) - var(--space-1)); }
+/* The agent switch, beside the workspace: quiet, the agent's glyph and name. Alt+A or a click turns it. */
+.agent-switch { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+button.agent-switch { border-color: var(--line); border-radius: var(--radius-pill); }
+.agent-switch[data-in] .agent-glyph { animation: turn-in var(--dur-bouncy) var(--ease-bouncy) backwards; }
 .status {
   flex: 1;
   min-width: 0;
@@ -169,6 +173,7 @@ body[data-closing] :is(.shade, .selection, .size, .hint, .box) { animation: fade
 /* The fade in clears a blur as it goes. */
 @keyframes fade-in { from { opacity: 0; filter: var(--blur-in); } }
 @keyframes fade-out { to { opacity: 0; } }
+@keyframes turn-in { from { transform: rotate(-60deg) scale(var(--pop)); } }
 @keyframes box-pop { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
 /* Each corner mark comes in from a few pixels out along its diagonal. */
 @keyframes corner-tl { from { transform: translate(calc(var(--space-1) * -1), calc(var(--space-1) * -1)); } }
@@ -180,6 +185,6 @@ body[data-closing] :is(.shade, .selection, .size, .hint, .box) { animation: fade
    the rise and the pop out of the tokens). Nothing moves. */
 @media (prefers-reduced-motion: reduce) {
   body[data-ready] .shade { animation: dim-in var(--dur-fade) linear backwards !important; }
-  .box[data-in] { animation: fade-in var(--dur-fade) linear backwards !important; }
+  .box[data-in], .agent-switch[data-in] .agent-glyph { animation: fade-in var(--dur-fade) linear backwards !important; }
   body[data-closing] :is(.shade, .selection, .size, .hint, .box) { animation: fade-out var(--dur-out) linear forwards !important; }
 }

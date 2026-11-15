@@ -22,8 +22,10 @@
     <textarea id="task" class="task" rows="1" aria-label="Task" placeholder="What should Claude do with this?" spellcheck="false"></textarea>
     <footer class="foot">
       <button id="workspace" class="chip quiet small" type="button" title="Workspace (Tab, Alt+1..9)" aria-keyshortcuts="Tab"><span id="workspace-name"></span><kbd>Tab</kbd></button>
+      <!-- The agent the task starts on: the workspace's own until flipped (a click, or Alt+A). -->
+      <button id="agent" class="agent-switch quiet small" type="button" aria-keyshortcuts="Alt+A"></button>
       <span id="status" class="status small" role="status" aria-live="polite"></span>
-      <span class="keys muted" aria-hidden="true"><kbd>Enter</kbd><span>start</span><kbd>Esc</kbd></span>
+      <span class="keys muted" aria-hidden="true"><kbd>Alt</kbd><kbd>A</kbd><span>agent</span><kbd>Enter</kbd><span>start</span><kbd>Esc</kbd></span>
     </footer>
   </form>
 </body>

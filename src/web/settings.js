@@ -3,7 +3,10 @@
 // at the field it names (docs/protocol.md, "Settings"). Other windows' changes arrive as
 // { type: "settings" } on /ws. The theme is applied by theme.js, at once on a choice here.
 // The Setup section is GET /api/platform, followed by { type: "platform" } on /ws ("Platform").
-import { fieldKeys, isDraft, keycaps, move, putBody, recordKey, setupLines } from "./settings-model.js";
+// The Agents section's status lines are GET /api/agents (as `intuition doctor` checks them), asked
+// again when the page comes back into view, so a login made meanwhile shows.
+import { agentSvg } from "./agent.js";
+import { agentLines, fieldKeys, isDraft, keycaps, move, putBody, recordKey, setupLines, usedAgents } from "./settings-model.js";
 
 const $ = (id) => document.getElementById(id);
 const main = document.querySelector(".settings");
@@ -24,6 +27,8 @@ let recording = null;
 /** GET /api/platform's answer, or null before it; and whether the runner answers now (its socket is open). */
 let platform = null;
 let reachable = true;
+/** GET /api/agents' answer, or null before it (or from a runner without the route). */
+let agents = null;
 
 const UNREACHABLE = "the runner is not reachable";
 
@@ -117,7 +122,7 @@ function adopt(stored) {
   const drafts = state ? state.workspaces.map((w, i) => (isDraft(w) ? [i, w] : null)).filter(Boolean) : [];
   const workspaces = Array.isArray(stored.workspaces) ? stored.workspaces.map((w) => ({ ...w })) : [];
   for (const [i, w] of drafts) workspaces.splice(Math.min(i, workspaces.length), 0, w);
-  state = { theme: stored.theme, permissionMode: stored.permissionMode, workspaces, shell: stored.shell ? { ...stored.shell } : null, port: stored.port };
+  state = { theme: stored.theme, permissionMode: stored.permissionMode, agent: stored.agent, workspaces, shell: stored.shell ? { ...stored.shell } : null, port: stored.port };
   window.intuitionTheme?.apply(state.theme);
   render();
 }
@@ -136,9 +141,12 @@ function render() {
   main.removeAttribute("aria-busy");
   for (const input of document.querySelectorAll('input[name="theme"]')) input.checked = input.value === state.theme;
   for (const input of document.querySelectorAll('input[name="permissionMode"]')) input.checked = input.value === state.permissionMode;
+  // A runner from before agents sends none: Claude Code, as it runs.
+  for (const input of document.querySelectorAll('input[name="agent"]')) input.checked = input.value === (state.agent ?? "claude");
   renderWorkspaces();
   renderShell();
   renderSetup();
+  renderAgents();
   $("port").textContent = String(state.port ?? "");
 }
 
@@ -178,6 +186,34 @@ setupList.addEventListener("click", async (e) => {
   }
 });
 
+const agentList = $("agents");
+
+function renderAgents() {
+  const lines = agentLines(agents, reachable, usedAgents(state));
+  while (agentList.children.length > lines.length) agentList.lastElementChild.remove();
+  while (agentList.children.length < lines.length) agentList.append(setupTemplate.content.firstElementChild.cloneNode(true));
+  lines.forEach((line, i) => {
+    const li = agentList.children[i];
+    li.dataset.agent = line.key;
+    li.dataset.tone = line.tone;
+    const name = li.querySelector(".setup-name");
+    if (name.dataset.agent !== line.key) {
+      name.dataset.agent = line.key;
+      name.replaceChildren(agentSvg(document, line.key), line.name);
+    }
+    li.querySelector(".setup-detail").textContent = line.detail;
+    li.querySelector(".setup-value").textContent = line.value;
+    li.querySelector(".setup-action").hidden = true;
+  });
+}
+
+async function loadAgents() {
+  const res = await api("/api/agents");
+  agents = res.ok && Array.isArray(res.body?.agents) ? res.body : null;
+  if (res.status === 0) reachable = false;
+  renderAgents();
+}
+
 async function loadPlatform() {
   const res = await api("/api/platform");
   // An older runner has no such route: the section says it can't tell.
@@ -206,6 +242,9 @@ function renderWorkspaces() {
     if (document.activeElement !== name) name.value = w.name;
     if (document.activeElement !== path) path.value = w.path;
     mode.value = w.permissionMode ?? "";
+    const agent = li.querySelector(".agent");
+    agent.dataset.field = `workspaces.${i}.agent`;
+    agent.value = w.agent ?? "";
     li.querySelector(".up").disabled = i === 0;
     li.querySelector(".down").disabled = i === rows.length - 1;
     const mark = li.querySelector(".exists");
@@ -268,6 +307,14 @@ for (const input of document.querySelectorAll('input[name="permissionMode"]')) {
     void save();
   });
 }
+for (const input of document.querySelectorAll('input[name="agent"]')) {
+  input.addEventListener("change", () => {
+    if (!state) return;
+    state.agent = input.value;
+    renderAgents();
+    void save();
+  });
+}
 
 const rowIndex = (el) => [...list.children].indexOf(el.closest(".workspace"));
 list.addEventListener("input", (e) => {
@@ -290,6 +337,11 @@ list.addEventListener("change", (e) => {
   if (e.target.classList.contains("mode")) {
     if (e.target.value) state.workspaces[i].permissionMode = e.target.value;
     else delete state.workspaces[i].permissionMode;
+  }
+  if (e.target.classList.contains("agent")) {
+    if (e.target.value) state.workspaces[i].agent = e.target.value;
+    else delete state.workspaces[i].agent;
+    renderAgents();
   }
   // A new row is sent once it has a name and a folder: until then there is nothing to save.
   if (isDraft(state.workspaces[i])) return;
@@ -395,6 +447,7 @@ function connect() {
     if (attempt > 0) {
       void load();
       void loadPlatform();
+      void loadAgents();
     }
     attempt = 0;
   });
@@ -420,6 +473,7 @@ function connect() {
     // The runner stopped, or restarted: the Setup section says so until the socket is back.
     reachable = false;
     renderSetup();
+    renderAgents();
     setTimeout(connect, Math.min(5000, 500 * 2 ** attempt));
     attempt += 1;
   });
@@ -428,4 +482,10 @@ function connect() {
 void load();
 void loadVersion();
 void loadPlatform();
+void loadAgents();
+// Back from a terminal (a login, say): the agents' lines are asked again.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void loadAgents();
+});
+window.addEventListener("focus", () => void loadAgents());
 connect();

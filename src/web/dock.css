@@ -160,6 +160,8 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .row-time { flex: none; }
 /* A session started in the terminal: a quiet glyph before its workspace. */
 .terminal-mark { flex: none; }
+/* The agent a session runs on: a quiet glyph after its dot, the agent's name as its tooltip. */
+.agent-mark { flex: none; display: inline-flex; color: var(--muted); }
 .empty { padding: var(--space-2) var(--space-4) var(--space-4); }
 
 .session { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: var(--hairline) solid var(--line); }
@@ -169,6 +171,7 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .session-title { flex: 1; min-width: 0; font-size: var(--text-m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-status { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-head .stop { flex: none; }
+.session-agent { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
 .more { flex: none; width: var(--control-s); padding: 0; color: var(--muted); letter-spacing: var(--track-l); }
 .more[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 .send-anyway { margin-left: var(--space-1); }

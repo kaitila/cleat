@@ -101,9 +101,13 @@ export function putBody(state) {
     rows.push(i);
     const out = { name: w.name.trim(), path: w.path.trim() };
     if (w.permissionMode === "auto" || w.permissionMode === "default") out.permissionMode = w.permissionMode;
+    // null clears a workspace's own agent; left out, the runner would keep it.
+    out.agent = w.agent === "claude" || w.agent === "codex" ? w.agent : null;
     workspaces.push(out);
   });
   const body = { theme: state.theme, permissionMode: state.permissionMode, workspaces, shell: state.shell, port: state.port };
+  // Left out (an older runner sent none), the runner keeps its own.
+  if (state.agent === "claude" || state.agent === "codex") body.agent = state.agent;
   return { body, rows };
 }
 
@@ -191,4 +195,38 @@ export function setupLines(platform, reachable, shell = null) {
     else lines.push({ key: "screenRecording", name: "Screen Recording", tone: "bad", value: "Not allowed", detail: "Until it is, a snip shows only the wallpaper. Open System Settings, allow Electron under Screen Recording, then quit the shell and start it again.", action });
   }
   return lines;
+}
+
+// ---------- the Agents section ----------
+
+const AGENT_NEEDS = {
+  claude: { name: "Claude Code", needs: "Needs Claude Code installed and logged in." },
+  codex: { name: "Codex", needs: "Needs Codex installed and logged in." },
+};
+
+/**
+ * The Agents section's status lines from GET /api/agents (null when it can't be had: not yet, or a
+ * runner without the route), as setupLines draws them: one per agent, Claude Code first. `detail`
+ * says what the agent needs, then what doctor found, or what to do. An agent that isn't ready is
+ * "bad" when sessions would run on it (`used`: the default agent or a workspace's), else "off".
+ */
+export function agentLines(response, reachable, used = ["claude"]) {
+  return ["claude", "codex"].map((agent) => {
+    const { name, needs } = AGENT_NEEDS[agent];
+    const status = reachable && Array.isArray(response?.agents) ? response.agents.find((a) => a?.agent === agent) : undefined;
+    if (!status) return { key: agent, name, tone: "unknown", value: "Unknown", detail: `${needs} ${reachable ? "Checking." : "Shown once the runner answers."}` };
+    const ready = status.installed === true && status.loggedIn === true;
+    if (ready) return { key: agent, name, tone: "ok", value: "Ready", detail: `${needs} Found ${status.detail}.` };
+    const tone = used.includes(agent) ? "bad" : "off";
+    const value = status.installed ? "Not logged in" : "Not installed";
+    const fix = typeof status.fix === "string" && status.fix ? ` ${status.fix}` : "";
+    return { key: agent, name, tone, value, detail: `${needs}${fix}` };
+  });
+}
+
+/** The agents sessions would run on: the default one, and each workspace's own. */
+export function usedAgents(state) {
+  const used = new Set([state?.agent === "codex" ? "codex" : "claude"]);
+  for (const w of state?.workspaces ?? []) if (w.agent === "claude" || w.agent === "codex") used.add(w.agent);
+  return [...used];
 }
