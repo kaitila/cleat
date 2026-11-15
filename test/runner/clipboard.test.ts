@@ -1,7 +1,7 @@
 // The clipboard handoff: POST and GET /api/clipboard, the image route, and imagePath on a session.
 // A temp folder stands in for /mnt (CI has none), with a "c" drive in it.
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ClipboardCapture, EventsResponse, SessionMeta } from "../../src/shared/protocol";
@@ -206,7 +206,8 @@ describe("the clipboard routes", () => {
 });
 
 describe("imagePathOf on macOS and Linux: a PNG directly in the shell's temp folder", () => {
-  const folder = join(root, "tmp", "intuition");
+  // Real paths: on a Mac the temp folder is under a link (/var is /private/var), and the rule gives real paths.
+  const folder = join(realpathSync(root), "tmp", "intuition");
   mkdirSync(join(folder, "deeper"), { recursive: true });
   const rule = { kind: "folder" as const, folder };
   const at = (name: string) => join(folder, name);

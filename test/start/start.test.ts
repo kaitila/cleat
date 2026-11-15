@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, relative } from "node:path";
 import { DEFAULT_COMMAND, pick } from "../../src/cli/command";
 import { defaultDir, link, onPath, unlink } from "../../src/cli/link";
-import { isRunner, KEPT, LOG_FILE, PID_FILE, runnerCommand, URL_FILE } from "../../src/cli/runner";
+import { commandLine, isRunner, KEPT, LOG_FILE, PID_FILE, runnerCommand, URL_FILE } from "../../src/cli/runner";
 import { buildId } from "../../src/runner/build";
 
 const REPO = join(import.meta.dir, "..", "..");
@@ -412,8 +412,9 @@ describe("through the link, from another folder", () => {
     expect(start.out).toMatch(/^intuition runner on http:\/\/127\.0\.0\.1:\d+ /);
     expect(start.code).toBe(0);
     const pid = Number(readFileSync(join(env.INTUITION_DATA_DIR, PID_FILE), "utf8"));
-    expect(readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0")).toContain(join(REPO, "src", "runner", "main.ts"));
-    expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(REPO);
+    expect(commandLine(pid)).toContain(join(REPO, "src", "runner", "main.ts"));
+    // Its folder: from /proc where there is one (not on a Mac).
+    if (existsSync("/proc/self")) expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(REPO);
     const url = start.out.match(/http:\/\/127\.0\.0\.1:\d+/)![0];
     // The pages are served from the repo too.
     expect((await fetch(`${url}/`)).status).toBe(200);

@@ -236,7 +236,7 @@ describe("settings from the runner", () => {
 
   test("the migration sends the old file's values, the defaults for the rest, and start on login as Windows has it", () => {
     expect(migratedPrefs({}, false)).toEqual({ ...SHELL_DEFAULTS, startOnLogin: false });
-    expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: "Control+Alt+S", dock: false, startOnLogin: true });
+    expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: SHELL_DEFAULTS.snipHotkey, dock: false, startOnLogin: true });
     expect(SHELL_DEFAULTS).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true });
   });
 

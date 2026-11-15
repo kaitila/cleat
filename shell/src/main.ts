@@ -1191,6 +1191,10 @@ function syncSettings(): void {
 
 // --- Self-test ---
 
+/** The self-test's result as far as it got, and the step it is in: written as they are when it runs out of time. */
+let selfTestSoFar: Partial<SelfTestResult> = {};
+let selfTestStep = "before the first step";
+
 async function selfTest(): Promise<SelfTestResult> {
   const r: SelfTestResult = {
     hotkeyRegistered: false, trayCreated: false, textCaptured: false, textPosted: false, imageCaptured: false, imagePosted: false,
@@ -1213,13 +1217,16 @@ async function selfTest(): Promise<SelfTestResult> {
     os: OS, dockTransparent: DOCK_TRANSPARENT, primaryWorkArea: null,
     screenAccess: OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted",
   };
+  selfTestSoFar = r;
   const step = async (name: string, run: () => Promise<void>) => {
+    selfTestStep = name;
     try {
       await run();
     } catch (e) {
       r.errors.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
     }
   };
+  selfTestStep = "reading the clipboard as it was";
   const before = await readClipboard();
 
   await step("hotkey", async () => {
@@ -1574,7 +1581,7 @@ function start(): void {
       writeFileSync(file, JSON.stringify(result, null, 2));
       app.exit(0);
     };
-    setTimeout(() => done({ errors: ["the self-test did not finish in 90 seconds"] }), 90_000);
+    setTimeout(() => done({ ...selfTestSoFar, errors: [...(selfTestSoFar.errors ?? []), `the self-test did not finish in 90 seconds: it was at "${selfTestStep}"`] }), 90_000);
     void selfTest().then(done, (e) => done({ errors: [String(e)] }));
     return;
   }
