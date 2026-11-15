@@ -18,10 +18,18 @@ import { deflateSync } from "node:zlib";
 import type { ClipboardCapture, ServerMessage, SessionResponse } from "../src/shared/protocol";
 import { loadConfig } from "../src/runner/config";
 import { startServer } from "../src/runner/server";
+import { localAppData, toWindows } from "../src/shell/paths";
 
 const TIMEOUT_MS = 180_000;
 const PROMPT = "What colour is the attached image? Answer with one word.";
-const WINDOWS_TEMP = "/mnt/c/Users/arttu/AppData/Local/Temp/intuition";
+let windowsTemp: string;
+try {
+  // The Windows user's temp folder (%TEMP% is <LocalAppData>\Temp), found at run time, as the shell's clips go there.
+  windowsTemp = join(localAppData(), "Temp", "intuition");
+} catch (e) {
+  console.log(`FAIL: the Windows user's LocalAppData folder was not found: ${(e as Error).message}`);
+  process.exit(1);
+}
 
 /** A PNG of one colour: 8-bit RGB, every row unfiltered, the rows deflated with zlib. */
 function solidPng(size: number, [r, g, b]: [number, number, number]): Buffer {
@@ -45,16 +53,16 @@ function solidPng(size: number, [r, g, b]: [number, number, number]): Buffer {
 
 let workspace: string;
 try {
-  mkdirSync(WINDOWS_TEMP, { recursive: true });
-  workspace = mkdtempSync(join(WINDOWS_TEMP, "smoke-image-"));
+  mkdirSync(windowsTemp, { recursive: true });
+  workspace = mkdtempSync(join(windowsTemp, "smoke-image-"));
 } catch (e) {
-  console.log(`FAIL: no folder could be made under ${WINDOWS_TEMP}: ${(e as Error).message}`);
+  console.log(`FAIL: no folder could be made under ${windowsTemp}: ${(e as Error).message}`);
   process.exit(1);
 }
 const image = join(workspace, "clip-red.png");
 writeFileSync(image, solidPng(64, [255, 0, 0]));
-// /mnt/c/Users/... as Windows names it, the way the shell posts it.
-const windowsPath = `C:\\${image.slice("/mnt/c/".length).replaceAll("/", "\\")}`;
+// As Windows names it, the way the shell posts it.
+const windowsPath = toWindows(image);
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-smoke-image-"));
 const configFile = join(dir, "config.json");

@@ -16,7 +16,7 @@ import { REPO } from "../../src/shell/paths";
 import { savedPathPattern } from "../../src/shell/selftest-run";
 
 const runner = { kind: "local" as const, repo: "/home/a/intuition", bun: "/home/a/.bun/bin/bun" };
-const wsl = { distro: "Ubuntu", repo: "/root/intuition", bun: "/root/.bun/bin/bun" };
+const wsl = { distro: "Ubuntu", repo: "/home/you/intuition", bun: "/home/you/.bun/bin/bun" };
 
 describe("the OS", () => {
   test("from process.platform: win32, darwin, and everything else Linux", () => {
@@ -54,7 +54,7 @@ describe("starting the runner", () => {
 
   test("Windows: wsl.exe as before, attached. macOS and Linux: bun on the repo's cli, detached, with the login shell's environment", () => {
     expect(runnerSpawn("windows", { wsl }, "C:\\Windows")).toEqual({
-      file: "C:\\Windows\\System32\\wsl.exe", args: ["-d", "Ubuntu", "--exec", wsl.bun, "/root/intuition/src/cli.ts", "start", "--login-env"], detached: false,
+      file: "C:\\Windows\\System32\\wsl.exe", args: ["-d", "Ubuntu", "--exec", wsl.bun, "/home/you/intuition/src/cli.ts", "start", "--login-env"], detached: false,
     });
     for (const os of ["macos", "linux"] as const) {
       expect(runnerSpawn(os, { runner: { ...runner, repo: "/home/a/intuition/" } })).toEqual({ file: runner.bun, args: ["/home/a/intuition/src/cli.ts", "start", "--login-env"], detached: true });

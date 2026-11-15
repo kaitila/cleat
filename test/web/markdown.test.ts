@@ -89,8 +89,8 @@ describe("blocks", () => {
 
 describe("lists", () => {
   test("bullets, right after a paragraph line, the owner's screenshot", () => {
-    expect(md("**CREANDUM DAY ZERO DRINKS**\n- **FR8 Demo Day**, 17:00-19:00\n- Dinner")).toBe(
-      "<p><strong>CREANDUM DAY ZERO DRINKS</strong></p><ul><li><p><strong>FR8 Demo Day</strong>, 17:00-19:00</p></li><li><p>Dinner</p></li></ul>",
+    expect(md("**SPRING MEETUP**\n- **Lightning Talks**, 17:00-19:00\n- Dinner")).toBe(
+      "<p><strong>SPRING MEETUP</strong></p><ul><li><p><strong>Lightning Talks</strong>, 17:00-19:00</p></li><li><p>Dinner</p></li></ul>",
     );
   });
   test("numbered, with a start, and nested lists of both kinds", () => {

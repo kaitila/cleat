@@ -29,10 +29,10 @@ Per platform:
 The setup command checks each of these and prints a one-line fix for anything missing.
 
 ## Install
-In a terminal (on Windows, a WSL terminal):
+In a terminal (on Windows, a WSL terminal), clone this repository (its GitHub page gives the URL under **Code**), then in the clone run:
 
 ```sh
-git clone https://github.com/kaitila/intuition && cd intuition && bun install && bun src/cli.ts setup
+bun install && bun src/cli.ts setup
 ```
 
 `setup` asks a few questions and takes a fresh clone to a running app:

@@ -7,13 +7,14 @@ const WEB = join(import.meta.dir, "..", "..", "src", "web");
 // A plain JavaScript module with no types: imported by a computed path, so tsc leaves it alone.
 const modulePath = join(WEB, "prompt.js");
 type Attachment = { capturedAt: string; kind: "image"; imagePath: string } | { capturedAt: string; kind: "text"; text: string };
-const { initialWorkspace, altDigit, errorText, UNREACHABLE, attachmentOf, preview, sessionBody, FRESH_MS, CLIPBOARD_POLLS } = (await import(modulePath)) as {
+const { initialWorkspace, noWorkspaceText, altDigit, errorText, UNREACHABLE, attachmentOf, preview, sessionBody, FRESH_MS, CLIPBOARD_POLLS } = (await import(modulePath)) as {
   attachmentOf(capture: unknown, now?: number): Attachment | null;
   preview(text: string): string;
   sessionBody(workspace: string, task: string, attachment: Attachment | null): { workspace: string; prompt: string; imagePath?: string };
   FRESH_MS: number;
   CLIPBOARD_POLLS: number[];
   initialWorkspace(workspaces: { name: string; exists: boolean }[], lastUsed: string | null): string | null;
+  noWorkspaceText(workspaces: unknown[]): string;
   altDigit(event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; code?: string; key?: string }): number | null;
   errorText(status: number, body: unknown): string;
   UNREACHABLE: string;
@@ -48,6 +49,13 @@ describe("the runner serves the pop-up", () => {
 });
 
 // That prompt.css has no colours or sizes of its own is test/web/design.test.ts.
+
+describe("noWorkspaceText", () => {
+  test("with none, it says to add one in Settings; with only missing folders, to fix their paths", () => {
+    expect(noWorkspaceText([])).toBe("no workspaces yet: add one in Settings, from the tray menu");
+    expect(noWorkspaceText([{ name: "gone", exists: false }])).toContain("fix the paths in Settings");
+  });
+});
 
 describe("initialWorkspace", () => {
   const list = [

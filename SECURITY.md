@@ -14,7 +14,7 @@ intuition starts Claude Code agents that can read and change files and run comma
 What it does not protect against: another program running as your user on the same machine can talk to the runner, as it could run `claude` itself. Treat access to your user account as access to your agents.
 
 ## Reporting a problem
-Please don't open a public issue for a security problem. Report it privately through GitHub: on [the repository](https://github.com/kaitila/intuition), open **Security**, then **Report a vulnerability**. Say what you found, how to reproduce it, and which version (`git rev-parse HEAD`) and platform you used.
+Please don't open a public issue for a security problem. Report it privately through GitHub: on the repository's GitHub page, open **Security**, then **Report a vulnerability**. Say what you found, how to reproduce it, and which version (`git rev-parse HEAD`) and platform you used.
 
 You can expect an answer within a week. A confirmed problem is fixed on `main`, and the advisory is published once the fix is in, with credit to you unless you'd rather not.
 
