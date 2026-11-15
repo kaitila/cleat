@@ -9,6 +9,7 @@ import { dockBounds, type DockState, islandRect } from "../../shell/src/dock";
 import { dockArea, opaqueDockBounds } from "../../shell/src/os";
 import { cropPlan, SELF_TEST_CROP } from "../../shell/src/snip";
 import type { Area } from "../../shell/src/geometry";
+import { parseRunnerSettings, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PAGE, SETTINGS_WINDOW } from "../../shell/src/prefs";
 import type { SelfTestResult } from "../../shell/src/result";
 import { HOST, type ClipboardPostRequest } from "../shared/protocol";
 import { electron, install } from "./install";
@@ -45,16 +46,43 @@ export const STUB_SESSION = "self-test-session";
 /** What the stub runner received from the shell. */
 export interface Seen {
   posts: ClipboardPostRequest[];
+  /** Every PUT /api/settings it took, in order: the shell's migration first, then the self-test's own and the tray's. */
+  puts: RunnerSettings[];
 }
 
-/** Just enough of the runner for the shell: /health, the three pages, the real snip page's files, no workspaces, and POST /api/clipboard, which it records. */
+/** The stub's settings at its start: as a runner that has never had a shell, so the shell migrates. */
+export function stubSettings(port: number): RunnerSettings {
+  return { theme: "system", permissionMode: "auto", workspaces: [], shell: null, port };
+}
+
+/**
+ * Just enough of the runner for the shell: /health, the pages, the real snip page's files, no workspaces,
+ * POST /api/clipboard, which it records, and the settings: GET and PUT /api/settings, which records each
+ * PUT and sends { type: "settings" } to every socket on /ws, as the real runner does.
+ */
 export function stubRunner() {
   const posts: ClipboardPostRequest[] = [];
+  const puts: RunnerSettings[] = [];
+  const sockets = new Set<Bun.ServerWebSocket<undefined>>();
+  let stored: RunnerSettings;
   const server = Bun.serve({
     hostname: HOST,
     port: 0,
-    async fetch(req) {
+    async fetch(req, srv) {
       const path = new URL(req.url).pathname;
+      if (req.method === "GET" && path === "/ws") return srv.upgrade(req, { data: undefined }) ? undefined : Response.json({ error: "expected a WebSocket upgrade" }, { status: 400 });
+      if (req.method === "GET" && path === "/api/settings") return Response.json(stored);
+      if (req.method === "PUT" && path === "/api/settings") {
+        const body = parseRunnerSettings(await req.json().catch(() => null));
+        if (!body) return Response.json({ error: "not settings", field: "settings" }, { status: 400 });
+        puts.push(body);
+        stored = { ...body, port: stored.port };
+        const message = JSON.stringify({ type: "settings", settings: stored });
+        for (const ws of sockets) ws.send(message);
+        return Response.json(stored);
+      }
+      // The Settings page: the real one once src/web has it, else a stand-in. /settings is its alias.
+      if (req.method === "GET" && (path === "/settings" || (path === SETTINGS_PAGE && !existsSync(join(WEB, "settings.html"))))) return new Response(PAGE, { headers: { "content-type": "text/html" } });
       if (req.method === "GET" && path === "/health") return Response.json({ ok: true, version: "self-test" });
       if (req.method === "GET" && (path === "/" || path === "/prompt")) return new Response(PAGE, { headers: { "content-type": "text/html" } });
       // /dock?silent: the same page without its call, as a page that never got as far as reporting a state.
@@ -73,8 +101,19 @@ export function stubRunner() {
       }
       return Response.json({ error: "not found" }, { status: 404 });
     },
+    websocket: {
+      open(ws) {
+        sockets.add(ws);
+        ws.send(JSON.stringify({ type: "hello", sessions: [] }));
+      },
+      close(ws) {
+        sockets.delete(ws);
+      },
+      message() {},
+    },
   });
-  return { url: `http://${HOST}:${server.port}`, posts, stop: () => server.stop(true) };
+  stored = stubSettings(server.port ?? 0);
+  return { url: `http://${HOST}:${server.port}`, posts, puts, settings: () => stored, stop: () => server.stop(true) };
 }
 
 function isArea(value: unknown): value is Area {
@@ -128,7 +167,7 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   const { layout } = where;
   const withheld = captureWithheld(r, where);
   const bad: string[] = [...(r.errors ?? []).map((e) => `the shell reported: ${e}`)];
-  const { posts } = seen;
+  const { posts, puts } = seen;
   const need = (ok: unknown, what: string) => {
     if (!ok) bad.push(what);
   };
@@ -210,6 +249,29 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   need(r.dockHiddenWithoutRunner, "the dock was not hidden when the runner stopped answering (or hid at the first missed check)");
   need(r.dockShownAgain, "the dock did not load and show again when the runner answered");
 
+  // Settings. The migration: the old file's values, and start on login as it was read, sent once, first.
+  const migrated = { hotkey: SELF_TEST_PREFS.hotkey, snipHotkey: SELF_TEST_PREFS.snipHotkey, dock: false, startOnLogin: r.openAtLogin };
+  need(JSON.stringify(puts[0]?.shell) === JSON.stringify(migrated), `the shell's first PUT /api/settings carried ${JSON.stringify(puts[0]?.shell)}, not the old file's values ${JSON.stringify(migrated)}`);
+  need(puts.filter((p) => p.shell && p.shell.hotkey === SELF_TEST_PREFS.hotkey && !p.shell.dock).length === 1, "the migration was sent more than once, or not at all");
+  need(JSON.stringify(r.settingsFileKeys) === JSON.stringify(["runnerUrl"]), `after the migration the shell's file has ${JSON.stringify(r.settingsFileKeys)}, not runnerUrl alone`);
+  need(r.settingsHotkeyRegistered, "after the migration the file's hotkeys were not the ones registered");
+  need(r.settingsHotkeyChanged, "a new hotkey from the runner was not registered, or the old one was not released");
+  need(r.settingsInvalidHotkeyKept, "a hotkey that is not a valid accelerator did not leave the one before it working");
+  need(r.settingsTakenHotkeyKept, "a hotkey that is taken did not leave the one before it working");
+  const notices = Array.isArray(r.settingsNotices) ? r.settingsNotices : [];
+  need(notices.length === 2 && notices[0]?.includes(SELF_TEST_PREFS.invalid) && notices[1]?.includes(SELF_TEST_PREFS.snipHotkey) && notices.every((n) => n.includes(`${SELF_TEST_PREFS.changed} still works`)),
+    `the notifications for the two hotkeys that could not be set were ${JSON.stringify(r.settingsNotices)}, not one naming each and the one that still works`);
+  need(puts.some((p) => p.shell?.dock === true), "the tray's Show dock did not write to the runner");
+  need(r.settingsDockShown, "the dock was not shown at once when the setting turned it on");
+  need(r.settingsDockHidden, "the dock was not closed at once when the setting turned it off");
+  need(r.settingsTheme === "dark", `the shell's windows' theme was ${r.settingsTheme} after the setting said dark`);
+  need(typeof r.settingsOpenAtLogin === "boolean" && r.settingsOpenAtLogin === r.openAtLogin, `start on login was ${r.openAtLogin} at the start and ${r.settingsOpenAtLogin} at the end: the self-test must not change it`);
+  const settingsPage = `${runnerUrl}${SETTINGS_PAGE}`;
+  need(r.settingsWindowUrl === settingsPage, `the Settings window loaded ${r.settingsWindowUrl}, not ${settingsPage}`);
+  need(near(r.settingsWindowWidth, SETTINGS_WINDOW.width) && near(r.settingsWindowHeight, SETTINGS_WINDOW.height), `the Settings window is ${r.settingsWindowWidth}x${r.settingsWindowHeight}, not ${SETTINGS_WINDOW.width}x${SETTINGS_WINDOW.height}`);
+  need(r.settingsWindowReused, "opening Settings again made a second window");
+  need(r.settingsLinkOpened === settingsPage, `a page's link to /settings opened ${r.settingsLinkOpened}, not the Settings window on ${settingsPage}`);
+
   need(Array.isArray(r.externalLinks) && JSON.stringify([...r.externalLinks].sort()) === JSON.stringify(expectedExternal(runnerUrl)), `the links handed to the browser were ${JSON.stringify(r.externalLinks)}, not ${JSON.stringify(expectedExternal(runnerUrl))}`);
 
   need(r.snipHotkeyRegistered, "the snip hotkey did not register");
@@ -279,7 +341,7 @@ export async function selfTestRun(): Promise<number> {
   const written: string[] = [];
   try {
     const shell = electron(paths, ["--self-test", platform.appArg(resultFile), "--runner-url", runner.url], false, platform);
-    const timer = setTimeout(() => shell.kill(), 90_000);
+    const timer = setTimeout(() => shell.kill(), 120_000);
     await shell.exited;
     clearTimeout(timer);
     if (!existsSync(resultFile)) {

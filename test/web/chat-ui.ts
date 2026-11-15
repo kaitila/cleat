@@ -140,6 +140,36 @@ try {
   await page.emulateMedia({ colorScheme: "dark" });
   await shot("chat-dark");
   await page.emulateMedia({ colorScheme: "light" });
+
+  // ---- the theme setting (docs/design.md, "Themes"): theme.js first, then live ----
+  check(await page.evaluate(() => document.head.querySelector("script, link")?.getAttribute("src") === "/assets/theme.js"), "theme.js is the first thing the page loads");
+  const gear = page.locator(".sidebar-head .settings-link");
+  check((await gear.getAttribute("href")) === "/assets/settings.html" && (await gear.getAttribute("aria-label")) === "Settings", "the sidebar has a gear that opens the settings page");
+  const colours = () => page.evaluate(() => ({ theme: document.documentElement.getAttribute("data-theme"), bg: getComputedStyle(document.body).backgroundColor, sidebar: getComputedStyle(document.querySelector(".sidebar")!).backgroundColor })) as Promise<{ theme: string | null; bg: string; sidebar: string }>;
+  const LIGHT = { bg: "rgb(255, 255, 255)", sidebar: "rgb(246, 246, 247)" };
+  const DARK = { bg: "rgb(21, 21, 23)", sidebar: "rgb(15, 15, 17)" };
+  // Another page of the runner chooses a theme (as the settings page does), and this one follows
+  // it live, without a reload: theme.js's storage listener. Each is forced against the scheme.
+  const other = await context.newPage();
+  await other.goto(`${runner.url}/assets/base.css`);
+  for (const [forced, scheme, want] of [["light", "dark", LIGHT], ["dark", "light", DARK]] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await other.evaluate((t: string) => localStorage.setItem("intuition.theme", t), forced);
+    await page.waitForFunction((t: string) => document.documentElement.getAttribute("data-theme") === t, forced);
+    await page.waitForTimeout(250);
+    const c = await colours();
+    check(c.bg === want.bg && c.sidebar === want.sidebar, `forced ${forced} under a ${scheme} scheme, the chat view follows live (${c.bg}, sidebar ${c.sidebar})`);
+    await shot(`chat-forced-${forced}`);
+  }
+  await page.reload();
+  await page.locator(".msg.assistant").first().waitFor();
+  check((await colours()).theme === "dark", "a page opened later starts in the cached theme");
+  await other.evaluate(() => localStorage.setItem("intuition.theme", "system"));
+  await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.waitForTimeout(250);
+  check((await colours()).bg === LIGHT.bg, "back on system, it follows the scheme again");
+  await other.close();
   // The same session at two device pixels per CSS pixel: hairlines become half a CSS pixel.
   const denseBrowser = await launch(["--force-device-scale-factor=2"]);
   for (const colorScheme of ["light", "dark"] as const) {

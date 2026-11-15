@@ -17,12 +17,6 @@ export function defaultHotkeys(os: ShellOs): { hotkey: string; snipHotkey: strin
   return os === "macos" ? { hotkey: "Command+Shift+Space", snipHotkey: "Command+Shift+S" } : { hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S" };
 }
 
-/** The self-test's hotkeys: unlikely to be anyone's, so it never clashes with a running shell. */
-export function selfTestHotkeys(os: ShellOs): { hotkey: string; snipHotkey: string } {
-  const mod = os === "macos" ? "Command+Alt+Shift" : "Control+Alt+Shift";
-  return { hotkey: `${mod}+F11`, snipHotkey: `${mod}+F10` };
-}
-
 // --- The runner ---
 
 /** Where a shell on macOS or Linux finds the runner: this repo with this bun, on the same machine. `shell install` writes it. */

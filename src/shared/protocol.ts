@@ -87,7 +87,34 @@ export type ServerMessage =
   /** A piece of assistant text as it streams. Not stored: the full text follows as an assistant_text event. */
   | { type: "delta"; sessionId: string; text: string }
   /** A notification as it is recorded. Not replayed on connect: GET /api/notifications has the kept ones. */
-  | { type: "notification"; notification: Notification };
+  | { type: "notification"; notification: Notification }
+  /** The whole Settings, after every change (PUT /api/settings). Not sent on connect: GET /api/settings has them. */
+  | { type: "settings"; settings: Settings };
+
+export type Theme = "system" | "light" | "dark";
+
+/** The Windows shell's own settings. The runner only stores them; the shell applies them. */
+export interface ShellSettings {
+  /** Electron accelerators, e.g. "Alt+Space". */
+  hotkey: string;
+  snipHotkey: string;
+  dock: boolean;
+  startOnLogin: boolean;
+}
+
+/**
+ * The user's settings, owned by the runner and kept in its config file (docs/protocol.md, "Settings").
+ * `port` is the port the runner serves on: read-only here, it is changed only in the file.
+ */
+export interface Settings {
+  theme: Theme;
+  permissionMode: PermissionMode;
+  /** In order: the first is the default when none was used. `path` as written (it may start with ~/). */
+  workspaces: { name: string; path: string; permissionMode?: PermissionMode }[];
+  /** null until something sets it: the shell then sends its local values once and reads them from here after. */
+  shell: ShellSettings | null;
+  port: number;
+}
 
 export interface Notification {
   /** Global, starts at 1 each time the runner starts. GET /api/notifications?after=<seq> returns the later ones. */
@@ -123,3 +150,7 @@ export interface ApprovalRequest { decision: ApprovalDecision }
 export interface ClipboardPostRequest { text?: string; imagePath?: string }
 export interface NotificationsResponse { notifications: Notification[]; latest: number }
 export interface ErrorResponse { error: string }
+/** The body of PUT /api/settings: a whole Settings. A port in it is ignored. */
+export type SettingsRequest = Omit<Settings, "port"> & { port?: number };
+/** The 400 of PUT /api/settings: the first bad field as a dotted path ("workspaces.1.path"), and why. */
+export interface SettingsErrorResponse { error: string; field: string }

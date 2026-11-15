@@ -106,11 +106,6 @@
   --shadow: 0 0 0 var(--hairline) rgb(0 0 0 / 0.08), 0 8px 28px rgb(0 0 0 / 0.14);
   --motion: 150ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  /* The dock's island: how long it takes to grow and to shrink, and the curve it grows on, fast out
-     of the pill and a long settle, never past its size. */
-  --island-open: 320ms;
-  --island-close: 220ms;
-  --settle: cubic-bezier(0.22, 1, 0.36, 1);
   /* Springs (docs/design.md, "Motion"): src/web/motion.js makes these from a stiffness and a
      damping (`bun src/web/motion.js`), and test/web/motion.test.ts fails when they differ. Each
      curve goes with its duration. Gentle: near critical, for things that appear or slide. Bouncy:
@@ -153,7 +148,7 @@
     --shadow: 0 0 0 var(--hairline) rgb(255 255 255 / 0.1), 0 8px 28px rgb(0 0 0 / 0.6);
   }
 }
-/* Dark whatever the scheme: the dock's page (<html class="dark">) is one dark island on any desktop.
+/* Dark whatever the scheme: the dock's page (<body class="dark">) is one dark island on any desktop.
    The same values as the dark scheme above; test/web/dock.test.ts fails when the two differ. */
 .dark {
   color-scheme: dark;

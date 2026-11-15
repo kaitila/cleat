@@ -1,5 +1,5 @@
 // The shell on macOS and Linux: what differs per OS (shell/src/os.ts), start on login's files
-// (shell/src/login.ts), the settings' local runner, and the self-test judged on each layout.
+// (shell/src/login.ts) and the settings' local runner. The self-test on each layout is in shell.test.ts.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -7,14 +7,13 @@ import { dockBounds, islandRect } from "../../shell/src/dock";
 import { autostartEntry, autostartFile, LAUNCH_AGENT, launchAgentFile, launchAgentPlist } from "../../shell/src/login";
 import {
   defaultHotkeys, dockArea, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
-  runnerDownHint, runnerSpawn, SCREEN_RECORDING_PANE, screenAllowed, selfTestHotkeys, shellOs,
+  runnerDownHint, runnerSpawn, SCREEN_RECORDING_PANE, screenAllowed, shellOs,
 } from "../../shell/src/os";
-import type { SelfTestResult } from "../../shell/src/result";
-import { defaultSettings, parseSettings } from "../../shell/src/settings";
-import { SELF_TEST_CROP } from "../../shell/src/snip";
+import { SHELL_DEFAULTS } from "../../shell/src/prefs";
+import { parseSettings } from "../../shell/src/settings";
 import { autostartEntry as cliAutostartEntry, parseLocalRunner as cliParseLocalRunner } from "../../src/shell/platform";
 import { REPO } from "../../src/shell/paths";
-import { captureWithheld, expectedExternal, problems, savedPathPattern, skipped, STUB_SESSION } from "../../src/shell/selftest-run";
+import { savedPathPattern } from "../../src/shell/selftest-run";
 
 const runner = { kind: "local" as const, repo: "/home/a/intuition", bun: "/home/a/.bun/bin/bun" };
 const wsl = { distro: "Ubuntu", repo: "/root/intuition", bun: "/root/.bun/bin/bun" };
@@ -24,21 +23,22 @@ describe("the OS", () => {
     expect([shellOs("win32"), shellOs("darwin"), shellOs("linux"), shellOs("freebsd")]).toEqual(["windows", "macos", "linux", "linux"]);
   });
 
-  test("hotkeys: Command+Shift on a Mac, Control+Alt elsewhere; the self-test's never clash", () => {
+  test("hotkeys: Command+Shift on a Mac, Control+Alt elsewhere", () => {
     expect(defaultHotkeys("macos")).toEqual({ hotkey: "Command+Shift+Space", snipHotkey: "Command+Shift+S" });
     for (const os of ["windows", "linux"] as const) expect(defaultHotkeys(os)).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S" });
-    for (const os of ["windows", "macos", "linux"] as const) {
-      const mine = selfTestHotkeys(os);
-      expect(Object.values(mine)).not.toContain(defaultHotkeys(os).hotkey);
-      expect(mine.hotkey).not.toBe(mine.snipHotkey);
-    }
-    expect(selfTestHotkeys("windows")).toEqual({ hotkey: "Control+Alt+Shift+F11", snipHotkey: "Control+Alt+Shift+F10" });
   });
 
-  test("the settings' defaults follow the OS, and a file's own hotkeys win", () => {
-    expect(defaultSettings("macos").hotkey).toBe("Command+Shift+Space");
-    expect(parseSettings("{}", defaultSettings("macos")).snipHotkey).toBe("Command+Shift+S");
-    expect(parseSettings('{"hotkey":"Alt+F9"}', defaultSettings("macos")).hotkey).toBe("Alt+F9");
+  test("savedPathPattern: native paths are <temp>/intuition/<kind>-<time>.png; Windows ones as before", () => {
+    const clipPath = "/var/folders/xy/T/intuition/clip-20261115-090507-042.png";
+    expect(savedPathPattern("macos", "clip").test(clipPath)).toBe(true);
+    expect(savedPathPattern("linux", "snip").test("/tmp/intuition/snip-20261115-090508-000.png")).toBe(true);
+    expect(savedPathPattern("linux", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe(false);
+    expect(savedPathPattern("windows-wsl", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe(true);
+    expect(savedPathPattern("windows-wsl", "clip").test(clipPath)).toBe(false);
+  });
+
+  test("the shell's defaults, which it sends the runner once, follow the OS it runs on", () => {
+    expect(SHELL_DEFAULTS).toEqual({ ...defaultHotkeys(shellOs()), dock: true });
   });
 });
 
@@ -165,92 +165,5 @@ describe("macOS", () => {
     expect(main).toContain('systemPreferences.getMediaAccessStatus("screen")');
     // On Linux the ozone switch is set before ready, with a DISPLAY only.
     expect(main).toContain('if (OS === "linux" && linuxOzone() === "x11" && !app.commandLine.hasSwitch("ozone-platform")) app.commandLine.appendSwitch("ozone-platform", "x11");');
-  });
-});
-
-describe("the self-test on each layout", () => {
-  const display = { x: 0, y: 0, width: 1512, height: 982 };
-  const workArea = { x: 0, y: 38, width: 1512, height: 944 };
-  const url = "http://127.0.0.1:5000";
-  const clipPath = "/var/folders/xy/T/intuition/clip-20261115-090507-042.png";
-  const snipPath = "/var/folders/xy/T/intuition/snip-20261115-090508-000.png";
-  const place = dockBounds(dockArea("macos", display, workArea));
-  const mac: SelfTestResult = {
-    hotkeyRegistered: true, trayCreated: true, textCaptured: true, textPosted: true, imageCaptured: true, imagePosted: true, imagePath: clipPath,
-    notificationsSupported: true, popupCreated: true, popupWidth: 560, popupHeight: 380, popupUrl: `${url}/prompt`,
-    popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
-    noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
-    dockOffNoWindow: true, dockCreated: true, dockUrl: `${url}/dock`, dockVisible: true, dockBridge: "object:setState:undefined:undefined",
-    primaryDisplay: display, dockIgnoresMouseBeforeLoad: true, dockIdleBounds: place, dockIdleFocusable: false, dockIdleFocused: false,
-    dockMouseOnIdleIsland: true, dockMouseAwayIgnored: true, dockMouseBelowPillIgnored: true,
-    dockPeekBounds: place, dockPeekFocusable: false, dockMouseOnPeekIsland: true,
-    dockOpenBounds: place, dockOpenFocusable: true, dockMouseOnOpenIsland: true, dockOtherValueIgnored: true,
-    dockBackBounds: place, dockBackFocusable: false, dockForeignOriginIgnored: true,
-    dockIgnoresMouseUnreported: true, dockIgnoresMouseAfterCrash: true,
-    dockOpenedChatUrl: `${url}/?session=${STUB_SESSION}`, dockOpenedPromptUrl: `${url}/prompt`,
-    dockOtherWindowRefused: true, dockHiddenWithoutRunner: true, dockShownAgain: true,
-    snipHotkeyRegistered: true, snipDisplays: [{ bounds: display, scaleFactor: 1 }], snipOverlayBounds: [display], snipOverlaysShown: true,
-    snipUrl: `${url}/assets/snip.html`, snipMs: 240, snipPhases: { warm: 1, captured: 150, drawn: 230 }, snipCaptured: true,
-    snipBridge: "object:close,crop,getCapture:undefined:undefined", snipCropRect: SELF_TEST_CROP, snipCropPath: snipPath, snipBadRectsRefused: true,
-    snipClosed: true, snipEscClosed: true, externalLinks: expectedExternal(url), errors: [],
-    os: "macos", dockTransparent: true, primaryWorkArea: workArea, screenAccess: "granted",
-  };
-  const posts = [{ text: "intuition self-test 1" }, { imagePath: clipPath }];
-  // SELF_TEST_CROP at 1x: 10.5..111.5 x 20.25..69.75 is 10..112 x 20..70.
-  const header = (width: number, height: number) => {
-    const b = Buffer.alloc(24);
-    b.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    b.writeUInt32BE(width, 16);
-    b.writeUInt32BE(height, 20);
-    return b;
-  };
-  const check = (r: Partial<SelfTestResult>, where: Parameters<typeof problems>[4] = { layout: "macos" }) => problems(r, { posts }, url, () => header(102, 50), where);
-
-  test("native paths are <temp>/intuition/<kind>-<time>.png; Windows ones as before", () => {
-    expect(savedPathPattern("macos", "clip").test(clipPath)).toBe(true);
-    expect(savedPathPattern("linux", "snip").test("/tmp/intuition/snip-20261115-090508-000.png")).toBe(true);
-    expect(savedPathPattern("linux", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe(false);
-    expect(savedPathPattern("windows-wsl", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe(true);
-    expect(savedPathPattern("windows-wsl", "clip").test(clipPath)).toBe(false);
-  });
-
-  test("a clean Mac result has no problems, and the dock is judged below the menu bar", () => {
-    expect(check(mac)).toEqual([]);
-    const top = dockBounds(display);
-    expect(check({ ...mac, dockIdleBounds: top, dockPeekBounds: top, dockOpenBounds: top, dockBackBounds: top })).toHaveLength(4);
-  });
-
-  test("the shell must have run on the layout's OS, with Windows paths only on Windows", () => {
-    expect(check({ ...mac, os: "windows" })).toEqual(["the shell ran on windows, not macos"]);
-    expect(check(mac, { layout: "linux" }).length).toBeGreaterThan(0);
-  });
-
-  test("macOS without Screen Recording: the capture, crop and time are skipped and named, not failed", () => {
-    const denied = { ...mac, screenAccess: "denied", snipCaptured: false, snipCropPath: null, snipMs: 3100 };
-    expect(check(denied)).toEqual([]);
-    expect(skipped(denied, { layout: "macos" })).toEqual([expect.stringContaining("macOS has not given Screen Recording (denied)")]);
-    // Granted but empty is a failure, and so is an empty capture on another layout.
-    expect(check({ ...denied, screenAccess: "granted" }).length).toBeGreaterThan(0);
-    expect(captureWithheld({ ...denied, os: "linux" }, { layout: "linux" })).toBeNull();
-    expect(skipped(mac, { layout: "macos" })).toEqual([]);
-  });
-
-  test("WSLg: an empty capture is skipped and named; a pixel short on the overlay is taken on Linux only", () => {
-    const linuxPlace = dockBounds(display);
-    const linux = { ...mac, os: "linux" as const, primaryWorkArea: display, dockIdleBounds: linuxPlace, dockPeekBounds: linuxPlace, dockOpenBounds: linuxPlace, dockBackBounds: linuxPlace,
-      snipCaptured: false, snipCropPath: null, snipMs: 3013, snipOverlayBounds: [{ ...display, width: 1511, height: 981 }] };
-    expect(check(linux, { layout: "linux", wslg: true })).toEqual([]);
-    expect(skipped(linux, { layout: "linux", wslg: true })).toEqual([expect.stringContaining("WSLg gives Electron no pixels")]);
-    expect(check(linux, { layout: "linux" }).length).toBeGreaterThan(0);
-    expect(check({ ...linux, snipOverlayBounds: [{ ...display, width: 1510 }] }, { layout: "linux", wslg: true }).length).toBe(1);
-  });
-
-  test("an opaque dock is judged as the island of each state", () => {
-    const linuxPlace = dockBounds(display);
-    const island = (s: "idle" | "peek" | "open") => opaqueDockBounds(linuxPlace, islandRect(s));
-    const opaque = { ...mac, os: "linux" as const, primaryWorkArea: display, dockTransparent: false,
-      dockIdleBounds: island("idle"), dockPeekBounds: island("peek"), dockOpenBounds: island("open"), dockBackBounds: island("idle") };
-    expect(check(opaque, { layout: "linux" })).toEqual([]);
-    expect(check({ ...opaque, dockTransparent: true }, { layout: "linux" })).toHaveLength(3);
   });
 });

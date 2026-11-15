@@ -16,17 +16,32 @@ The commands below are written `intuition …`. That command exists once `bun sr
 | `intuition shell login on` | Start the shell when you log in to Windows. `off` turns that off, `status` says which it is. See "Start on login" below. |
 | `intuition shell selftest` | The same as `bun src/shell/selftest-run.ts`, below. |
 
-After installing again, stop and start the shell: a running one keeps the old bundle and the old settings.
+After installing again, stop and start the shell: a running one keeps the old bundle.
 
 ## Settings
-`%APPDATA%\intuition-shell\settings.json`, written with these defaults on first start. Stop and start the shell after changing it.
+The person's settings live in the runner, not in the shell: the Settings window (tray > Settings…), the tray's checkboxes and the runner's `/api/settings` all change the same values, and the shell applies every change at once, without a restart. Why it is built this way: [D0021](decisions/D0021-shell-settings-from-the-runner.md). The API is in [protocol](protocol.md) under "Settings".
+
+What the shell applies, from the runner's settings:
+- `shell.hotkey`: an [Electron accelerator](https://www.electronjs.org/docs/latest/api/accelerator) that captures the clipboard and opens the pop-up. `Control+Alt+Space` by default.
+- `shell.snipHotkey`: an Electron accelerator for the snip (below). `Control+Alt+S` by default.
+- `shell.dock`: whether the dock is shown. On by default.
+- `shell.startOnLogin`: whether Windows starts the shell at login (see "Start on login").
+- `theme` (`system`, `light` or `dark`): the theme of the shell's windows, through `nativeTheme.themeSource`. Their title bars, scrollbars and the pages' `prefers-color-scheme` follow it.
+
+**How it hears of a change.** The shell keeps one WebSocket to the runner's `/ws` open in its main process. On every connect it asks `GET /api/settings`, and it applies each `{ type: "settings" }` message. When the socket closes (the runner stopped or restarted) it connects again after 1, 2, 4 and 8 seconds, then every 15, without a word. The socket never starts the runner.
+
+**A hotkey change** registers the new hotkey first and releases the old one only once that has worked. If the new one cannot be registered (another program holds it, the other hotkey is the same, or it is not a valid accelerator), the old one keeps working. A notification names the hotkey that failed and the one that still works: "intuition: the hotkey could not be set" (or "the snip hotkey"). The two hotkeys can trade keys in one change.
+
+**The tray's checkboxes** ("Show dock", "Start on login") write to the runner (`GET`, then `PUT` of the whole settings) and apply what it stored, so the tray and the Settings page always agree. If the runner does not answer, or is older than the shell and has no settings, nothing changes and a notification says so ("the setting was not changed").
+
+**Before the runner answers** at the shell's start, the hotkeys are the old file's values if it still has them, else the defaults, and they move as soon as the runner's settings arrive.
+
+### The shell's file
+`%APPDATA%\intuition-shell\settings.json` keeps two keys. It is written with the first one on first start:
 
 ```json
 {
   "runnerUrl": "http://127.0.0.1:4777",
-  "hotkey": "Control+Alt+Space",
-  "snipHotkey": "Control+Alt+S",
-  "dock": true,
   "wsl": {
     "distro": "Ubuntu",
     "repo": "/root/projects/intuition",
@@ -35,24 +50,24 @@ After installing again, stop and start the shell: a running one keeps the old bu
 }
 ```
 
-- `runnerUrl`: where the runner listens. The shell's windows load this origin and nothing else.
-- `hotkey`: an [Electron accelerator](https://www.electronjs.org/docs/latest/api/accelerator). If another program holds it, the shell says so in a notification at start.
-- `snipHotkey`: an Electron accelerator for the snip (below). It too is said in a notification at start when another program holds it ("the snip hotkey is taken"). Empty or not a string counts as missing.
-- `dock`: whether the dock is shown. The tray's "Show dock" checkbox changes it at once and writes it here, keeping everything else in the file. Anything but `false` counts as `true`.
+- `runnerUrl`: where the runner listens. The shell's windows load this origin and nothing else. Stop and start the shell after changing it.
 - `wsl`: where the runner lives, so the shell can start it. Not in the defaults: `shell install` and `up` write it, from `WSL_DISTRO_NAME`, the repo the command was run from and the bun that ran it, and keep everything else in the file. `distro` is letters, digits, `.`, `_` and `-`; `repo` and `bun` are absolute WSL paths. Run from a git worktree, the command writes that worktree's path.
 
-A value that is missing or malformed falls back to its default; a `wsl` with any part missing or malformed counts as absent, and the shell then starts no runner.
+A value that is missing or malformed falls back to its default. A `wsl` with any part missing or malformed counts as absent, and the shell then starts no runner.
+
+**The migration from an older shell.** A file from before the runner kept the settings may also have `hotkey`, `snipHotkey` and `dock`. The first time the shell finds that the runner has no shell settings yet (`shell` is null), it sends those values, the defaults for any it lacks, and start on login as Windows has it now. Once the runner has stored them, it rewrites the file with `runnerUrl` and `wsl` alone (and `runner`, the same-machine layout's key from [platforms](platforms.md), when the file has it). This happens once: after that, the runner's values are the ones applied. If the runner refuses the old values (a hotkey it does not accept), the shell sends the defaults instead.
 
 ## What it does
-- **Tray**: an icon with a menu: New task, Snip, Open chat, a "Show dock" checkbox, a "Start on login" checkbox, Quit. A double-click opens the chat. There is no window at start.
+- **Tray**: an icon with a menu: New task, Snip, Open chat, Settings…, a "Show dock" checkbox, a "Start on login" checkbox, Quit. Both checkboxes write to the runner (see "Settings"). A double-click opens the chat. There is no window at start.
 - **Hotkey, and New task**: captures the clipboard and opens the pop-up, both at once. The pop-up is a frameless 560x380 window, always on top, on the runner's `/prompt`, in the middle of the display the cursor is on. Esc or a click elsewhere hides it. Pressing the hotkey while it is up focuses it. The page closes it with `window.close()`.
 - **Clipboard capture**: an image is saved as `%TEMP%\intuition\clip-<time>.png` (the newest 20 are kept) and its Windows path posted to `/api/clipboard` as `{ imagePath }`. Otherwise the text, cut to 20,000 characters, as `{ text }`. An empty clipboard posts `{}`. When the clipboard holds both an image and text, the image wins.
 - **Snip hotkey, and Snip**: freezes every display and lets the person drag an area and type the task right beside it. See "The snip" below.
 - **Links elsewhere**: a link from one of the runner's pages to `http:`, `https:` or `mailto:` on another origin opens in the default browser (`shell.openExternal`), from a new window or a link followed in the page. Anything else (`file:`, `javascript:`, other protocols, a URL with a user name or password, a redirect) opens nothing.
+- **Settings…**: a normal 720x640 window titled "intuition settings", on the runner's Settings page (`/assets/settings.html`). It is focused if already open. A link from any of the runner's pages to `/settings` or `/assets/settings.html`, opened in a new window or followed in the page, opens this window.
 - **Open chat**: a 1100x720 window on `/`, or `/?session=<id>` (`electron.exe <app> --session <id>`, and a link to `/?session=<id>` that a page, the dock among them, opens in a new window). Focused if already open.
 - **Runner not running**: when `GET /health` does not answer within 1.5 seconds, the shell starts the runner itself: at its own start, on the hotkey and New task, and on Open chat (the dock's links to the pop-up and the chat among them). It runs `wsl.exe -d <distro> --exec <bun> <repo>/src/cli.ts start --login-env` from its `wsl` settings, with no window, and asks `/health` again for up to ten seconds. The pop-up or the chat then opens as if the runner had been there; the clipboard was read when the key was pressed and is posted once the runner answers. If nothing answers after ten seconds, or there are no `wsl` settings, no window opens and a notification says the runner is not running. See "Starting the runner" below.
 - **Dock**: a clear window on the runner's `/dock` page at the top centre of the primary display, in which the page draws an island that grows when something happens or the pointer rests on it. It shows what the sessions are doing, in place of the Windows toasts the shell used to show. See "The dock" below.
-- **Notifications**: only for the shell's own trouble: the runner is not running, the runner is older than the shell (it answers but has no dock), the hotkey or the snip hotkey is taken, start on login could not be changed. Never for a session.
+- **Notifications**: only for the shell's own trouble: the runner is not running, the runner is older than the shell (it answers but has no dock), a hotkey could not be set, a tray checkbox could not be saved, start on login could not be changed. Never for a session.
 - **One instance**: a second copy hands its command line to the first and exits. That is how `shell stop` works (`--quit`).
 
 ## Starting the runner
@@ -63,11 +78,11 @@ A value that is missing or malformed falls back to its default; a `wsl` with any
 - **`bun scripts/smoke-start.ts`** runs that very command through the real `wsl.exe` for a runner in temp folders on a free port with the fake agent, and checks that the runner is still up, as its own process and with the login shell's PATH, after `wsl.exe` has returned. It needs Windows and is skipped in CI. It passed on this machine on 2026-11-13. It does not involve Electron: the shell's own spawn of `wsl.exe` (no window, from a Windows program) has not been seen.
 
 ## Start on login
-- **On and off.** The "Start on login" checkbox in the tray menu, or `intuition shell login on` and `off` from WSL. `intuition shell login status` only reads. All three use Electron's login item (`app.setLoginItemSettings`), which is a value named `intuition` under the Windows user's `Run` registry key: `"<…>\electron.exe" "<…>\intuition\shell"`. Windows lists it under Task Manager > Startup apps, where it can also be switched off.
+- **On and off.** The "Start on login" checkbox in the tray menu or on the Settings page, or `intuition shell login on` and `off` from WSL. `intuition shell login status` only reads. The checkbox and the page change the runner's `shell.startOnLogin`, and the shell sets the login item from there. `shell login on|off` sets the login item and then tells the runner, if it answers, so a running shell does not set it back. All of them use Electron's login item (`app.setLoginItemSettings`), which is a value named `intuition` under the Windows user's `Run` registry key: `"<…>\electron.exe" "<…>\intuition\shell"`. Windows lists it under Task Manager > Startup apps, where it can also be switched off.
 - **At login** Windows starts the shell, and the shell starts the runner as above. WSL has to boot first, so allow some seconds.
 - **The command and a running shell.** `shell login on` works whether or not the shell runs, and a running shell's checkbox follows it. It needs the installed bundle to know `--login`: after updating the repo, `shell install` first.
 - **It names the installed folder,** not the repo: installing again does not change it. Removing `%LOCALAPPDATA%\intuition` while it is on leaves a login item that starts nothing: turn it off first.
-- **Nothing automatic turns it on.** Not the install, not `up`, not the self-test (which reads it and prints which it is), not any test or script.
+- **Nothing automatic turns it on.** Not the install, not `up`, not the self-test (which reads it and prints which it is, and never applies the setting), not any test or script. The migration sends the runner what Windows has, so it changes nothing either.
 
 ## The dock
 The contract between the page and the shell is in [protocol](protocol.md) under "Dock". This is the shell's half: the window. The page (`/dock`) is the runner's.
@@ -79,7 +94,7 @@ The contract between the page and the shell is in [protocol](protocol.md) under 
 - **The keyboard.** In idle and peek the window cannot be focused: showing it, the island growing or a click on it takes nothing from the program the person is typing in. Only in open can it take the keyboard, when the person clicks into it; the shell never focuses it itself. Going back to idle or peek while it has the keyboard gives the focus back to the window below.
 - **Its links.** A link the page opens in a new window to `/?session=<id>` opens the chat window on that session, and one to `/prompt` captures the clipboard and opens the pop-up, as the hotkey does. Every other new window is refused.
 - **When it shows.** At the shell's start once the runner answers, and whenever the shell has started the runner. Every 4 seconds the shell asks `/health`: after two misses in a row the dock is hidden; when the runner answers again the page is loaded afresh and the dock shown, idle. A page that does not load (no answer, an HTTP error such as a 404 from a runner that has no `/dock` yet, a crashed page) hides the window: an empty clear window is never left on screen. The shell tries again at the next check. When the page fails with an HTTP error while `/health` answers, the runner is older than the shell: a notification says so once ("run intuition up"), and the dock appears by itself at the first check after the runner is restarted.
-- **Off.** Untick "Show dock" in the tray, or set `"dock": false`: the window is closed, not hidden, and nothing is created at the next start. With the dock off the shell shows nothing about sessions at all; the chat window still has everything.
+- **Off.** Untick "Show dock" in the tray or turn the dock off on the Settings page: the window is closed at once, not hidden, and nothing is created at the next start. Turned on, it loads and shows at once. With the dock off the shell shows nothing about sessions at all; the chat window still has everything.
 
 ### Why
 The decisions are [D0008](decisions/D0008-dock.md), which replaces the shell's half of [D0005](decisions/D0005-toasts.md), and [D0010](decisions/D0010-dock-fixed-window.md) for the window's one size and the mouse. The window's reasons:
@@ -106,7 +121,7 @@ The snip hotkey (`snipHotkey`, `Control+Alt+S` by default) or the tray's Snip. L
 The windows are sandboxed, with context isolation and no Node integration. Two have a preload script: the dock's, which gives its page `window.intuitionDock.setState` and nothing else (see "The dock"), and the snip overlays', which gives theirs `window.intuitionSnip` with `getCapture`, `crop` and `close` (see "The snip"). Navigation or a redirect to any origin but the runner's is refused, and so is every new window but two: a link to the runner's own chat view opens in the chat window, and the dock's link to `/prompt` opens the pop-up. A link to `http:`, `https:` or `mailto:` elsewhere goes to the default browser instead (see "Links elsewhere" above). Pages get no permissions (camera, location, notifications and the rest) except writing to the clipboard. There is no application menu, so no reload or developer-tools shortcuts.
 
 ## Self-test
-`bun src/shell/selftest-run.ts` runs on this machine only (it prints `skipped` and exits 0 when `CI` is set or there is no `/mnt/c`). It installs the shell, starts a stub runner on a free port, runs `electron.exe <app> --self-test <result file> --runner-url <stub>`, and checks the JSON the shell writes. The self-test uses its own user data folder and its own hotkeys (`Control+Alt+Shift+F11`, and `Control+Alt+Shift+F10` for the snip), so it runs beside a running shell. It opens no browser: the links it tries are only noted. It puts text and then a small image on the clipboard, then puts back what was there (text or an image; other kinds, such as copied files, are not put back). The pop-up flashes on screen for about a second, without taking focus, and so does the chat window. The dock's window is up for some seconds at the top of the screen, with nothing to see in it: the stub's dock page draws no island. The self-test crashes that page's process once, on purpose. At the end every display shows the snip's frozen overlay twice, for under a second each. Run with Windows on its lock screen, the clipboard steps fail, because nothing can use the clipboard there; the runner says so in a note.
+`bun src/shell/selftest-run.ts` runs on this machine only (it prints `skipped` and exits 0 when `CI` is set or there is no `/mnt/c`). It installs the shell, starts a stub runner on a free port, runs `electron.exe <app> --self-test <result file> --runner-url <stub>`, and checks the JSON the shell writes. The self-test uses its own user data folder and its own hotkeys (`Control+Alt+Shift+F11`, and `Control+Alt+Shift+F10` for the snip, and `Control+Alt+Shift+F12` as the changed one), so it runs beside a running shell. It shows no notification: the ones it would show are noted and checked. It opens no browser: the links it tries are only noted. It puts text and then a small image on the clipboard, then puts back what was there (text or an image; other kinds, such as copied files, are not put back). The pop-up flashes on screen for about a second, without taking focus, and so does the chat window. The dock's window is up for some seconds at the top of the screen, with nothing to see in it: the stub's dock page draws no island. The self-test crashes that page's process once, on purpose. Every display then shows the snip's frozen overlay twice, for under a second each. Last, the dock comes and goes again, and the Settings window and the chat flash up. Run with Windows on its lock screen, the clipboard steps fail, because nothing can use the clipboard there; the runner says so in a note.
 
 What it covers, on the real Windows desktop:
 - a global hotkey registers;
@@ -137,7 +152,15 @@ What it covers, on the real Windows desktop:
   - `crop` of a known rectangle (10.5, 20.25, 101x49.5 DIPs) saves `<temp>\intuition\snip-<time>.png`, and its PNG header has the size that rectangle has at the first display's scale (the test then deletes it);
   - `crop` with a negative or too large rectangle, `NaN`, `Infinity`, a string, a zero width, an extra key, `null`, an array or a path is refused, every time;
   - the page's `close()` closes every overlay, and so does Esc sent to one as a key;
-  - when the capture comes back empty (a locked desktop) it fails with one line that says so, and does not judge the crop.
+  - when the capture comes back empty (a locked desktop) it fails with one line that says so, and does not judge the crop;
+- settings, against the stub runner's `GET` and `PUT /api/settings` and its `/ws`. Each PUT is sent to every socket as a `settings` message, as the real runner does. The self-test changes the settings as the Settings page would (GET, change, PUT), so the shell hears of each change only through its socket:
+  - the migration: the self-test writes a file as an older shell did (its own hotkeys, the dock off), and the stub starts with no shell settings. The shell's first PUT carries exactly those values and start on login as it was read. It is sent once. The file then has `runnerUrl` alone, and the file's hotkeys are the ones registered;
+  - a new hotkey is registered without a restart, and the old one is released;
+  - a hotkey that is not a valid accelerator (`Control+Alt+Nope`), and one that is taken (the snip hotkey's), each leave the one before working. A notification would have named each, and the one that still works;
+  - "Show dock" through the tray's own code path writes to the runner and shows the dock at once. Turned off from the page, the dock's window is closed at once;
+  - the theme set to dark sets `nativeTheme.themeSource` to dark, and is set back;
+  - start on login is read again at the end and is what it was at the start: nothing changed it;
+  - the Settings window opens at 720x640 on `/assets/settings.html` (the stub serves a stand-in until `src/web` has the page). Opening it again gives the same window. The chat page's link to `/settings` opens it.
 
 What nobody has seen. The self-test cannot press keys, click or look at the screen, and the shell was written from WSL:
 - the hotkey being pressed: only that it registers. Pressing it, and pressing it again to focus the pop-up, are untested;
@@ -145,26 +168,28 @@ What nobody has seen. The self-test cannot press keys, click or look at the scre
 - the pop-up taking keyboard focus, hiding on Esc and hiding on a click elsewhere;
 - the chat window;
 - **the dock on screen. Nobody has seen it**: not since it stopped resizing. The owner saw the first one, which resized its window, on 2026-11-13 and found it too tall and its animation janky; this one has been seen by nobody. The self-test reads the window's bounds, whether it can be focused, and what the shell told it about the mouse for a made-up cursor, and that is all it knows. Unseen, each of them: whether the window is really clear around the island or shows a black or white rectangle, a border or a shadow; whether it sits above a maximised or a full-screen window; whether it stays out of Alt+Tab and the taskbar, also while open; whether a click beside the pill, and under where the open panel was, really lands on the window below; whether the island grows smoothly; whether showing it leaves the active program active (its title bar stays lit, nothing flashes in the taskbar) and what Windows activates when the dock gives the focus back; whether typing works in it once clicked in open; where it lands with a second display, a taskbar at the top, or a scale other than the one here. The dock's page exists now (`src/web/dock.js`) and is driven in headless Chromium by `test/web/dock-ui.ts`, with a stand-in for the bridge; nobody has seen it in the shell's window. Both self-test runs of 2026-11-13 that covered the dock ran with Windows on its lock screen;
-- any notification on screen: not "the runner is not running", not "the hotkey is taken". Windows may hold back notifications from an app that has no Start-menu shortcut;
+- any notification on screen: not "the runner is not running", not "the hotkey could not be set". Windows may hold back notifications from an app that has no Start-menu shortcut;
 - the dock's links being clicked by a person, and "Show dock" in the tray being ticked and unticked;
 - a clipboard image copied by a real program (a screenshot, a browser), as opposed to the PNG the self-test writes itself;
 - more than one display, and displays with different scaling, for the pop-up and the dock. (The snip's self-test ran on three displays, one at 200%, but saw no window, as below.);
 - **the snip on screen. Nobody has seen it.** The self-test opened it on this machine's three displays and checked bounds, the bridge, the crop's size and the closing, and `test/web/snip-ui.ts` drove the page in headless Chromium with a stand-in bridge. Unseen: whether the frozen image lines up with the real screen pixel for pixel on each display (at 200% and at 100% beside it); whether the overlays cover the taskbar; whether the focus lands on the display under the cursor and typing goes into the box at once; whether a drag that crosses from one display to the next behaves; whether the key, pressed while a full-screen program or a game is up, opens it; whether anything flashes before the frozen image is drawn; how long it takes from a real key press; the PNG it saves being looked at by Claude in a real session;
 - a link from a page opening in the default browser;
 - the shell starting the runner: its `wsl.exe` command was run from WSL by `scripts/smoke-start.ts`, never by the shell itself, and never after a real login;
+- a hotkey changed in the Settings page and then pressed: the self-test sees it registered, nobody has pressed it. The same goes for a notification naming a hotkey that could not be set, and for the Settings window and its page on screen;
+- the shell's socket reconnecting after a real runner restart (the code reconnects; no test stops the runner under it), and the migration against the real runner of T-0030;
 - start on login being on. `intuition shell login status` was run on 2026-11-13 and said off. Nobody has turned it on, by the checkbox or by the command, so the checkbox, the registry value and a login with it on are all unseen.
 
 `shell start` and `shell stop` were run once by hand on 2026-11-12: the process list showed the shell running after start, still one shell after a second start, and none after stop.
 
 ## Hand-test checklist
-Steps 10 to 18 are the dock, step 9 is the shell starting the runner, steps 20 to 23 are start on login, and steps 24 to 31 are the snip: nobody has seen any of them yet. The dock steps need a runner that serves the dock's page (`/dock`): with an older runner, step 10 shows no dock at all, and that is right.
+Steps 10 to 18 are the dock, step 9 is the shell starting the runner, steps 20 to 23 are start on login, steps 24 to 31 are the snip, and steps 32 to 37 are the settings: nobody has seen any of them yet. The dock steps need a runner that serves the dock's page (`/dock`): with an older runner, step 10 shows no dock at all, and that is right.
 
 1. In WSL: `intuition shell install`, then `intuition up`. **See**: a line `intuition runner on http://127.0.0.1:4777 …`, and a small blue-violet disc in the tray (maybe under the `^` arrow), with the tooltip "intuition". No window but the dock (step 10).
 2. Copy some text anywhere, then press Ctrl+Alt+Space. **See**: a small window without a title bar in the middle of the screen the mouse is on, above other windows, with the keyboard focus in it. In WSL, `curl http://127.0.0.1:4777/api/clipboard` shows the text.
 3. Press Ctrl+Alt+Space again. **See**: the same window, still there and focused, not a second one.
 4. Press Esc. **See**: the window gone. Press the hotkey, then click on another window. **See**: gone again.
 5. Take a screenshot to the clipboard (Win+Shift+S), then press the hotkey. **See**: the pop-up, and a new `clip-<time>.png` in `%TEMP%\intuition` that shows the screenshot.
-6. Right-click the tray icon. **See**: New task, Open chat, a ticked "Show dock" checkbox, a "Start on login" checkbox, Quit. Choose New task. **See**: the pop-up, as in step 2.
+6. Right-click the tray icon. **See**: New task, Snip, Open chat, Settings…, a ticked "Show dock" checkbox, a "Start on login" checkbox, Quit. Choose New task. **See**: the pop-up, as in step 2.
 7. Double-click the tray icon. **See**: a normal window, about 1100x720, titled "intuition", on the chat view. Double-click again. **See**: the same window brought to the front, not a second one.
 8. On a second display, if there is one: move the mouse there and press the hotkey. **See**: the pop-up in the middle of that display.
 9. `intuition stop` in WSL, then press the hotkey. **See**: no console window flashing; within about ten seconds, the pop-up, with the clipboard attached. `intuition status` in WSL says `running`. (If instead a notification says the runner is not running, wait a few seconds, press again, and look at `intuition logs`: note how long the start took.)
@@ -176,7 +201,7 @@ Steps 10 to 18 are the dock, step 9 is the shell starting the runner, steps 20 t
 15. Its links. In the open dock, use the session's link to the chat window. **See**: the chat window, on that session. Copy some text, then use the dock's new-task control. **See**: the pop-up, with that text attached, as from the hotkey.
 16. Displays. In Settings > System > Display change the scale of the primary display, then change it back; if there is a second display, unplug it or make it the primary one. **See**: after each change the pill is in the top middle of the display that is primary now, at its right size.
 17. The runner goes away. `intuition stop` in WSL. **See**: within about ten seconds the dock is gone, all of it: no empty patch at the top of the screen that swallows clicks. `intuition start`. **See**: within about five seconds the pill is back.
-18. The dock switched off. Right-click the tray icon and untick "Show dock". **See**: the dock gone at once, and `"dock": false` in `%APPDATA%\intuition-shell\settings.json`, the rest of the file as it was. Send a task and let it finish. **See**: nothing on screen about it: no dock, no toast; the chat window has it. `intuition shell stop`, then `shell start`. **See**: still no dock, and the checkbox still unticked. Tick it. **See**: the pill back at once.
+18. The dock switched off. Right-click the tray icon and untick "Show dock". **See**: the dock gone at once, and the Settings window, if open, shows the dock off. `%APPDATA%\intuition-shell\settings.json` is unchanged. Send a task and let it finish. **See**: nothing on screen about it: no dock, no toast; the chat window has it. `intuition shell stop`, then `shell start`. **See**: still no dock, and the checkbox still unticked. Tick it. **See**: the pill back at once.
 19. `intuition shell stop`, or Quit in the tray menu. **See**: the tray icon and the dock gone, and the hotkey does nothing.
 20. Start on login, from the command: `intuition shell login status`. **See**: `start on login is off`. Then `intuition shell login on`. **See**: `start on login is on`; in Task Manager > Startup apps, an entry named "intuition" or "Electron", enabled; and, if the shell runs, its tray checkbox ticked.
 21. From the tray: start the shell, untick "Start on login". **See**: `intuition shell login status` says off, and the entry is gone from Startup apps. Tick it again.
@@ -191,6 +216,13 @@ Steps 10 to 18 are the dock, step 9 is the shell starting the runner, steps 20 t
 30. A second display with another scaling (say 100% beside 150% or 200%). Press the key with the mouse on each in turn. **See**: both frozen, each sharp and lined up with what was there; the box on the display under the mouse takes the typing. Select on the second display and send. **See**: the PNG at that display's own pixels. Drag on one display, then on the other. **See**: the first one's selection goes away.
 31. Stop the runner (`intuition stop`) and press the key. **See**: as with the hotkey, no console window; the runner starts within about ten seconds, then the overlays. If not, a notification that the runner is not running.
 
+32. Settings, the migration. Before installing this version, put `"hotkey": "Control+Alt+J"` in `%APPDATA%\intuition-shell\settings.json`. Then `intuition up` with a runner that has the settings API. **See**: Ctrl+Alt+J opens the pop-up. `curl http://127.0.0.1:4777/api/settings` shows `"hotkey": "Control+Alt+J"` under `shell`, and the file holds only `runnerUrl` and `wsl`.
+33. Tray > Settings…. **See**: a normal window about 720x640 titled "intuition settings" on the Settings page. Choose Settings… again. **See**: the same window brought to the front, not a second one.
+34. In the Settings window, change the hotkey to Ctrl+Alt+K. **See**: at once, without restarting anything, Ctrl+Alt+K opens the pop-up and Ctrl+Alt+Space does nothing. Change the snip hotkey too, and press it. **See**: the snip.
+35. Change the hotkey to one another program holds (say Ctrl+Alt+Delete, or a key your other tools use), or to the snip hotkey. **See**: a notification "intuition: the hotkey could not be set" naming it and the one that still works, and the old hotkey still opens the pop-up.
+36. Turn the dock off and on in the Settings window, and tick and untick "Show dock" and "Start on login" in the tray. **See**: each change at once, in the tray, the page and on screen, both ways. `intuition shell login status` agrees with the checkbox.
+37. Switch the theme to dark, then light, then system. **See**: the chat and Settings windows' title bars and scrollbars follow each time. `intuition stop`, wait, `intuition start`, then change a setting. **See**: it applies within about 15 seconds of the runner being back, with no notification about the socket.
+
 ## Not built yet
 - The snip's selection can't be moved or resized once drawn: a new drag replaces it. Nothing can be drawn on it (arrows, boxes).
-- A Start-menu shortcut for the app id: without one, Windows may hold back the shell's own notifications (the runner is not running, the hotkey is taken).
+- A Start-menu shortcut for the app id: without one, Windows may hold back the shell's own notifications (the runner is not running, a hotkey could not be set).

@@ -118,6 +118,37 @@ export interface SelfTestResult {
   snipClosed: boolean;
   /** Esc, sent to the first overlay as a key, closed every overlay. */
   snipEscClosed: boolean;
+  /**
+   * Settings, against the stub runner's settings and its socket. The self-test writes a settings file as
+   * an older shell did (its own hotkeys, the dock off) and the stub starts with no shell settings: after
+   * the migration, the file's keys, sorted (runnerUrl alone: the self-test has no wsl).
+   */
+  settingsFileKeys: string[] | null;
+  /** After the migration, the file's hotkey is the one registered, from the runner's settings, and so is its snip hotkey. */
+  settingsHotkeyRegistered: boolean;
+  /** A new hotkey PUT as the page does: registered through the socket's message, and the old one released. */
+  settingsHotkeyChanged: boolean;
+  /** A hotkey that is not a valid accelerator: the one before it still registered. */
+  settingsInvalidHotkeyKept: boolean;
+  /** A hotkey that is taken (the snip hotkey's): the one before it still registered, and the snip hotkey too. */
+  settingsTakenHotkeyKept: boolean;
+  /** The notifications those two would have shown, as "title: body". */
+  settingsNotices: string[];
+  /** The tray's "Show dock" ticked: written to the runner, and the dock shown at once. */
+  settingsDockShown: boolean;
+  /** The dock turned off from the page: its window closed at once. */
+  settingsDockHidden: boolean;
+  /** nativeTheme.themeSource after the theme was set to dark. */
+  settingsTheme: string | null;
+  /** Start on login read again at the end: what it was at the start. The self-test never changes it. */
+  settingsOpenAtLogin: boolean | null;
+  /** The Settings window: its URL and outer size, and a second open giving the same window. */
+  settingsWindowUrl: string | null;
+  settingsWindowWidth: number;
+  settingsWindowHeight: number;
+  settingsWindowReused: boolean;
+  /** The Settings window's URL after the chat page opened /settings in a new window. */
+  settingsLinkOpened: string | null;
   /** What the shell would have handed to the default browser (the self-test opens none). */
   externalLinks: string[];
   /** Anything that threw on the way. Empty on a clean run. */
