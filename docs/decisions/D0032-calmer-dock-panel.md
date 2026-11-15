@@ -21,3 +21,10 @@ The owner, on the open dock: "make this a whole lot simpler, remove the horizont
 
 ## Risk
 - A workspace chosen in the dock and then forgotten hides the other workspaces' sessions from the list (not from the pill or the peeks). The switch is the first thing in the head and names the workspace.
+
+## Screenshots
+From `bun test/web/dock-ui.ts` (the island is the same dark in both page schemes, D0017):
+- [Open, dark](D0032/dock-open-dark.png): All workspaces, the session's head with its quiet "…", the hint as the placeholder.
+- [A long URL title, light](D0032/dock-open-long-url-light.png): the row and the head end in "…", the stream wraps; no sideways scroll.
+- [One workspace chosen, light](D0032/dock-open-workspace-light.png): the list shows only that workspace's sessions.
+- [The "…" menu, light](D0032/dock-open-more-light.png).
