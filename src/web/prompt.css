@@ -82,7 +82,7 @@ body { overflow: hidden; }
   gap: var(--space-1);
   margin: var(--space-3) var(--space-3) 0 0;
 }
-button.agent-switch.small { height: var(--control); padding: 0 var(--space-3) 0 var(--space-2); border-radius: var(--radius-pill); }
+button.agent-switch.small { height: var(--control); padding: 0 var(--space-3) 0 var(--space-2); border-color: var(--line); border-radius: var(--radius-pill); }
 .agent-switch[data-in] .agent-glyph { animation: turn-in var(--dur-bouncy) var(--ease-bouncy) backwards; }
 
 /* The task box is the window: no border, no ring (it holds the focus from the start, and its

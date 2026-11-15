@@ -63,7 +63,8 @@ function check(name: string, ok: boolean, detail = ""): void {
 }
 
 // A throwaway config: one workspace whose folder is missing (first, so the default has to skip it)
-// and two that exist, so "the chosen one" and "the last used one" differ from "the first".
+// and two that exist, so "the chosen one" and "the last used one" differ from "the first". beta runs
+// on Codex, so the agent switch follows the workspace.
 const dir = mkdtempSync(join(tmpdir(), "intuition-prompt-ui-"));
 for (const name of ["alpha", "beta"]) mkdirSync(join(dir, name));
 const env = {
@@ -74,7 +75,7 @@ const env = {
 };
 writeFileSync(
   env.INTUITION_CONFIG,
-  JSON.stringify({ workspaces: ["gone", "alpha", "beta"].map((name) => ({ name, path: join(dir, name) })) }),
+  JSON.stringify({ workspaces: ["gone", "alpha", "beta"].map((name) => ({ name, path: join(dir, name), ...(name === "beta" ? { agent: "codex" } : {}) })) }),
 );
 const runner = startServer(loadConfig(env));
 const shots = join(dir, "screenshots");
@@ -119,6 +120,9 @@ const state = () => ({
     checked: r.checked,
   })),
   task: document.querySelector<HTMLTextAreaElement>("#task")!.value,
+  placeholder: document.querySelector<HTMLTextAreaElement>("#task")!.placeholder,
+  agent: document.querySelector<HTMLElement>("#agent")!.hidden ? null : (document.querySelector<HTMLElement>("#agent")!.dataset.agent ?? null),
+  agentText: document.querySelector<HTMLElement>("#agent")!.textContent ?? "",
   status: document.querySelector("#status")!.textContent ?? "",
   link: document.querySelector<HTMLAnchorElement>("#status a")?.getAttribute("href") ?? null,
   clipboardHidden: document.querySelector<HTMLElement>("#clipboard")!.hidden && document.querySelector("#clipboard")!.childNodes.length === 0,
@@ -181,6 +185,13 @@ try {
   check("with none used yet, the first that exists is selected", checkedOf(s) === "alpha", String(checkedOf(s)));
   check("the clipboard element is there, empty and hidden", s.clipboardHidden);
   check("no scrollbars at 560x380", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
+  check("the agent switch shows alpha's agent, Claude Code, and the box asks Claude", s.agent === "claude" && s.agentText === "Claude Code" && s.placeholder === "What should Claude do?", JSON.stringify([s.agent, s.agentText, s.placeholder]));
+  const keysFit = await page.evaluate(() => {
+    const keys = document.querySelector(".keys")!.getBoundingClientRect();
+    const sw = document.querySelector("#agent")!.getBoundingClientRect();
+    return keys.right <= window.innerWidth && sw.right <= window.innerWidth && document.querySelector(".keys")!.textContent!.includes("agent");
+  });
+  check("the hints name Alt+A for the agent, and they and the switch fit the window", keysFit);
   await shot(page, "light-empty");
   const fonts = await page.evaluate(() => document.fonts.check('13px "Geist Variable"'));
   check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-latin.woff2"), requested.join(" "));
@@ -206,6 +217,8 @@ try {
   s = await page.evaluate(state);
   check("Alt+3 picks the third workspace and typing stays in the task box", checkedOf(s) === "beta" && s.focus === "task");
   check("and the mark ends on that chip", (await page.evaluate(motion)).markOnChip);
+  s = await page.evaluate(state);
+  check("on beta the switch follows its agent, Codex", s.agent === "codex" && s.agentText === "Codex" && s.placeholder === "What should Codex do?", JSON.stringify([s.agent, s.placeholder]));
 
   await page.keyboard.type("Tidy the notes");
   await page.keyboard.press("Shift+Enter");
@@ -232,6 +245,7 @@ try {
   check("Enter creates one session", list.length === 1, `${list.length} sessions`);
   check("the session is in the chosen workspace", list[0]?.workspace === "beta" && list[0]?.cwd === join(dir, "beta"), JSON.stringify(list[0]));
   check("the session's title is the task's first line", list[0]?.title === "Tidy the notes", list[0]?.title);
+  check("the session runs on the agent the switch showed, beta's Codex", list[0]?.agent === "codex", String(list[0]?.agent));
   if (page.isClosed()) {
     check("the window closed itself after the 201", true);
   } else {
@@ -253,7 +267,22 @@ try {
   await again.keyboard.type("A longer task, to see the box with text in the dark theme.");
   await shot(again, "dark-typed");
 
-  // Tab reaches the workspaces.
+  s = await again.evaluate(state);
+  check("the switch shows beta's Codex on the second visit", s.agent === "codex", String(s.agent));
+  await shot(again, "dark-codex");
+
+  // Alt+A flips the agent, and flips it back.
+  await again.keyboard.press("Alt+A");
+  s = await again.evaluate(state);
+  check("Alt+A flips the switch to Claude Code, and nothing is typed", s.agent === "claude" && s.placeholder === "What should Claude do?" && s.task === "A longer task, to see the box with text in the dark theme.", JSON.stringify([s.agent, s.task]));
+  await shot(again, "dark-agent-flipped");
+  await again.keyboard.press("Alt+A");
+  check("Alt+A again turns it back to Codex", (await again.evaluate(state)).agent === "codex");
+
+  // Tab reaches the agent switch, then the workspaces.
+  await again.keyboard.press("Shift+Tab");
+  const onSwitch = await again.evaluate(() => document.activeElement?.id ?? "");
+  check("Shift+Tab from the task reaches the agent switch", onSwitch === "agent", onSwitch);
   await again.keyboard.press("Shift+Tab");
   const focused = await again.evaluate(() => (document.activeElement as HTMLInputElement | null)?.value ?? "");
   check("Tab reaches the workspace row", focused === "beta", focused);

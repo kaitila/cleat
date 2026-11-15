@@ -434,7 +434,7 @@ try {
   // ---- the session's actions: a quiet "…" in its head ----
   {
     const heads = await page.locator(".session-head > :not([hidden])").evaluateAll((els: Element[]) => els.map((el) => el.id || el.className));
-    check(heads.join(",") === "title,stop quiet small,more", `the head is the title, Stop while it runs, and "…" (${heads.join(", ")})`);
+    check(heads.join(",") === "title,session-agent muted small,stop quiet small,more", `the head is the title, its agent, Stop while it runs, and "…" (${heads.join(", ")})`);
     await page.locator("#more").click();
     const items = await d.text(".menu:not([hidden]) .menu-item");
     check(items[0] === "Open in chat" && items.slice(-3).join(",") === "Rename,Pin,Archive" && (await page.locator("#more").getAttribute("aria-expanded")) === "true", `"…" opens a small menu: ${items.join(", ")}`);
@@ -518,6 +518,7 @@ try {
   const grown = await d.fits("open");
   check(grown.height > opened.height - 200 && grown.height <= DOCK_SIZES.open.height, `the island followed its content: ${grown.height}px now`);
   await d.shot("open-replied");
+
 
   // ---- managing a session from the open dock: Stop, and a row's menu (Rename, Pin, Archive) ----
   {
@@ -767,6 +768,26 @@ try {
   await workspace.selectOption("");
   await page.locator(".session-row", { hasText: needs }).waitFor();
   check((await d.text(".row-title")).join("|") === allTitles.join("|") && (await page.evaluate(() => localStorage.getItem("intuition.dock.workspace"))) === null, "All workspaces lists them all again, and is remembered as no choice");
+
+  // ---- the agent: a quiet glyph on each row, and the head names it ----
+  const codexTitle = "answer this on codex in the dock";
+  const codexId = ((await (await runner.post("/api/sessions", { workspace: "work", prompt: codexTitle, agent: "codex" })).json()) as { session: { id: string } }).session.id;
+  const codexRow = page.locator(".session-row", { hasText: codexTitle });
+  await codexRow.click();
+  await page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${codexTitle}` }).waitFor();
+  await page.locator(".note", { hasText: "Done" }).waitFor();
+  const codexMark = codexRow.locator(".agent-mark");
+  check((await codexMark.getAttribute("data-agent")) === "codex" && (await codexMark.getAttribute("title")) === "Runs on Codex" && (await codexMark.locator("svg").count()) === 1, "a Codex session's row has Codex's glyph, its name only as the tooltip");
+  check((await page.locator(".session-row .agent-mark").count()) === (await page.locator(".session-row").count()), "every row has its agent's glyph");
+  check((await page.locator(".session-head .session-agent").textContent()) === "Codex", "the open session's head names its agent");
+  await d.settle("open");
+  await d.fits("open");
+  await d.shot("open-codex");
+  // Gone again, so the dark part below starts from the sessions it expects.
+  await page.locator(".session-row").filter({ hasNotText: codexTitle }).first().click();
+  check((await runner.post(`/api/sessions/${codexId}/delete`, {})).ok, "the Codex session is deleted after its look");
+  await page.locator(".session-row", { hasText: codexTitle }).waitFor({ state: "detached" });
+
   await d.leave();
   await page.locator("#pill").waitFor();
   await d.settle("idle");
@@ -798,6 +819,19 @@ try {
   check((await k.page.locator('.session-row[aria-current="true"] .row-title').textContent()) === darkPrompt, "dark: opened from a peek, its session is selected");
   await k.fits("open");
   await k.shot("open");
+  const darkCodex = "answer this on codex in the dark dock";
+  const darkCodexId = ((await (await runner.post("/api/sessions", { workspace: "work", prompt: darkCodex, agent: "codex" })).json()) as { session: { id: string } }).session.id;
+  await k.page.locator(".session-row", { hasText: darkCodex }).click();
+  await k.page.locator(".session-head .session-agent", { hasText: "Codex" }).waitFor();
+  await k.page.locator(".note", { hasText: "Done" }).waitFor();
+  await k.settle("open");
+  await k.fits("open");
+  await k.shot("open-codex");
+  await k.page.locator(".session-row").filter({ hasNotText: darkCodex }).first().click();
+  check((await runner.post(`/api/sessions/${darkCodexId}/delete`, {})).ok, "dark: the Codex session is deleted after its look");
+  await k.page.locator(".session-row", { hasText: darkCodex }).waitFor({ state: "detached" });
+  await k.page.locator(".session-row", { hasText: darkPrompt }).click();
+  await k.page.locator(".session-head .session-agent", { hasText: "Claude Code" }).waitFor();
   await k.page.locator(".session-row", { hasText: "Markdown sample" }).click();
   await k.page.locator(".msg.assistant.md", { hasText: "SPRING MEETUP" }).waitFor();
   const mdDark = (await k.page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];

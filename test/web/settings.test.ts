@@ -252,6 +252,6 @@ describe("the Agents section", () => {
     expect(html).toContain('data-field="agent"');
     expect(html).toMatch(/<input type="radio" name="agent" value="claude"><span>Claude Code<\/span>/);
     expect(html).toMatch(/<input type="radio" name="agent" value="codex"><span>Codex<\/span>/);
-    expect(html).toMatch(/<select class="select agent" aria-label="Agent">[\s\S]*<option value="">Default<\/option>[\s\S]*<option value="codex">Codex<\/option>/);
+    expect(html).toMatch(/<select class="select agent" aria-label="Agent">[\s\S]*<option value="">Default agent<\/option>[\s\S]*<option value="codex">Codex<\/option>/);
   });
 });

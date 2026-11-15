@@ -152,6 +152,8 @@
 .meta { display: flex; align-items: center; gap: var(--space-2); }
 .meta #workspace::after, .meta .agent::after { content: "·"; margin-left: var(--space-2); }
 .meta .agent { display: inline-flex; align-items: center; gap: var(--space-1); }
+/* Inside the flex row its separator already has the gap: the margin makes up the rest. */
+.meta .agent::after { margin-left: calc(var(--space-2) - var(--space-1)); }
 .meta .resume { margin-left: auto; }
 .meta .stop:not([hidden]) + .resume { margin-left: var(--space-2); }
 .meta .stop { margin-left: auto; }

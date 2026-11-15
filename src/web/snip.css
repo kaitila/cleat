@@ -152,6 +152,7 @@ button.chip:hover { background: var(--ink); color: var(--ink-text); }
 .chip kbd { height: calc(var(--control-s) - var(--space-1)); }
 /* The agent switch, beside the workspace: quiet, the agent's glyph and name. Alt+A or a click turns it. */
 .agent-switch { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); }
+button.agent-switch { border-color: var(--line); border-radius: var(--radius-pill); }
 .agent-switch[data-in] .agent-glyph { animation: turn-in var(--dur-bouncy) var(--ease-bouncy) backwards; }
 .status {
   flex: 1;
