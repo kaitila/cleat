@@ -4,7 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { position, REST, SAMPLES, settleTime, springCurve, SPRINGS, springTokens } from "../../src/web/motion.js";
+import { COPIED, position, REST, SAMPLES, settleTime, springCurve, SPRINGS, springTokens } from "../../src/web/motion.js";
 
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
 const read = (file: string) => readFileSync(join(WEB, file), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -37,9 +37,7 @@ describe("a spring", () => {
     expect(peak({ stiffness: 400, damping: 80 })).toBeLessThanOrEqual(1);
   });
 
-  test("the bouncy one overshoots visibly, the gentle one barely, the snappy one hardly at all", () => {
-    expect(peak(SPRINGS.bouncy)).toBeGreaterThan(1.08);
-    expect(peak(SPRINGS.bouncy)).toBeLessThan(1.15);
+  test("the gentle one overshoots barely, the snappy one hardly at all", () => {
     expect(peak(SPRINGS.gentle)).toBeLessThan(1.01);
     expect(peak(SPRINGS.snappy)).toBeLessThan(1.002);
   });
@@ -52,11 +50,38 @@ describe("a spring", () => {
     }
   });
 
-  test("the bouncy spring, for the snip's prompt box, settles in about 350ms; snappy is the quickest", () => {
-    expect(springCurve(SPRINGS.bouncy).ms).toBeGreaterThanOrEqual(300);
-    expect(springCurve(SPRINGS.bouncy).ms).toBeLessThanOrEqual(400);
+  test("snappy is the quickest", () => {
     expect(springCurve(SPRINGS.snappy).ms).toBeLessThan(springCurve(SPRINGS.gentle).ms);
-    expect(springCurve(SPRINGS.snappy).ms).toBeLessThan(springCurve(SPRINGS.bouncy).ms);
+    expect(springCurve(SPRINGS.snappy).ms).toBeLessThan(COPIED.soft.ms);
+  });
+});
+
+describe("the springs copied from the Glass reference (D0028)", () => {
+  test("are its curves: from 0 to 1, evenly spaced, to three decimals, with its durations", () => {
+    expect(Object.keys(COPIED).sort()).toEqual(["bouncy", "soft"]);
+    expect(COPIED.bouncy.ms).toBe(680);
+    expect(COPIED.soft.ms).toBe(460);
+    for (const { points } of Object.values(COPIED)) {
+      expect(points).toHaveLength(45);
+      expect(points[0]).toBe(0);
+      expect(points.at(-1)).toBe(1);
+      for (const p of points) expect(Number(p.toFixed(3))).toBe(p);
+    }
+  });
+
+  test("bouncy goes about 12% past its end and comes back; soft about 1%", () => {
+    const top = (points: number[]) => Math.max(...points);
+    expect(top(COPIED.bouncy.points)).toBeGreaterThan(1.1);
+    expect(top(COPIED.bouncy.points)).toBeLessThan(1.13);
+    expect(COPIED.bouncy.points.indexOf(top(COPIED.bouncy.points))).toBeLessThan(45 / 2);
+    expect(top(COPIED.soft.points)).toBeGreaterThan(1);
+    expect(top(COPIED.soft.points)).toBeLessThan(1.015);
+  });
+
+  test("each is a real spring: within 0.006 of its nearest one in this model at every point", () => {
+    for (const { points, ms, nearest } of Object.values(COPIED)) {
+      for (let i = 0; i < points.length - 1; i++) expect(Math.abs(position(nearest, (ms / 1000) * (i / (points.length - 1))) - points[i]!)).toBeLessThan(0.006);
+    }
   });
 });
 
@@ -75,14 +100,6 @@ describe("its curve", () => {
     }
   });
 
-  test("the bouncy curve passes 1 and comes back", () => {
-    const { points } = springCurve(SPRINGS.bouncy);
-    const top = points.indexOf(Math.max(...points));
-    expect(points[top]).toBeGreaterThan(1.08);
-    expect(top).toBeGreaterThan(0);
-    expect(top).toBeLessThan(SAMPLES / 2);
-  });
-
   test("a softer spring settles later", () => {
     expect(settleTime({ stiffness: 200, damping: 12 })).toBeGreaterThan(settleTime({ stiffness: 200, damping: 28 }));
   });
@@ -93,7 +110,8 @@ describe("the motion tokens", () => {
 
   test("base.css holds exactly the curves and durations motion.js makes (paste `bun src/web/motion.js`)", () => {
     for (const line of springTokens()) expect(root).toContain(line);
-    expect(Object.keys(SPRINGS).sort()).toEqual(["bouncy", "gentle", "snappy"]);
+    expect(Object.keys(SPRINGS).sort()).toEqual(["gentle", "snappy"]);
+    expect(springTokens()).toHaveLength(8);
   });
 
   test("there are fade and travel tokens to go with them", () => {
@@ -104,7 +122,7 @@ describe("the motion tokens", () => {
     const reduced = [...base.matchAll(/@media \(prefers-reduced-motion: reduce\) \{\s*:root \{([^}]*)\}/g)].map((m) => m[1]!).join("");
     expect(reduced).toMatch(/--rise:\s*0px;/);
     expect(reduced).toMatch(/--pop:\s*1;/);
-    for (const name of Object.keys(SPRINGS)) {
+    for (const name of [...Object.keys(SPRINGS), ...Object.keys(COPIED)]) {
       expect(reduced).toMatch(new RegExp(`--ease-${name}:\\s*linear;`));
       expect(reduced).toMatch(new RegExp(`--dur-${name}:\\s*var\\(--dur-fade\\);`));
     }
@@ -121,13 +139,13 @@ describe("the motion tokens", () => {
         expect({ property, value, ok: !/cubic-bezier|steps\(|\bease(?:-in|-out|-in-out)?\b(?![-)])|linear\(/.test(value) }).toEqual({ property, value, ok: true });
         if (/^(?:animation|transition)$/.test(property) && value !== "none") expect({ value, ok: /var\(--(?:dur|motion)/.test(value) }).toEqual({ value, ok: true });
       }
-      expect(css).toMatch(/var\(--ease-(?:gentle|bouncy|snappy)\)/);
+      expect(css).toMatch(/var\(--ease-(?:gentle|bouncy|soft|snappy)\)/);
     });
 
     // Colour changes on hover keep their 150ms --motion fade (docs/design.md); what moves is these two.
-    test(`${file} animates transform and opacity only, and moves only on a spring`, () => {
-      for (const [, body] of css.matchAll(/@keyframes [a-z-]+ \{([^@]*?)\}\s*\}/g)) {
-        for (const [, property] of body!.matchAll(/([a-z-]+)\s*:/g)) expect(["transform", "opacity"]).toContain(property!);
+    test(`${file} animates transform and opacity only (and a fade clears a blur), and moves only on a spring`, () => {
+      for (const [name, body] of [...css.matchAll(/@keyframes ([a-z-]+) \{([^@]*?)\}\s*\}/g)].map((m) => [m[1]!, m[2]!])) {
+        for (const [, property] of body!.matchAll(/([a-z-]+)\s*:/g)) expect({ name, property, ok: ["transform", "opacity"].includes(property!) || (name === "fade-in" && property === "filter") }).toEqual({ name, property, ok: true });
       }
       for (const { property, value } of motion.filter((m) => m.property.startsWith("transition") && /var\(--(?:dur|ease)-/.test(m.value))) {
         for (const what of value.split(",").map((part) => part.trim().split(/\s+/)[0]!)) expect({ property, what, ok: ["transform", "opacity"].includes(what) || /^var\(/.test(what) }).toEqual({ property, what, ok: true });

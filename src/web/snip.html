@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="/assets/theme.js"></script>
   <title>intuition snip</title>
-  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/base.css">
   <link rel="stylesheet" href="/assets/snip.css">
   <script type="module" src="/assets/snip.js"></script>
@@ -16,9 +16,9 @@
   <!-- The dim over everything but the selection. Dark in both schemes: it darkens the screen. -->
   <div id="shade" class="shade dark" aria-hidden="true"></div>
   <div id="selection" class="selection" hidden aria-hidden="true"><span class="corner" data-at="tl"></span><span class="corner" data-at="tr"></span><span class="corner" data-at="bl"></span><span class="corner" data-at="br"></span></div>
-  <div id="size" class="size dark num" hidden aria-hidden="true"></div>
+  <div id="size" class="size dark num mono" hidden aria-hidden="true"></div>
   <p id="hint" class="hint dark" role="status">Drag an area, or click for the whole screen. <kbd>Esc</kbd> cancels.</p>
-  <form id="box" class="box" autocomplete="off" hidden>
+  <form id="box" class="box glass-float" autocomplete="off" hidden>
     <textarea id="task" class="task" rows="1" aria-label="Task" placeholder="What should Claude do with this?" spellcheck="false"></textarea>
     <footer class="foot">
       <button id="workspace" class="chip quiet small" type="button" title="Workspace (Tab, Alt+1..9)" aria-keyshortcuts="Tab"><span id="workspace-name"></span><kbd>Tab</kbd></button>

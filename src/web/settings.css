@@ -1,15 +1,23 @@
 /* The settings page: one calm column of sections, each a caption over a card of rows, a name and a
    line on the left, its control on the right. Layout only: every colour, size, radius and border
-   is a token or a component of base.css (docs/design.md). */
+   is a token or a component of base.css (docs/design.md). Glass (D0028): the cards are frosted
+   panels (.card.glass) over the window's own backdrop (<body class="backdrop">). */
 .settings {
   max-width: var(--measure);
   margin: 0 auto;
   padding: var(--space-5) var(--space-5) var(--space-6);
   display: grid;
   gap: var(--space-5);
-  animation: rise-in var(--dur-gentle) var(--ease-gentle) backwards, fade-in var(--dur-fade) var(--ease) backwards;
+  animation: fade-in calc(var(--dur-fade) * 2) var(--ease) backwards;
 }
 .settings[aria-busy="true"] .section { opacity: 0.5; pointer-events: none; }
+/* The sections arrive one after the other. */
+.settings > .section { animation: rise-in var(--dur-bouncy) var(--ease-bouncy) backwards; }
+.settings > .section:nth-of-type(2) { animation-delay: var(--stagger); }
+.settings > .section:nth-of-type(3) { animation-delay: calc(var(--stagger) * 2); }
+.settings > .section:nth-of-type(4) { animation-delay: calc(var(--stagger) * 3); }
+.settings > .section:nth-of-type(5) { animation-delay: calc(var(--stagger) * 4); }
+.settings > .section:nth-of-type(n + 6) { animation-delay: calc(var(--stagger) * 5); }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 
 /* "Saved" is quiet and goes; an error stays, in red. */
@@ -68,8 +76,8 @@
   display: inline-flex;
   padding: calc(var(--space-1) / 2);
   gap: calc(var(--space-1) / 2);
-  border: var(--hairline) solid var(--line-strong);
-  border-radius: var(--radius);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-pill);
   background: var(--sunken);
 }
 .segmented label { position: relative; display: inline-flex; }
@@ -79,13 +87,13 @@
   align-items: center;
   height: calc(var(--control) - var(--space-1));
   padding: 0 var(--space-3);
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-pill);
   color: var(--muted);
   font-weight: var(--medium);
   transition: background-color var(--motion) var(--ease), color var(--motion) var(--ease);
 }
 .segmented label:hover span { color: var(--text); }
-.segmented input:checked + span { background: var(--surface); color: var(--text); border: var(--hairline) solid var(--line-strong); }
+.segmented input:checked + span { background: var(--ink); color: var(--ink-text); }
 .segmented input:focus-visible + span, .theme input:focus-visible ~ .preview, .shortcut:focus-visible { outline: var(--ring) solid var(--accent); outline-offset: var(--hairline); }
 [data-field][aria-invalid="true"] .segmented, .segmented[aria-invalid="true"], .themes[aria-invalid="true"] .preview { border-color: var(--danger); }
 
@@ -97,10 +105,12 @@
   aspect-ratio: 16 / 10;
   overflow: hidden;
   border: var(--hairline) solid var(--line-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-m);
   background: var(--bg);
-  transition: border-color var(--motion) var(--ease);
+  transition: border-color var(--motion) var(--ease), transform var(--dur-press) var(--ease-bouncy);
 }
+.theme:hover .preview { transform: translateY(var(--lift)); }
+.theme:active .preview { transform: scale(var(--squash)); }
 .theme:hover .preview { border-color: var(--muted); }
 .theme input:checked ~ .preview { border-color: var(--accent); outline: var(--ring) solid var(--accent-soft); outline-offset: 0; }
 .theme-name { padding-inline: var(--space-1); font-weight: var(--medium); color: var(--muted); }
@@ -109,11 +119,11 @@
 .half .mini { flex: none; width: 200%; }
 .half.dark .mini { margin-left: -100%; }
 .mini { flex: 1; display: flex; background: var(--bg); color: var(--text); }
-.mini-side { width: 28%; background: var(--sunken); border-right: var(--hairline) solid var(--line); }
+.mini-side { width: 28%; margin: var(--space-1); border-radius: var(--radius-xs); background: var(--glass); box-shadow: var(--glass-edge); }
 .mini-main { flex: 1; display: grid; align-content: start; gap: var(--space-2); padding: var(--space-3); }
-.mini-line { height: var(--space-2); border-radius: var(--radius-s); background: var(--line-strong); }
+.mini-line { height: var(--space-2); border-radius: var(--radius-pill); background: var(--line-strong); }
 .mini-line.short { width: 60%; background: var(--line); }
-.mini-button { width: 36%; height: var(--space-3); margin-top: var(--space-1); border-radius: var(--radius-s); background: var(--accent); }
+.mini-button { width: 36%; height: var(--space-3); margin-top: var(--space-1); border-radius: var(--radius-pill); background: var(--accent); }
 
 /* ---------- shortcuts: keycaps on a quiet button; recording shows a hint in their place ---------- */
 .shortcut { flex: none; height: auto; min-height: var(--control); padding: var(--space-1) var(--space-2); border-color: var(--line-strong); }
@@ -131,7 +141,7 @@
   height: var(--control-s);
   margin: 0;
   border: var(--hairline) solid var(--line-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-pill);
   background: var(--selected);
   cursor: pointer;
   transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease);
@@ -143,10 +153,10 @@
   left: calc(var(--space-1) / 2);
   width: calc(var(--control-s) - var(--space-1) - var(--hairline) * 2);
   height: calc(var(--control-s) - var(--space-1) - var(--hairline) * 2);
-  border-radius: var(--radius-s);
-  background: var(--surface);
+  border-radius: 50%;
+  background: var(--muted);
   border: var(--hairline) solid var(--line-strong);
-  transition: transform var(--dur-snappy) var(--ease-snappy);
+  transition: transform var(--dur-press) var(--ease-bouncy);
 }
 .switch:checked { background: var(--accent); border-color: var(--accent); }
 .switch:checked::after { transform: translateX(calc(var(--control-s) * 0.8)); border-color: var(--accent); background: var(--accent-text); }
@@ -170,8 +180,8 @@ label.setting { cursor: pointer; }
 .about .setting { min-height: var(--control); padding-block: var(--space-2); }
 .about .setting + .setting { border-top: var(--hairline) solid var(--line); }
 
-@keyframes rise-in { from { transform: translateY(var(--rise)); } }
-@keyframes fade-in { from { opacity: 0; } }
+@keyframes rise-in { from { transform: translateY(var(--rise)) scale(calc((1 + var(--pop)) / 2)); } }
+@keyframes fade-in { from { opacity: 0; filter: var(--blur-in); } }
 
 @media (max-width: 560px) {
   .settings { padding: var(--space-4) var(--space-3) var(--space-5); }
@@ -184,4 +194,5 @@ label.setting { cursor: pointer; }
 }
 @media (prefers-reduced-motion: reduce) {
   .settings { animation: fade-in var(--dur-fade) var(--ease) backwards !important; }
+  .settings > .section { animation: none !important; }
 }

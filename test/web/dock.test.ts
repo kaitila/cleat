@@ -131,7 +131,7 @@ describe("the contract with the shell", () => {
     expect(OPEN_MS).toBeLessThanOrEqual(120);
   });
 
-  test("a change of state animates the island's own size (its clip) and the content's opacity and transform, and nothing else", () => {
+  test("a change of state animates the island's own size (its clip) and the content's opacity, transform and clearing blur, and nothing else", () => {
     const css = noComments(source("dock.css"));
     // Every transition names what it moves: the island's size as drawn, which only its clip reads, and its opacity.
     const transitions = [...css.matchAll(/transition:([^;}]*)/g)].map((m) => m[1]!.trim());
@@ -142,15 +142,18 @@ describe("the contract with the shell", () => {
     for (const [, prop] of css.matchAll(/([\w-]+)\s*:[^;{}]*var\(--island-[wh]\)/g)) expect(prop).toBe("clip-path");
     // Every easing and duration of a transition or an animation is a motion token (docs/design.md, "Motion").
     for (const [, value] of css.matchAll(/(?:transition|animation(?:-duration|-timing-function|-delay)?):([^;}]*)/g)) {
-      expect(value!.replace(/var\(--(?:ease|ease-gentle|ease-bouncy|ease-snappy|dur-gentle|dur-bouncy|dur-snappy|dur-fade|dur-out|motion)\)/g, "")).not.toMatch(/\d(?:ms|s)\b|cubic-bezier|linear\(|\b(?:ease|ease-in|ease-out|ease-in-out|linear)\b/);
+      expect(value!.replace(/var\(--(?:ease|ease-gentle|ease-bouncy|ease-soft|ease-snappy|dur-gentle|dur-bouncy|dur-soft|dur-snappy|dur-fade|dur-out|motion|lag|stagger)\)/g, "")).not.toMatch(/\d(?:ms|s)\b|cubic-bezier|linear\(|\b(?:ease|ease-in|ease-out|ease-in-out|linear)\b/);
     }
     expect(css).not.toMatch(/transition-property|transition:\s*all\b/);
-    // The keyframes move opacity and transform only.
+    // The keyframes move opacity and transform only, and the fade in clears a blur (the content coming into focus).
     const frames = [...css.matchAll(/@keyframes [\w-]+ \{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)].map((m) => m[1]!);
     expect(frames.length).toBeGreaterThan(0);
-    for (const body of frames) for (const prop of body.matchAll(/([\w-]+)\s*:/g)) expect(["opacity", "transform"]).toContain(prop[1]!);
-    // No shadow, filter or blur anywhere on the dock, and no size that changes with the state.
-    expect(css).not.toMatch(/box-shadow|backdrop-filter|\bfilter\b/);
+    for (const body of frames) for (const prop of body.matchAll(/([\w-]+)\s*:/g)) expect(["opacity", "transform", "filter"]).toContain(prop[1]!);
+    expect(css).toMatch(/@keyframes layer-fade \{ from \{ opacity: 0; filter: var\(--blur-in\); \} \}/);
+    // No shadow and no backdrop-filter on the dock: the window is the island's size (a shadow would be
+    // cut off) and the frost is the OS's, behind the see-through window (D0028). No filter outside a fade.
+    expect(css).not.toMatch(/box-shadow|backdrop-filter/);
+    expect(css.replace(/@keyframes layer-fade \{[^}]*\}/, "")).not.toMatch(/\bfilter\b/);
     expect(css).toMatch(/prefers-reduced-motion: reduce/);
     // The page never asks the shell for anything but the state: no size, and no call that waits for an animation.
     expect(noComments(source("dock.js"))).not.toMatch(/resizeTo|resizeBy|innerWidth|innerHeight/);

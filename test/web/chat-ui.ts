@@ -132,8 +132,8 @@ try {
   check(true, "the reply box is enabled once the turn has ended");
   await tool.locator("summary").click();
   await page.evaluate(() => document.fonts.ready);
-  check(await page.evaluate(() => document.fonts.check('13px "Inter Variable"') && document.fonts.check('12px "JetBrains Mono Variable"')), "the interface font and the code font are loaded");
-  check(requested.some((u) => new URL(u).pathname === "/assets/fonts/inter-latin.woff2") && requested.some((u) => new URL(u).pathname === "/assets/fonts/jetbrains-mono-latin.woff2"), "from the runner's own /assets/fonts");
+  check(await page.evaluate(() => document.fonts.check('13px "Geist Variable"') && document.fonts.check('12px "Geist Mono Variable"')), "the interface font and the code font are loaded");
+  check(requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-latin.woff2") && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-mono-latin.woff2"), "from the runner's own /assets/fonts");
   const borderOf = (p: Any) => p.locator(".sidebar").evaluate((el: Element) => getComputedStyle(el).borderRightWidth) as Promise<string>;
   check((await borderOf(page)) === "1px", "a hairline is 1px where a CSS pixel is one device pixel");
   await shot("chat-light");

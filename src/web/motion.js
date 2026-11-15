@@ -3,6 +3,10 @@
 // curve is where it is over time, sampled evenly, and its duration is when it has come to rest.
 // base.css holds the results as tokens: `bun src/web/motion.js` prints them, to paste there, and
 // test/web/motion.test.ts fails when the two differ. Pages don't load this file.
+//
+// Two of the springs are not made here but copied: the bouncy one and the soft one are the Glass
+// reference's own curves (D0028), point for point, so the app moves as the design the owner chose.
+// Each is listed with the spring of this model nearest to it, which the test holds it to.
 
 /** How close to 1, and for good, the spring must be to count as at rest: a 40px move is then within 0.2px. */
 export const REST = 0.005;
@@ -10,15 +14,33 @@ export const REST = 0.005;
 export const SAMPLES = 40;
 
 /**
- * The springs, by name: stiffness and damping with a mass of 1.
+ * The springs made here, by name: stiffness and damping with a mass of 1.
  * - gentle: near critical (under 1% overshoot); things that appear or slide without fuss.
- * - bouncy: a visible overshoot, about 11%; something that arrives (the snip's prompt box).
  * - snappy: critical in effect (under 0.2%); quick answers to a key or a click.
  */
 export const SPRINGS = {
   gentle: { stiffness: 300, damping: 30 },
-  bouncy: { stiffness: 700, damping: 30 },
   snappy: { stiffness: 900, damping: 54 },
+};
+
+/**
+ * The springs copied from the Glass reference (its project/Glass.dc.html, linked from D0028:
+ * `--spring` and `--spring-out`), with the duration it pairs each with, and
+ * the spring of this model each is within 0.006 of at every point.
+ * - bouncy: about 12% past its end and back over 680ms; opening and arriving.
+ * - soft: about 1% over 460ms; closing, gathering back.
+ */
+export const COPIED = {
+  bouncy: {
+    ms: 680,
+    nearest: { stiffness: 259, damping: 18.25 },
+    points: [0, 0.032, 0.106, 0.209, 0.328, 0.453, 0.576, 0.692, 0.796, 0.89, 0.963, 1.021, 1.063, 1.092, 1.11, 1.117, 1.117, 1.11, 1.099, 1.086, 1.071, 1.057, 1.043, 1.03, 1.018, 1.009, 1.001, 0.995, 0.991, 0.988, 0.987, 0.986, 0.987, 0.988, 0.989, 0.991, 0.993, 0.994, 0.996, 0.997, 0.998, 0.999, 1, 1.001, 1],
+  },
+  soft: {
+    ms: 460,
+    nearest: { stiffness: 399, damping: 33.75 },
+    points: [0, 0.022, 0.071, 0.143, 0.219, 0.3, 0.389, 0.468, 0.543, 0.618, 0.68, 0.735, 0.788, 0.829, 0.868, 0.898, 0.923, 0.945, 0.961, 0.974, 0.985, 0.993, 0.999, 1.004, 1.006, 1.008, 1.009, 1.01, 1.01, 1.009, 1.009, 1.008, 1.007, 1.006, 1.006, 1.005, 1.004, 1.003, 1.003, 1.002, 1.002, 1.001, 1.001, 1.001, 1],
+  },
 };
 
 /** Where the spring is at `t` seconds: 0 at the start, 1 at rest. Exact, for any damping. */
@@ -60,13 +82,14 @@ export function springCurve(spring, samples = SAMPLES) {
   return { points, ms, css: `linear(${points.join(", ")})` };
 }
 
-/** The tokens base.css holds: `--ease-<name>` and `--dur-<name>` for each spring. */
-export function springTokens(springs = SPRINGS) {
+/** The tokens base.css holds: `--ease-<name>` and `--dur-<name>` for each spring, made and copied. */
+export function springTokens(springs = SPRINGS, copied = COPIED) {
   const lines = [];
   for (const [name, spring] of Object.entries(springs)) {
     const { css, ms } = springCurve(spring);
     lines.push(`--ease-${name}: ${css};`, `--dur-${name}: ${ms}ms;`);
   }
+  for (const [name, { points, ms }] of Object.entries(copied)) lines.push(`--ease-${name}: linear(${points.join(", ")});`, `--dur-${name}: ${ms}ms;`);
   return lines;
 }
 

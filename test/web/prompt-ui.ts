@@ -182,8 +182,8 @@ try {
   check("the clipboard element is there, empty and hidden", s.clipboardHidden);
   check("no scrollbars at 560x380", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
   await shot(page, "light-empty");
-  const fonts = await page.evaluate(() => document.fonts.check('13px "Inter Variable"'));
-  check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/inter-latin.woff2"), requested.join(" "));
+  const fonts = await page.evaluate(() => document.fonts.check('13px "Geist Variable"'));
+  check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-latin.woff2"), requested.join(" "));
   const hairline = () => getComputedStyle(document.querySelector("#workspaces")!).borderBottomWidth;
   check("a hairline is 1px where a CSS pixel is one device pixel", (await page.evaluate(hairline)) === "1px", await page.evaluate(hairline));
 
@@ -308,7 +308,7 @@ try {
   await shot(withText, "light-clipboard-text");
   check(
     "the code font is loaded for the clipboard text, from the runner's /assets/fonts",
-    (await withText.evaluate(() => document.fonts.check('12px "JetBrains Mono Variable"'))) && requested.some((u) => new URL(u).pathname === "/assets/fonts/jetbrains-mono-latin.woff2"),
+    (await withText.evaluate(() => document.fonts.check('12px "Geist Mono Variable"'))) && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-mono-latin.woff2"),
   );
   const sent = await send(withText, "Explain this code");
   const sentUser = sent ? await userTexts(sent.id) : [];
