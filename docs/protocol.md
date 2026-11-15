@@ -8,6 +8,7 @@ The runner is one bun process on `127.0.0.1:4777` (`port` in the config file). I
 | `/` | Chat view: sessions in a sidebar, the selected one streaming. `/?session=<id>` opens one. |
 | `/prompt` | Pop-up prompt: workspace picker, task box, the clipboard attachment. |
 | `/dock` | The dock: a pill, a peek and an open view of the sessions. See "Dock". |
+| `/settings` | The settings page: every setting of `GET /api/settings`, saved with `PUT /api/settings`. See "Settings". |
 | `/assets/<file>` | Files from `src/web/`. |
 
 Pages are plain HTML, CSS and JavaScript modules served from `src/web/` with no build step.

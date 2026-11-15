@@ -209,6 +209,7 @@ async function handle(req: Request, app: App): Promise<Response> {
     if (path === "/") return page("chat.html");
     if (path === "/prompt") return page("prompt.html");
     if (path === "/dock") return page("dock.html");
+    if (path === "/settings") return page("settings.html");
     if (path.startsWith("/assets/")) {
       const rel = normalize(path.slice("/assets/".length));
       if (rel.startsWith("..") || rel.startsWith("/")) return fail(404, "not found");

@@ -167,6 +167,13 @@ describe("PUT /api/settings", () => {
   });
 });
 
+test("/settings serves the settings page", async () => {
+  const r = runner();
+  const res = await r.get("/settings");
+  expect(res.status).toBe(200);
+  expect(await res.text()).toContain("/assets/settings.js");
+});
+
 describe("config settings", () => {
   test("theme and shell are read from the file, and a bad one is refused", () => {
     const r = runner();
