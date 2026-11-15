@@ -42,6 +42,7 @@ As before this change; everything about it is in [the Windows shell](windows-she
 - **The menu bar.** The tray is a template icon in the menu bar, and the shell hides itself from the Dock and the app switcher.
 - **Hotkeys** default to Command+Shift+Space (new task) and Command+Shift+S (snip). The shell sends its defaults to the runner once; after that the settings page changes them.
 - **The dock** hangs from the top of the work area, so it sits below the menu bar (and below the notch on a display that has one), centred on the display, on every Space.
+- **Frosted pop-up.** The pop-up is made with vibrancy (`popover`, `visualEffectState: "active"`, so it stays frosted while it does not have the focus), the macOS material behind its transparent page. The dock has none, as on every OS ([the Windows shell](windows-shell.md), "Frosted windows").
 - **Screen Recording.** The snip captures the screens with Electron's desktopCapturer, which macOS allows only with Screen Recording. The shell checks it (`systemPreferences.getMediaAccessStatus("screen")`) at start and at each snip; when it is missing it says so once, and clicking the notification opens System Settings > Privacy & Security > Screen Recording. Allow "Electron" there (the shell runs as npm's Electron.app), then quit the shell and start it again. Until then a snip shows only the wallpaper. The settings page's Setup section has a line for it, with a button that asks the shell to open that pane ([protocol](protocol.md), "Platform").
 - **Start at login** is a launch agent, `~/Library/LaunchAgents/dev.intuition.shell.plist`, that runs the installed Electron on the app folder, as `shell start` does. Electron's own login item would register npm's Electron.app, which starts Electron's default app without the shell ([D0023](decisions/D0023-native-shell.md)). The tray's checkbox, the settings page and `intuition shell login on|off|status` all write or read that file. macOS shows "Background Items Added" the first time.
 - Clipboard images and snips are saved in `$TMPDIR/intuition/`, and the runner takes only a PNG directly in that folder ([protocol](protocol.md), "Clipboard images").
@@ -54,6 +55,7 @@ As before this change; everything about it is in [the Windows shell](windows-she
 - **X11 or Wayland.** With `DISPLAY` set the shell runs on X11 (`--ozone-platform=x11`, XWayland on a Wayland desktop): global shortcuts, placing the pop-up and the dock, and always-on-top work there. With only `WAYLAND_DISPLAY` it runs on Wayland, where the hotkeys may not register; it says so once, and the tray's New task and Snip do the same.
 - **The tray** is Electron's, a StatusNotifierItem. GNOME's top bar shows one only with the AppIndicator extension: on GNOME the shell asks `gnome-extensions list --enabled`, and when none is enabled it says to install `gnome-shell-extension-appindicator`. KDE, Xfce, Cinnamon and most others show it as they are.
 - **The dock** is a transparent always-on-top window, which needs a compositor. Under Wayland and on desktops that composite by default (GNOME, KDE, Xfce, Cinnamon, MATE, LXQt, Budgie and others named in `shell/src/os.ts`) it is. Anywhere else (a bare window manager, Xvfb) the dock is an opaque window the size of the island, which follows the island as it opens and closes. `INTUITION_DOCK_OPAQUE=1` forces the opaque dock, `0` the transparent one.
+- **No material.** Linux has no OS blur Electron can ask for: the pop-up and the dock are transparent windows (opaque without a compositor), and the page's translucent fill is all the glass there is.
 - Clipboard images and snips are saved in `/tmp/intuition/` (the OS temp folder), and the runner takes only a PNG directly in that folder.
 - **As root** (WSL's default user), Chromium will not start with its sandbox, so the linux layout then passes `--no-sandbox` to `shell start`, `shell stop` and the autostart entry. A normal user keeps the sandbox.
 
@@ -91,11 +93,14 @@ CI runs it on `macos-latest` (job `macos`, after the unit tests) and on `ubuntu-
 | The shell's self-test, linux | WSLg's Xvfb (`xvfb-run`, no window manager), as root | 2026-11-15 | Passed, the dock opaque |
 | The shell's self-test, linux | CI `linux-shell` (ubuntu-latest, Xvfb, sandbox on), PR #36 | 2026-11-15 | Passed. The renderer crash was not taken by `forcefullyCrashRenderer()` under the sandbox: the self-test kills it |
 | The shell's self-test, windows-wsl | this machine | 2026-11-15 | Passed, after the change: the same checks as before |
+| The shell's self-test with the materials (T-0050), windows-wsl | this machine, Windows build 26200 | 2026-11-15 | Passed. `materials (Windows 10.0.26200): pop-up acrylic, dock none, snip none, settings none` |
+| The shell's self-test with the materials (T-0050), linux | WSLg, as root, X11 | 2026-11-15 | Passed. `materials: pop-up none, dock none, snip none, settings none`; the pop-up is now a transparent window |
 
 ## What nobody has seen
 - **The macos layout on a Mac.** Nothing here has run on macOS. Its paths and its Electron executable follow Electron's own layout.
 - **The linux layout on a real Linux desktop** (GNOME, KDE, a Wayland session), and as a normal user with Chromium's sandbox on. Whether npm's Electron then needs `chrome-sandbox` set up (owned by root, mode 4755) on distributions that restrict unprivileged user namespaces has not been tried.
 - **What the shell does on Linux and macOS, seen by a person.** The self-test runs it on WSLg and in CI, but nobody has looked at its windows, the menu bar icon, the opaque dock, or a snip with real pixels on Linux. Starting a `local` runner from the shell has not been tried (the self-test never starts one).
+- **The pop-up's vibrancy on a Mac**: chosen by the self-test's rules (`windowMaterial`), never seen.
 - **Screen Recording granted on a Mac**, and the notice's click opening System Settings. The macOS CI runner cannot grant it.
 - **A launch agent run at a real Mac login**, and a GNOME desktop without AppIndicator.
 - **An XDG autostart entry run at a real login.**
