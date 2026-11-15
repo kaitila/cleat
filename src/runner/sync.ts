@@ -191,12 +191,20 @@ interface Tracked {
   ownWrite: number;
   /** A terminal session's title as its transcript last gave it: a new one there replaces the session's. */
   title?: string;
+  /**
+   * Set when a runner turn of a Codex session ended: Codex may write the turn's last lines (its
+   * task_complete) after the SDK reported the end, so what comes next before a user message is
+   * still the runner's turn, and is passed over.
+   */
+  tail?: true;
 }
 
 interface SyncFile {
   /** Every Claude Code session id and Codex thread id the runner knows, to the runner's session id: one id per session, kept across restarts. */
   ids: Record<string, string>;
   sessions: Record<string, Tracked>;
+  /** Set once Codex threads are synced (D0031): a file without it may have Codex sessions whose cursor was never kept. */
+  codex?: true;
 }
 
 export interface SyncOptions {
@@ -253,7 +261,13 @@ export class Sync implements TurnWatcher {
     this.threads = { claude: claudeThreads(this.options.transcripts), codex: this.options.codex };
     this.path = join(dataDir, "sync.json");
     const file = readJson<Partial<SyncFile>>(this.path, {});
-    this.file = { ids: file.ids ?? {}, sessions: file.sessions ?? {} };
+    this.file = { ids: file.ids ?? {}, sessions: file.sessions ?? {}, codex: true };
+    if (!file.codex) {
+      // Before D0031 a Codex session's turns never moved its cursor: it is tracked again from its
+      // thread's end at the next round, so nothing it already has is stored twice.
+      for (const id of Object.keys(this.file.sessions)) if (this.store.get(id)?.agent === "codex") delete this.file.sessions[id];
+      this.save();
+    }
   }
 
   private save(): void {
@@ -399,7 +413,12 @@ export class Sync implements TurnWatcher {
     if (this.ours(id) || (this.generation.get(id) ?? 0) !== gen) return null;
     const at = tracked.cursor === null ? -1 : entries.findIndex((m) => m.key === tracked.cursor);
     // A cursor that is gone (the transcript was compacted or rewritten): nothing can be told new, start over from its end.
-    const fresh = tracked.cursor !== null && at === -1 ? [] : entries.slice(at + 1);
+    let fresh = tracked.cursor !== null && at === -1 ? [] : entries.slice(at + 1);
+    if (tracked.tail && fresh.length) {
+      const user = fresh.findIndex((e) => e.events.some((ev) => ev.kind === "user"));
+      fresh = user === -1 ? [] : fresh.slice(user);
+      delete tracked.tail;
+    }
     if (live && fresh.length) this.grew(id, fresh.at(-1)!.idle);
     for (const entry of fresh) {
       for (const event of entry.events) this.sessions.record(id, event, undefined, entry.time);
@@ -602,6 +621,7 @@ export class Sync implements TurnWatcher {
       } catch (e) {
         this.log(`sync: reading ${session.claudeSessionId} after its turn failed: ${(e as Error).message}`);
       }
+      if (agentOf(session) === "codex") tracked.tail = true;
       tracked.ownWrite = this.options.now();
       this.save();
     }).finally(() => this.ending.delete(id));

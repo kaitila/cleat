@@ -78,7 +78,11 @@ class CodexHome {
   answer(id: string, text: string, end = true): void {
     this.item(id, { type: "AgentMessage", id: `msg-${this.ordinal}`, content: [{ type: "Text", text }], phase: end ? "final_answer" : "commentary" });
     this.line(id, "response_item", { type: "message", role: "assistant", content: [{ type: "output_text", text }] });
-    if (end) this.line(id, "event_msg", { type: "task_complete", turn_id: "turn", last_agent_message: text, duration_ms: 1200 });
+    if (end) this.complete(id, text);
+  }
+
+  complete(id: string, text: string): void {
+    this.line(id, "event_msg", { type: "task_complete", turn_id: "turn", last_agent_message: text, duration_ms: 1200 });
   }
 
   /** The TUI's name for a thread, in session_index.jsonl. */
@@ -118,6 +122,21 @@ function writingDriver(c: CodexHome): AgentDriver {
       await Bun.sleep(30);
       yield { type: "event", event: { kind: "assistant_text", text: "ok" } };
       yield { type: "event", event: { kind: "result", ok: true, text: "ok" } };
+    },
+  };
+}
+
+/** As writingDriver, but the turn's task_complete reaches the rollout only after the SDK reported the end, as Codex may write it. */
+function lateTailDriver(c: CodexHome): AgentDriver {
+  return {
+    async *run(input) {
+      const id = input.resume ?? crypto.randomUUID();
+      if (!input.resume) c.start(id, input.cwd, { source: "exec" });
+      yield { type: "session_id", id };
+      c.turn(id, input.prompt, "ok", { end: false });
+      yield { type: "event", event: { kind: "assistant_text", text: "ok" } };
+      yield { type: "event", event: { kind: "result", ok: true, text: "ok" } };
+      setTimeout(() => c.complete(id, "ok"), 60);
     },
   };
 }
@@ -304,6 +323,46 @@ describe("Codex threads from the terminal", () => {
     c.turn(threadId, "from the terminal", "terminal answer");
     await socket.waitFor((m) => m.type === "event" && m.sessionId === session.id && m.event.kind === "result" && m.event.text === "terminal answer");
     expect(kinds(await eventsFrom(r, session.id))).toEqual(["user", "assistant_text", "result", "user", "assistant_text", "result"]);
+  });
+
+  test("the last lines of a runner turn written after its end are the runner's, not a terminal turn", async () => {
+    const c = new CodexHome();
+    const r = runner(c, { driver: lateTailDriver(c) });
+    const socket = await socketOf(r);
+    const session = await r.startSession("mine");
+    await idle(r, session.id);
+    const threadId = (await sessionsOf(r))[0]!.claudeSessionId!;
+    await Bun.sleep(250);
+    const idleAt = socket.messages.length;
+    await Bun.sleep(150);
+    expect(socket.messages.slice(idleAt).filter((m) => m.type === "session" && m.session.status === "running")).toEqual([]);
+    expect(kinds(await eventsFrom(r, session.id))).toEqual(["user", "assistant_text", "result"]);
+    // A turn from the terminal afterwards is read whole.
+    c.turn(threadId, "from the terminal", "terminal answer");
+    await socket.waitFor((m) => m.type === "event" && m.sessionId === session.id && m.event.kind === "result" && m.event.text === "terminal answer");
+    expect(kinds(await eventsFrom(r, session.id))).toEqual(["user", "assistant_text", "result", "user", "assistant_text", "result"]);
+  });
+
+  test("a Codex session from before the sync is followed from its thread's end, nothing stored twice", async () => {
+    const c = new CodexHome();
+    const first = runner(c, { driver: writingDriver(c) });
+    const session = await first.startSession("before the sync");
+    await idle(first, session.id);
+    const threadId = (await sessionsOf(first))[0]!.claudeSessionId!;
+    await first.stop();
+    runners.splice(runners.indexOf(first), 1);
+    // sync.json as the runner left it before D0031: the Codex session's cursor never moved.
+    const file = join(first.config.dataDir, "sync.json");
+    const sync = JSON.parse(readFileSync(file, "utf8")) as { codex?: true; sessions: Record<string, unknown> };
+    delete sync.codex;
+    sync.sessions[session.id] = { cursor: null, loaded: true, mtime: 0, ownWrite: 0 };
+    writeFileSync(file, JSON.stringify(sync));
+    const second = runner(c, { dir: first.dir });
+    const socket = await socketOf(second);
+    await Bun.sleep(100);
+    c.turn(threadId, "from the terminal", "terminal answer");
+    await socket.waitFor((m) => m.type === "event" && m.sessionId === session.id && m.event.kind === "result" && m.event.text === "terminal answer");
+    expect(kinds(await eventsFrom(second, session.id))).toEqual(["user", "assistant_text", "result", "user", "assistant_text", "result"]);
   });
 
   test("a reply to a thread written to in the last two minutes is refused without force; one idle longer takes it", async () => {

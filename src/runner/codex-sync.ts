@@ -12,7 +12,7 @@
 //     `error` reports a failed one;
 //   - a resumed thread appends to the same file.
 // $CODEX_HOME/session_index.jsonl names a thread (`thread_name`, the TUI's title for it).
-import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { closeSync, openSync, readFileSync, readSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { NewEvent } from "./agent";
@@ -319,13 +319,19 @@ export function codexThreads(home: string = codexHome()): Threads {
 
   return {
     async list(dir, limit) {
-      const want = resolve(dir);
+      // Codex records the folder as it found it, links resolved (on macOS /var is /private/var).
+      const want = new Set([resolve(dir)]);
+      try {
+        want.add(realpathSync(dir));
+      } catch {
+        // A workspace folder that is gone: only its path as written.
+      }
       const all: string[] = [];
       walk(sessionsDir, all);
       const out: ThreadInfo[] = [];
       for (const path of all) {
         const state = stateOf(path);
-        if (state?.meta && !state.meta.own && state.meta.cwd === want) out.push(infoOf(state));
+        if (state?.meta && !state.meta.own && want.has(state.meta.cwd)) out.push(infoOf(state));
       }
       return out.sort((a, b) => b.lastModified - a.lastModified).slice(0, limit);
     },
