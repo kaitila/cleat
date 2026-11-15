@@ -167,7 +167,9 @@ describe("start at login on Linux: an XDG autostart file", () => {
 
 describe("intuition doctor", () => {
   const all = (over: Partial<Probes> = {}): Probes => ({
-    output: (cmd) => ({ git: "git version 2.43.0", node: "v22.12.0", npm: "10.9.0", claude: cmd[1] === "auth" ? '{ "loggedIn": true }' : "2.1.0 (Claude Code)" })[cmd[0]!] ?? null,
+    output: (cmd) =>
+      ({ git: "git version 2.43.0", node: "v22.12.0", npm: "10.9.0", claude: cmd[1] === "auth" ? '{ "loggedIn": true }' : "2.1.0 (Claude Code)", "/c/codex": cmd[1] === "login" ? "Logged in using ChatGPT" : "codex-cli 0.169.0" })[cmd[0]!] ?? null,
+    codex: () => "/c/codex",
     config: () => ({ ok: true, path: "/c/config.json" }),
     runner: async () => "http://127.0.0.1:4777",
     shellInstalled: () => true,
@@ -188,7 +190,7 @@ describe("intuition doctor", () => {
     expect(lines[0]).toBe("layout: linux (the runner and the shell on this machine)");
     expect(lines.join("\n")).not.toContain("fix:");
     expect(lines.at(-1)).toBe("everything needed is there");
-    for (const name of ["git", "bun", "node and npm", "Claude Code", "Claude Code login", "config", "display", "runner", "shell installed", "shell running", "start at login"]) {
+    for (const name of ["git", "bun", "node and npm", "Claude Code", "Claude Code login", "config", "display", "runner", "shell installed", "shell running", "start at login", "Codex", "Codex login"]) {
       expect(lines.some((l) => l.startsWith(`  ok    ${name}: `))).toBe(true);
     }
   });
@@ -221,6 +223,18 @@ describe("intuition doctor", () => {
     }
     // Not installed: neither its pid nor its login item is asked for.
     expect(text).toContain("start at login: the shell is not installed");
+  });
+
+  test("Codex is optional: not installed, or logged out, is shown with its fix and is not a failure", async () => {
+    const missing = await checks(platformFor("linux"), all({ codex: () => null }), display);
+    expect(missing.find((c) => c.name === "Codex")).toMatchObject({ ok: false, needed: false, detail: "not installed" });
+    expect(missing.some((c) => c.name === "Codex login")).toBe(false);
+    const out = all({ output: (cmd) => (cmd[0] === "/c/codex" && cmd[1] === "login" ? null : all().output(cmd)) });
+    const lines: string[] = [];
+    expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), out)).toBe(0);
+    const at = lines.findIndex((l) => l.startsWith("  --    Codex login: not logged in"));
+    expect(at).toBeGreaterThan(0);
+    expect(lines[at + 1]).toContain("codex login");
   });
 
   test("windows-wsl checks the Windows disk, and needs it; macOS has no display check", async () => {

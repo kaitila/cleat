@@ -22,12 +22,13 @@ export interface TestRunner extends Runner {
 
 /**
  * `dir` reuses an earlier runner's folders, as a restart does. `mounts` stands in for /mnt, which CI lacks.
- * `permissionMode` goes in the config file at the top, `workMode` on the "work" workspace. `sync`
+ * `permissionMode` goes in the config file at the top, `workMode` on the "work" workspace, and the
+ * same for `agent` and `workAgent`. `sync`
  * replaces the transcript sync's reader and timings (with the fake agent it reads no transcripts), and
  * `ops` what renames, forks and deletes transcripts.
  */
 export function testRunner(
-  options: { dir?: string; driver?: AgentDriver; mounts?: string; permissionMode?: string; workMode?: string; sync?: Partial<SyncOptions>; ops?: TranscriptOps } = {},
+  options: { dir?: string; driver?: AgentDriver; mounts?: string; permissionMode?: string; workMode?: string; agent?: string; workAgent?: string; sync?: Partial<SyncOptions>; ops?: TranscriptOps } = {},
 ): TestRunner {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), "intuition-runner-"));
   const workspace = join(dir, "work");
@@ -42,7 +43,8 @@ export function testRunner(
     env.INTUITION_CONFIG,
     JSON.stringify({
       ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
-      workspaces: [{ name: "work", path: workspace, ...(options.workMode ? { permissionMode: options.workMode } : {}) }, { name: "gone", path: join(dir, "gone") }],
+      ...(options.agent ? { agent: options.agent } : {}),
+      workspaces: [{ name: "work", path: workspace, ...(options.workMode ? { permissionMode: options.workMode } : {}), ...(options.workAgent ? { agent: options.workAgent } : {}) }, { name: "gone", path: join(dir, "gone") }],
     }),
   );
   const config = loadConfig(env);
