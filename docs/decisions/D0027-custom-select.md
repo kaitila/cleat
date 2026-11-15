@@ -7,7 +7,8 @@ The chat view's workspace filter and the settings page's permission mode were pl
 
 ## Decision
 - **`.select` in `base.css`, on a real `<select>`.** Where the browser can style the select's list (`appearance: base-select`, Chromium 135 and later; the shell's Electron 45 is Chromium 140), base.css draws it like a menu: a surface with `--shadow` and `--radius`, a hair below the button and at least as wide, rows that highlight under the pointer or the keys, and a check at the end of the chosen one. The button has a chevron that turns over while the list is open. `.quiet` and `.small` give the sidebar's quiet 20px filter.
-- **No JavaScript.** Keys, typing to jump, the `change` event, `select.value`, `options` and what a screen reader hears all stay the browser's, so `chat.js`, `settings.js` and the UI tests that call `selectOption` are unchanged.
+- **The chosen option shows in `<selectedcontent>`** inside a `<button>` that is the select's first child. The browser's own label can't shrink (it forces `overflow: visible` on the select), so without it a long workspace name wrapped and covered the search box. Code that rebuilds the options keeps the button (`renderWorkspaces` in chat.js removes options only).
+- **No JavaScript of its own.** Keys, typing to jump, the `change` event, `select.value`, `options` and what a screen reader hears all stay the browser's, so `settings.js` and the UI tests that call `selectOption` are unchanged, and `chat.js` changes only in keeping the button above.
 - **Elsewhere the OS's list shows.** Everything that styles the list sits in `@supports (appearance: base-select)`; a browser without it keeps the closed control's look and its own list.
 
 ## Alternatives

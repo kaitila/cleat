@@ -54,6 +54,8 @@
   padding: var(--space-3) var(--space-4);
 }
 .workspace + .workspace { border-top: var(--hairline) solid var(--line); }
+/* As wide as its longest choice ("As above"), so the column is even and a change doesn't move the path. */
+.workspace .mode { width: calc(var(--space-6) * 2 + var(--space-5)); }
 .workspace-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 5fr) auto; gap: var(--space-2); min-width: 0; }
 .workspace-actions { display: flex; align-items: center; gap: var(--space-1); }
 .workspace .field-error { grid-column: 1 / -1; margin: 0; }

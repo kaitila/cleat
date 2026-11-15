@@ -344,23 +344,44 @@ button:disabled, .button[aria-disabled="true"] { opacity: 0.5; cursor: default; 
   gap: var(--space-2);
   min-width: 0;
   height: var(--control);
+  min-height: var(--control);
   padding: 0 var(--space-2) 0 var(--space-3);
   border: var(--hairline) solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
-  transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease), color var(--motion) var(--ease);
+  outline: var(--ring) solid transparent;
+  outline-offset: 0;
+  transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease), color var(--motion) var(--ease), outline-color var(--motion) var(--ease);
 }
+/* Focused, it is an input: an accent border and the soft halo. The quiet one takes the plain ring. */
+.select:focus-visible { border-color: var(--accent); outline-color: var(--accent-soft); }
+.select.quiet:focus-visible { border-color: transparent; outline-color: var(--accent); outline-offset: var(--hairline); }
 .select:hover { background: var(--hover); }
 .select:disabled { background: var(--sunken); border-color: var(--line); cursor: default; }
 .select.quiet { border-color: transparent; background: transparent; color: var(--muted); }
 .select.quiet:hover { background: var(--hover); color: var(--text); }
-.select.small { height: var(--control-s); padding: 0 var(--space-1) 0 var(--space-2); border-radius: var(--radius-s); }
+.select.small { height: var(--control-s); min-height: var(--control-s); padding: 0 var(--space-1) 0 var(--space-2); border-radius: var(--radius-s); }
 
 @supports (appearance: base-select) {
   .select, .select::picker(select) { appearance: base-select; }
   .select.quiet:open { background: var(--hover); color: var(--text); }
+  /* The chosen option shows in <button><selectedcontent></selectedcontent></button>, the select's
+     first child, so a long one ends in "…" instead of pushing the chevron out (the browser's own
+     label can't shrink). The button is the select's own part, not a page button. */
+  .select > button {
+    all: unset;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+  }
+  .select selectedcontent { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* The chevron: two hairlines turned into a "v", which turns over while the list is open. */
   .select::picker-icon {
     content: "";
@@ -368,8 +389,8 @@ button:disabled, .button[aria-disabled="true"] { opacity: 0.5; cursor: default; 
     height: var(--space-1);
     margin: 0 var(--space-1) 0 auto;
     border: 0;
-    border-right: calc(var(--hairline) * 1.5) solid currentColor;
-    border-bottom: calc(var(--hairline) * 1.5) solid currentColor;
+    border-right: var(--hairline) solid currentColor;
+    border-bottom: var(--hairline) solid currentColor;
     color: var(--muted);
     transform: translateY(calc(0px - var(--space-1) / 2)) rotate(45deg);
     transition: transform var(--dur-snappy) var(--ease-snappy);
@@ -377,7 +398,8 @@ button:disabled, .button[aria-disabled="true"] { opacity: 0.5; cursor: default; 
   .select:open::picker-icon { transform: translateY(calc(var(--space-1) / 2)) rotate(225deg); }
 
   /* The list floats over the page like a menu: a card with the shadow, a hair below the button,
-     at least as wide as it. It springs in from the button and fades out quickly. */
+     at least as wide as it. It pops in from its middle, so it looks the same whether the browser
+     puts it below the button or, short of room, above; it fades out quickly. */
   .select::picker(select) {
     min-width: anchor-size(width);
     margin-block: var(--space-1);
@@ -389,7 +411,6 @@ button:disabled, .button[aria-disabled="true"] { opacity: 0.5; cursor: default; 
     box-shadow: var(--shadow);
     scrollbar-width: thin;
     opacity: 0;
-    transform-origin: top;
     transition: opacity var(--dur-out) var(--ease), display var(--dur-out) allow-discrete, overlay var(--dur-out) allow-discrete;
   }
   .select::picker(select):popover-open {
@@ -398,7 +419,7 @@ button:disabled, .button[aria-disabled="true"] { opacity: 0.5; cursor: default; 
     transition: opacity var(--dur-fade) var(--ease), transform var(--dur-snappy) var(--ease-snappy), display var(--dur-fade) allow-discrete, overlay var(--dur-fade) allow-discrete;
   }
   @starting-style {
-    .select::picker(select):popover-open { opacity: 0; transform: translateY(calc(0px - var(--rise))) scale(var(--pop)); }
+    .select::picker(select):popover-open { opacity: 0; transform: scale(var(--pop)); }
   }
 
   /* Options are rows, like a menu's: the one under the pointer or the keys is highlighted (the
@@ -574,5 +595,5 @@ kbd {
 .md [data-align="right"] { text-align: right; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  *, *::before, *::after, .select::picker-icon { animation: none !important; transition: none !important; }
 }
