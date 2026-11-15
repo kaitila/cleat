@@ -1432,6 +1432,7 @@ async function selfTest(): Promise<SelfTestResult> {
     // Under Chromium's sandbox on Linux (a CI runner, not root in WSL) the call can leave the process running:
     // the self-test kills it itself, as a crash would. The shell's part, hiding and replacing the window, is the same.
     if (!win.webContents.isCrashed()) {
+      r.dockCrashKilledBySelfTest = true;
       try {
         process.kill(win.webContents.getOSProcessId(), "SIGKILL");
       } catch (e) {
