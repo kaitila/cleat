@@ -1,4 +1,5 @@
 // Which URLs the shell's windows may load, and the runner's page addresses. No Electron imports here.
+import { SETTINGS_ALIAS, SETTINGS_PAGE } from "./prefs";
 
 /** True when `url` is on the runner's own origin (scheme, host and port all equal). */
 export function sameOrigin(url: string, runnerUrl: string): boolean {
@@ -17,6 +18,18 @@ export function promptUrl(runnerUrl: string): string {
 
 export function dockUrl(runnerUrl: string): string {
   return new URL("/dock", runnerUrl).href;
+}
+
+/** The Settings page, which the Settings window loads. */
+export function settingsUrl(runnerUrl: string): string {
+  return new URL(SETTINGS_PAGE, runnerUrl).href;
+}
+
+/** True for a link to the Settings page on the runner's origin: /settings or /assets/settings.html, with or without a query or fragment. */
+export function isSettingsLink(url: string, runnerUrl: string): boolean {
+  if (!sameOrigin(url, runnerUrl)) return false;
+  const path = new URL(url).pathname;
+  return path === SETTINGS_ALIAS || path === `${SETTINGS_ALIAS}/` || path === SETTINGS_PAGE;
 }
 
 /** The chat view, on one session when given its id. */
@@ -54,15 +67,17 @@ export function externalLink(url: string, runnerUrl: string): string | null {
 }
 
 /** What a link that a page opens in a new window leads to. */
-export type WindowTarget = { kind: "chat"; session?: string } | { kind: "prompt" };
+export type WindowTarget = { kind: "chat"; session?: string } | { kind: "prompt" } | { kind: "settings" };
 
 /**
  * The window a page's new-window link opens, or null when it is refused. From any page, the runner's
- * chat view (`/`, `/?session=<id>`) opens the chat window. From the dock, `/prompt` opens the pop-up.
+ * chat view (`/`, `/?session=<id>`) opens the chat window, and the Settings page (`/settings`,
+ * `/assets/settings.html`) the Settings window. From the dock, `/prompt` opens the pop-up.
  */
 export function windowTarget(url: string, runnerUrl: string, fromDock: boolean): WindowTarget | null {
   if (!sameOrigin(url, runnerUrl)) return null;
   const path = new URL(url).pathname;
   if (path === "/") return { kind: "chat", session: sessionOf(url) };
+  if (isSettingsLink(url, runnerUrl)) return { kind: "settings" };
   return fromDock && path === "/prompt" ? { kind: "prompt" } : null;
 }
