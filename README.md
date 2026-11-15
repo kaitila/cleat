@@ -68,9 +68,9 @@ It turns start at login off, quits and removes the tray app, stops the runner an
 ## Where settings live
 | What | Where |
 |---|---|
-| Configuration: workspaces, port, permission mode | `~/.config/intuition/config.json` |
+| Configuration: workspaces, port, permission mode, the theme, and the tray app's hotkeys, dock and start on login (the Settings window edits them) | `~/.config/intuition/config.json` |
 | Sessions, their events, the runner's log | `~/.local/share/intuition/` |
-| Windows: the tray app's own settings (hotkeys, the dock) | `%APPDATA%\intuition-shell\settings.json` |
+| Windows: where the tray app finds the runner (`runnerUrl` and `wsl` only) | `%APPDATA%\intuition-shell\settings.json` |
 | Windows: the installed tray app | `%LOCALAPPDATA%\intuition\` |
 
 On Windows the first two are inside WSL. `INTUITION_CONFIG`, `INTUITION_DATA_DIR` and `INTUITION_PORT` move the configuration file, the data folder and the port.
