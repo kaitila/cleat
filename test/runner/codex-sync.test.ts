@@ -135,8 +135,9 @@ function lateTailDriver(c: CodexHome): AgentDriver {
       yield { type: "session_id", id };
       c.turn(id, input.prompt, "ok", { end: false });
       yield { type: "event", event: { kind: "assistant_text", text: "ok" } };
-      yield { type: "event", event: { kind: "result", ok: true, text: "ok" } };
+      // The runner stops reading at the result: the late write is set up before it.
       setTimeout(() => c.complete(id, "ok"), 60);
+      yield { type: "event", event: { kind: "result", ok: true, text: "ok" } };
     },
   };
 }
