@@ -15,7 +15,7 @@ import { DEFAULT_SETTINGS, dropLegacy, hasLegacy, loadSettings, parseSettings, P
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
 import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
-import { dockArea, opaqueDockBounds } from "../../shell/src/os";
+import { defaultHotkeys, dockArea, opaqueDockBounds, shellOs } from "../../shell/src/os";
 import type { Area } from "../../shell/src/geometry";
 import { captureWithheld, expectedExternal, pngSize, problems, selfTestRun, skipped, type Where, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
 
@@ -237,7 +237,8 @@ describe("settings from the runner", () => {
   test("the migration sends the old file's values, the defaults for the rest, and start on login as Windows has it", () => {
     expect(migratedPrefs({}, false)).toEqual({ ...SHELL_DEFAULTS, startOnLogin: false });
     expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: SHELL_DEFAULTS.snipHotkey, dock: false, startOnLogin: true });
-    expect(SHELL_DEFAULTS).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true });
+    // Control+Alt on Windows and Linux, Command+Shift on a Mac (shell/src/os.ts).
+    expect(SHELL_DEFAULTS).toEqual({ ...defaultHotkeys(shellOs()), dock: true });
   });
 
   /** A stand-in for globalShortcut: some accelerators are taken by another program, some throw as Electron does for one that is not valid. */

@@ -64,7 +64,7 @@ It shares the runner (port 4777) with the Windows shell, and both shells registe
 ## The self-test, per layout
 `bun src/shell/selftest-run.ts` installs the shell for this machine's layout, starts a stub runner and runs the shell with `--self-test`, then checks every field it wrote against that layout: the paths it saves (`<temp>\intuition\` on Windows, `<temp>/intuition/` elsewhere), the dock's place (below the menu bar on a Mac, the island's size when opaque), and the rest as on Windows. It is skipped when `CI` is set; the CI jobs with a desktop run it with `env -u CI`. What it cannot judge for a known reason is printed as `skipped:` with why, and does not fail it: macOS without Screen Recording, and WSLg's empty captures.
 
-CI runs it on `macos-latest` (job `macos`, after the unit tests) and on Ubuntu under Xvfb (job `linux-shell`: no compositor, so the opaque dock, and no tray host).
+CI runs it on `macos-latest` (job `macos`, after the unit tests). An Ubuntu job under Xvfb was tried and left out: it got through the hotkeys, the tray, the clipboard, the pop-up and every state of the opaque dock, then the dock's page crash was not noticed and the self-test ran out of time (T-0032's PR, follow-up task).
 
 ## What was tried where
 | What | Where | When | Seen |
