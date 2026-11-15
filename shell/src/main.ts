@@ -1,28 +1,35 @@
-// The Windows shell: Electron's main process. It lives in the tray, opens the pop-up on the global
-// hotkey with the clipboard captured, freezes the screens for a snip on the second hotkey, shows the
-// runner's pages in small windows, and keeps the dock at the top of the screen.
+// The shell: Electron's main process, on Windows (the runner in WSL), macOS or Linux (the runner on the
+// same machine). It lives in the tray (the menu bar on a Mac), opens the pop-up on the global hotkey
+// with the clipboard captured, freezes the screens for a snip on the second hotkey, shows the runner's
+// pages in small windows, and keeps the dock at the top of the screen. What differs per OS is in ./os.
 // Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
 import { spawn } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, Notification, screen, session, shell, Tray } from "electron";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, Notification, screen, session, shell, systemPreferences, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
 import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, takesMouse, watchMs } from "./dock";
 import { centred, iconBitmap } from "./geometry";
-import { APP_ID, loginItem, type LoginResult } from "./login";
+import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
+import { dockArea, dockTransparent, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, selfTestHotkeys, shellOs } from "./os";
 import { chatUrl, dockUrl, externalLink, promptUrl, sameOrigin, windowTarget } from "./origin";
 import type { SelfTestResult } from "./result";
 import { loadSettings, PID_FILE, saveDock, SETTINGS_FILE, type Settings } from "./settings";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
-import { RUNNER_START_MS, runnerCommand } from "./wsl";
+import { RUNNER_START_MS } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
 const CHAT = { width: 1100, height: 720 };
 const ICON_SIZE = 32;
+const OS = shellOs();
 /** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
-const SELF_TEST_HOTKEY = "Control+Alt+Shift+F11";
-const SELF_TEST_SNIP_HOTKEY = "Control+Alt+Shift+F10";
+const { hotkey: SELF_TEST_HOTKEY, snipHotkey: SELF_TEST_SNIP_HOTKEY } = selfTestHotkeys(OS);
+/** False on a Linux X11 desktop without a compositor: the dock is then an opaque window the island's size. */
+const DOCK_TRANSPARENT = dockTransparent(OS);
+/** What an opaque dock (and the snip, before its page draws) shows behind the page. */
+const OPAQUE_BACKGROUND = "#0f0f11";
 /** Pages get no Node and their own sandboxed process. Only the dock and the snip overlays add a preload, each for its own small bridge. */
 const WEB_PREFERENCES = { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } as const;
 
@@ -38,6 +45,14 @@ type Clip = { kind: "image"; png: Buffer } | { kind: "text"; text: string } | { 
 
 function icon() {
   return nativeImage.createFromBitmap(iconBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE });
+}
+
+/** The tray's icon. On a Mac, a template image for the menu bar: 16 points at 2x, drawn by macOS from its alpha in the bar's colour. */
+function trayIcon() {
+  if (OS !== "macos") return icon();
+  const image = nativeImage.createFromBitmap(iconBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE, scaleFactor: 2 });
+  image.setTemplateImage(true);
+  return image;
 }
 
 /** The shell's own trouble only (the runner is not running, the hotkey is taken). Sessions show in the dock. */
@@ -59,19 +74,21 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let starting: Promise<boolean> | null = null;
 
 /**
- * True once the runner answers. When it does not, the shell starts it in WSL, if `shell install`
- * wrote where it lives, and waits up to ten seconds. Callers at the same moment share one start.
+ * True once the runner answers. When it does not, the shell starts it, if `shell install` wrote where
+ * it lives (in WSL on Windows, this machine's repo and bun on macOS and Linux), and waits up to ten
+ * seconds. Callers at the same moment share one start.
  */
 function ensureRunner(): Promise<boolean> {
   starting ??= (async () => {
     if (await runnerAnswers()) return true;
     // The self-test never starts a runner: it has its stub, and checks what happens without one.
-    const wsl = settings.wsl;
-    if (args.selfTest || !wsl) return false;
-    const { file, args: wslArgs } = runnerCommand(wsl, process.env.SystemRoot);
+    const how = runnerSpawn(OS, settings, process.env.SystemRoot);
+    if (args.selfTest || !how) return false;
     // An array of arguments and no shell. windowsHide: wsl.exe is a console program, and no console window may flash.
-    const child = spawn(file, wslArgs, { stdio: "ignore", windowsHide: true, shell: false });
-    child.on("error", (e) => console.error("starting the runner in WSL failed", e));
+    // A local runner is a detached child of its own: `intuition start` hands off to the runner and exits, and the runner outlives the shell.
+    const child = spawn(how.file, how.args, { stdio: "ignore", windowsHide: true, shell: false, detached: how.detached });
+    child.on("error", (e) => console.error("starting the runner failed", e));
+    if (how.detached) child.unref();
     const end = Date.now() + RUNNER_START_MS;
     while (Date.now() < end) {
       await sleep(300);
@@ -96,22 +113,40 @@ function ensureRunner(): Promise<boolean> {
 function runnerDown(): void {
   // The self-test checks that no window opens; it does not put a toast on the person's screen.
   if (args.selfTest) return;
-  const how = settings.wsl
-    ? "The shell tried to start it in WSL and it did not come up. In WSL: intuition start, and intuition logs"
-    : "Start it in WSL: intuition up";
+  const how = runnerDownHint(OS, runnerSpawn(OS, settings) !== null);
   notify("intuition: the runner is not running", `Nothing answers at ${settings.runnerUrl}. ${how}`);
 }
 
 // --- Start on login ---
 
+/**
+ * Where start on login lives, on a Mac or on Linux: a launch agent or an XDG autostart file that runs
+ * this Electron on the app folder, as `shell start` does. On Windows, null: Electron's login item.
+ */
+function loginFile(): { file: string; text: string } | null {
+  if (OS === "windows") return null;
+  // As `shell start` runs it: Chromium will not start as root with its sandbox (WSL's default user).
+  const flags = OS === "linux" && process.getuid?.() === 0 ? ["--no-sandbox"] : [];
+  const argv = [...flags, app.getAppPath()];
+  return OS === "macos"
+    ? { file: launchAgentFile(homedir()), text: launchAgentPlist(process.execPath, argv) }
+    : { file: autostartFile(homedir()), text: autostartEntry(process.execPath, argv) };
+}
+
 /** The same executable and arguments for setting and for reading: Electron compares them. */
 function startsOnLogin(): boolean {
+  const login = loginFile();
+  if (login) return existsSync(login.file);
   return app.getLoginItemSettings(loginItem(process.execPath, app.getAppPath())).openAtLogin;
 }
 
 /** Only the tray's checkbox and `--login on|off` come here. */
 function setStartOnLogin(on: boolean): void {
-  app.setLoginItemSettings({ ...loginItem(process.execPath, app.getAppPath()), openAtLogin: on, name: APP_ID });
+  const login = loginFile();
+  if (!login) return app.setLoginItemSettings({ ...loginItem(process.execPath, app.getAppPath()), openAtLogin: on, name: APP_ID });
+  if (!on) return rmSync(login.file, { force: true });
+  mkdirSync(dirname(login.file), { recursive: true });
+  writeFileSync(login.file, login.text);
 }
 
 /** --login on|off|status: does it, writes the outcome, tells a running shell to redraw its menu, and quits. */
@@ -275,6 +310,8 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
       win.show();
       win.focus();
     }
+    // Linux: an X window manager may place a window as it maps it, wherever it likes (WSLg's puts it at 0,0). Placed again once shown.
+    if (OS === "linux" && !sameArea(win.getContentBounds(), bounds)) win.setBounds(bounds);
     return win;
   } catch (e) {
     console.error("opening the pop-up failed", e);
@@ -347,7 +384,7 @@ function trayMenu(): Menu {
         } catch (e) {
           notify("intuition: start on login was not changed", e instanceof Error ? e.message : String(e));
         }
-        // Drawn again from what Windows now says.
+        // Drawn again from what the OS now says.
         tray?.setContextMenu(trayMenu());
       },
     },
@@ -357,7 +394,7 @@ function trayMenu(): Menu {
 }
 
 function createTray(): Tray {
-  const t = new Tray(icon());
+  const t = new Tray(trayIcon());
   t.setToolTip("intuition");
   t.setContextMenu(trayMenu());
   t.on("double-click", () => void openChat());
@@ -436,7 +473,7 @@ function overlayWindow(display: Electron.Display): BrowserWindow {
     enableLargerThanScreen: true,
     alwaysOnTop: true,
     skipTaskbar: true,
-    backgroundColor: "#0f0f11",
+    backgroundColor: OPAQUE_BACKGROUND,
     title: "intuition snip",
     // Not throttled while hidden: the page waits, loaded, for the key, and must draw at once.
     webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) },
@@ -521,7 +558,22 @@ function snip(inactive = false): Promise<SnipOpened | null> {
   return snipOpening;
 }
 
+/** Says once per start that macOS has not given Screen Recording, with a click that opens its pane. True when the snip can see the screens. */
+let screenSaid = false;
+function checkScreenAccess(): boolean {
+  const ok = screenAllowed(OS, OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted");
+  if (!ok && !screenSaid && !args.selfTest && Notification.isSupported()) {
+    screenSaid = true;
+    const n = new Notification({ title: SCREEN_RECORDING_NOTICE.title, body: SCREEN_RECORDING_NOTICE.body });
+    n.on("click", () => void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e)));
+    n.show();
+  }
+  return ok;
+}
+
 async function openSnip(inactive: boolean): Promise<SnipOpened | null> {
+  // Without Screen Recording the snip still opens: macOS gives the wallpaper, and the notice says why.
+  checkScreenAccess();
   const started = performance.now();
   const phases: Record<string, number> = {};
   const mark = (name: string) => (phases[name] = Math.round(performance.now() - started));
@@ -645,11 +697,30 @@ let dockIgnoresMouse = true;
 let dockCursor = (): Electron.Point => screen.getCursorScreenPoint();
 let dockWatch: ReturnType<typeof setTimeout> | null = null;
 
-/** Puts the dock's window in its one place, on the primary display as it is now. Never called for a change of state. */
+/**
+ * Where the transparent dock's window is, on the primary display as it is now: touching the very top
+ * edge (the display's bounds, not its work area), or on a Mac just below the menu bar.
+ */
+function dockPlace(): Electron.Rectangle {
+  const display = screen.getPrimaryDisplay();
+  return dockBounds(dockArea(OS, display.bounds, display.workArea));
+}
+
+/** The window's bounds: its one place, or for an opaque dock the island of the state the page last reported, at the top centre of that place. */
+function dockWindowBounds(): Electron.Rectangle {
+  return DOCK_TRANSPARENT ? dockPlace() : opaqueDockBounds(dockPlace(), islandRect(dockState ?? "idle"));
+}
+
+/** Puts the dock's window in its place. Called for a change of display, and for an opaque dock's change of state only (fitOpaqueDock). */
 function placeDock(): void {
   if (!dock || dock.isDestroyed()) return;
-  // The display's bounds, not its work area: the dock touches the very top edge.
-  dock.setBounds(dockBounds(screen.getPrimaryDisplay().bounds));
+  const want = dockWindowBounds();
+  if (!sameArea(dock.getBounds(), want)) dock.setBounds(want);
+}
+
+/** An opaque dock's window is the island, so it follows the state. A transparent dock is never resized or moved for a state. */
+function fitOpaqueDock(): void {
+  if (!DOCK_TRANSPARENT) placeDock();
 }
 
 /** Tells the window whether to take the mouse, when that changes. */
@@ -669,7 +740,8 @@ function setDockMouse(win: BrowserWindow, takes: boolean): void {
 function watchDockMouse(): number {
   const win = dock;
   if (!win || win.isDestroyed()) return DOCK_WATCH_FAR_MS;
-  const bounds = win.getBounds();
+  // An opaque dock's window is only the island: the island is found from where the transparent window would be.
+  const bounds = DOCK_TRANSPARENT ? win.getBounds() : dockPlace();
   const cursor = dockCursor();
   // A page that has reported nothing, or a window that is not shown, takes nothing.
   const state = dockLoaded ? dockState : null;
@@ -694,6 +766,7 @@ function forgetDockState(): void {
   dockState = null;
   const win = dock;
   if (!win || win.isDestroyed()) return;
+  fitOpaqueDock();
   setDockMouse(win, false);
   if (win.isFocused()) win.blur();
   if (win.isFocusable()) {
@@ -715,6 +788,7 @@ function setDockState(state: DockState): void {
     // On Windows, making a window focusable puts it back in the taskbar.
     win.setSkipTaskbar(true);
   }
+  fitOpaqueDock();
   // At once, not at the next look: the island just changed under the cursor.
   watchDockMouseLoop();
 }
@@ -735,11 +809,11 @@ function closeDock(): void {
 
 function createDock(): BrowserWindow {
   const win = new BrowserWindow({
-    ...dockBounds(screen.getPrimaryDisplay().bounds),
+    ...dockWindowBounds(),
     show: false,
     frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
+    transparent: DOCK_TRANSPARENT,
+    backgroundColor: DOCK_TRANSPARENT ? "#00000000" : OPAQUE_BACKGROUND,
     hasShadow: false,
     // No thick frame: no shadow, no edges to drag, no square outline around the island.
     thickFrame: false,
@@ -756,6 +830,8 @@ function createDock(): BrowserWindow {
     title: "intuition dock",
     webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) },
   });
+  // On a Mac: on every Space, and beside full-screen apps.
+  if (OS === "macos") win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // The default, before any page: every click goes through the window to what is under it.
   dockState = null;
   dockIgnoresMouse = true;
@@ -890,6 +966,8 @@ async function selfTest(): Promise<SelfTestResult> {
     snipHotkeyRegistered: false, snipDisplays: null, snipOverlayBounds: null, snipOverlaysShown: false, snipUrl: null, snipMs: null, snipPhases: null,
     snipCaptured: null, snipBridge: null, snipCropRect: null, snipCropPath: null, snipBadRectsRefused: false, snipClosed: false, snipEscClosed: false,
     externalLinks: [], errors: [],
+    os: OS, dockTransparent: DOCK_TRANSPARENT, primaryWorkArea: null,
+    screenAccess: OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted",
   };
   const step = async (name: string, run: () => Promise<void>) => {
     try {
@@ -980,7 +1058,8 @@ async function selfTest(): Promise<SelfTestResult> {
   await step("dock", async () => {
     // The cursor is made up from here on: the self-test cannot move the real one. The watching is the real loop.
     const display = screen.getPrimaryDisplay().bounds;
-    const windowAt = dockBounds(display);
+    // Where the transparent window is, and the island is found from, for an opaque dock too.
+    const windowAt = dockPlace();
     /** A point on the screen from one inside the dock's window. */
     const spot = (x: number, y: number): Electron.Point => ({ x: windowAt.x + x, y: windowAt.y + y });
     const middle = (state: DockState) => {
@@ -1008,6 +1087,7 @@ async function selfTest(): Promise<SelfTestResult> {
     r.dockUrl = win.webContents.getURL();
     r.dockVisible = win.isVisible();
     r.primaryDisplay = display;
+    r.primaryWorkArea = screen.getPrimaryDisplay().workArea;
     const run = (code: string) => win.webContents.executeJavaScript(code, true);
     r.dockBridge = String(await run("typeof window.intuitionDock + ':' + Object.keys(window.intuitionDock ?? {}).join(',') + ':' + typeof window.require + ':' + typeof window.process"));
     /** Asks through the page, as the page would, and waits for the shell to take it (or not). */
@@ -1185,16 +1265,36 @@ function start(): void {
 
   tray = createTray();
   snipKeepWarm = true;
+  // Under Wayland a shortcut can fail to register although nobody holds it: the tray has both actions.
+  const fallback = OS === "linux" && linuxOzone() === "wayland" ? " Under Wayland global shortcuts may not register at all: the tray's New task and Snip do the same." : "";
   if (!globalShortcut.register(settings.hotkey, newTask)) {
-    notify("intuition: the hotkey is taken", `${settings.hotkey} could not be registered. Change "hotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
+    notify("intuition: the hotkey is taken", `${settings.hotkey} could not be registered. Change "hotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.${fallback}`);
   }
   if (!globalShortcut.register(settings.snipHotkey, () => void snip())) {
-    notify("intuition: the snip hotkey is taken", `${settings.snipHotkey} could not be registered. Change "snipHotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.`);
+    notify("intuition: the snip hotkey is taken", `${settings.snipHotkey} could not be registered. Change "snipHotkey" in ${join(app.getPath("userData"), SETTINGS_FILE)} and start the shell again.${fallback}`);
   }
+  if (OS === "macos") checkScreenAccess();
+  if (OS === "linux") void sayLinuxNotices();
   // The runner is started here when it is not up: after a login, nobody has started it yet.
   if (args.session) void openChat(args.session);
   else void ensureRunner().then((up) => (up ? undefined : runnerDown()));
   watchDock();
+}
+
+/** What may not work on this Linux desktop (no tray icon on GNOME without AppIndicator, hotkeys under Wayland), said once at start. */
+async function sayLinuxNotices(): Promise<void> {
+  // gnome-extensions answers what is enabled; when it is missing or fails, nothing is said about the tray.
+  const enabled = isGnome()
+    ? await new Promise<string | null>((resolve) => {
+        // An array of arguments and no shell, as the runner's start.
+        const child = spawn("gnome-extensions", ["list", "--enabled"], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 3000 });
+        let out = "";
+        child.stdout?.on("data", (chunk) => (out += String(chunk)));
+        child.on("error", () => resolve(null));
+        child.on("close", (code) => resolve(code === 0 ? out : null));
+      })
+    : null;
+  for (const n of linuxNotices(process.env, enabled)) notify(n.title, n.body);
 }
 
 /** False for a second copy (the running shell has been handed this command line) and for --quit with no shell running. */
@@ -1207,6 +1307,10 @@ function shouldRun(): boolean {
   return app.requestSingleInstanceLock() && !args.quit;
 }
 
+// Linux with an X display (XWayland on a Wayland desktop included): X11, where global shortcuts, window
+// placement and always-on-top work. Without DISPLAY, Electron's own choice (Wayland). Set before ready.
+if (OS === "linux" && linuxOzone() === "x11" && !app.commandLine.hasSwitch("ozone-platform")) app.commandLine.appendSwitch("ozone-platform", "x11");
+
 if (args.login) {
   // Before the single-instance lock: this works beside a running shell. The app id names the login item.
   const action = args.login;
@@ -1217,6 +1321,8 @@ if (args.login) {
 } else {
   // Windows notifications need an app id, and the login item is named after it.
   app.setAppUserModelId(APP_ID);
+  // On a Mac the shell lives in the menu bar only: no Dock icon, and no app switcher entry.
+  if (OS === "macos") app.dock?.hide();
   // The shell stays in the tray when its windows close.
   app.on("window-all-closed", () => {});
   app.on("will-quit", () => globalShortcut.unregisterAll());

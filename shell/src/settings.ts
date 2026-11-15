@@ -1,6 +1,7 @@
 // The shell's settings: one JSON file in the app's user data folder. No Electron imports here.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { defaultHotkeys, type LocalRunner, parseLocalRunner, type ShellOs, shellOs } from "./os";
 import { parseWsl, type WslSettings } from "./wsl";
 
 export interface Settings {
@@ -12,11 +13,19 @@ export interface Settings {
   snipHotkey: string;
   /** Whether the dock is shown at the top of the screen. The tray's "Show dock" checkbox writes it. */
   dock: boolean;
-  /** Where the runner lives in WSL, so the shell can start it. Absent until `shell install` has written it. */
+  /** Windows: where the runner lives in WSL, so the shell can start it. Absent until `shell install` has written it. */
   wsl?: WslSettings;
+  /** macOS and Linux: the repo and bun on this machine, so the shell can start the runner. Absent until `shell install` has written it. */
+  runner?: LocalRunner;
 }
 
-export const DEFAULT_SETTINGS: Settings = { runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true };
+/** The defaults on an OS: the hotkeys use Command on a Mac. */
+export function defaultSettings(os: ShellOs): Settings {
+  return { runnerUrl: "http://127.0.0.1:4777", ...defaultHotkeys(os), dock: true };
+}
+
+/** The defaults on the OS this runs on. */
+export const DEFAULT_SETTINGS: Settings = defaultSettings(shellOs());
 export const SETTINGS_FILE = "settings.json";
 /** The running shell's Windows pid, beside the settings: `up` waits for that process to end before it installs over it. */
 export const PID_FILE = "shell.pid";
@@ -32,20 +41,23 @@ function httpUrl(value: unknown): string | null {
 }
 
 /** The settings in a file's text. Anything missing or malformed falls back to its default. */
-export function parseSettings(text: string): Settings {
+export function parseSettings(text: string, defaults: Settings = DEFAULT_SETTINGS): Settings {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
   } catch {
-    return { ...DEFAULT_SETTINGS };
+    return { ...defaults };
   }
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const wsl = parseWsl(o.wsl);
+  const runner = parseLocalRunner(o.runner);
   return {
-    runnerUrl: httpUrl(o.runnerUrl) ?? DEFAULT_SETTINGS.runnerUrl,
-    hotkey: typeof o.hotkey === "string" && o.hotkey.trim() ? o.hotkey.trim() : DEFAULT_SETTINGS.hotkey,
-    snipHotkey: typeof o.snipHotkey === "string" && o.snipHotkey.trim() ? o.snipHotkey.trim() : DEFAULT_SETTINGS.snipHotkey,
-    dock: typeof o.dock === "boolean" ? o.dock : DEFAULT_SETTINGS.dock,
-    ...(parseWsl(o.wsl) ? { wsl: parseWsl(o.wsl) } : {}),
+    runnerUrl: httpUrl(o.runnerUrl) ?? defaults.runnerUrl,
+    hotkey: typeof o.hotkey === "string" && o.hotkey.trim() ? o.hotkey.trim() : defaults.hotkey,
+    snipHotkey: typeof o.snipHotkey === "string" && o.snipHotkey.trim() ? o.snipHotkey.trim() : defaults.snipHotkey,
+    dock: typeof o.dock === "boolean" ? o.dock : defaults.dock,
+    ...(wsl ? { wsl } : {}),
+    ...(runner ? { runner } : {}),
   };
 }
 

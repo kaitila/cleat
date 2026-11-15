@@ -422,10 +422,13 @@ describe("the dock", () => {
   test("the shell never resizes or moves the dock for a state: setBounds is called in one place, and never setSize", () => {
     const main = readFileSync(join(import.meta.dir, "..", "..", "shell", "src", "main.ts"), "utf8");
     const body = (name: string) => main.match(new RegExp("function " + name + "\\([^)]*\\)[^{]*\\{[\\s\\S]*?\\n\\}"))?.[0] ?? "";
-    expect(body("placeDock")).toContain("dock.setBounds(dockBounds(screen.getPrimaryDisplay().bounds))");
+    expect(body("placeDock")).toContain("dock.setBounds(want)");
+    expect(body("dockWindowBounds")).toContain("DOCK_TRANSPARENT ? dockPlace() : opaqueDockBounds(dockPlace(), islandRect(dockState ?? \"idle\"))");
+    // A state reaches the window's bounds only through fitOpaqueDock, which does nothing for a transparent dock.
+    expect(body("fitOpaqueDock")).toContain("if (!DOCK_TRANSPARENT) placeDock();");
     for (const name of ["setDockState", "onDockState", "watchDockMouse", "setDockMouse", "forgetDockState"]) {
       expect(body(name).length).toBeGreaterThan(40);
-      expect(name + ": " + /setBounds|setSize|setPosition|setContentSize|placeDock/.test(body(name))).toBe(name + ": false");
+      expect(name + ": " + /setBounds|setSize|setPosition|setContentSize|placeDock/.test(body(name).replace("fitOpaqueDock()", ""))).toBe(name + ": false");
     }
     expect(main.match(/dock\.setBounds\(/g)).toHaveLength(1);
     expect(main).not.toMatch(/dock\.(setSize|setContentSize|setPosition)\(/);
@@ -469,15 +472,15 @@ describe("the dock", () => {
   test("main.ts: the window is frameless, clear, on top, out of the taskbar, never activated, and placed from the display's bounds", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     const create = main.slice(main.indexOf("function createDock()"), main.indexOf("async function loadDock()"));
-    for (const option of ["frame: false", "transparent: true", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
+    for (const option of ["frame: false", "transparent: DOCK_TRANSPARENT", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
     expect(create).toContain('win.on("will-resize", (event) => event.preventDefault());');
     const dockCode = main.slice(main.indexOf("// --- Dock ---"), main.indexOf("// --- Self-test ---"));
     // Shown without activating, and never focused by the shell.
     expect(dockCode).toContain("win.showInactive();");
     expect(dockCode).not.toMatch(/\.show\(\)|\.focus\(\)/);
-    // The primary display's bounds, not its work area.
-    expect(dockCode.match(/screen\.getPrimaryDisplay\(\)\.bounds/g)).toHaveLength(2);
-    expect(dockCode).not.toContain("workArea");
+    // From the primary display, through dockArea: its bounds on Windows and Linux, from the work area's top on a Mac.
+    expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea));");
+    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(1);
     for (const event of ["display-metrics-changed", "display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", placeDock);`);
   });
 
@@ -626,7 +629,9 @@ describe("the snip", () => {
 
   test("main.ts: links elsewhere go through externalLink to the browser; the self-test opens none", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
-    expect(main.match(/shell\.openExternal\(/g)).toHaveLength(1);
+    // The other one opens System Settings' Screen Recording pane, a constant, when its notice is clicked.
+    expect(main.match(/shell\.openExternal\(/g)).toHaveLength(2);
+    expect(main).toContain("shell.openExternal(SCREEN_RECORDING_PANE)");
     const open = main.slice(main.indexOf("function openExternal("));
     const body = open.slice(0, open.indexOf("\n}\n"));
     expect(body).toContain("const link = externalLink(url, settings.runnerUrl);");
@@ -646,9 +651,11 @@ describe("no toasts for sessions", () => {
       expect(`${name}: ${/api\/notifications|toastOf|pollOnce|Open last session|lastSession/.test(code)}`).toBe(`${name}: false`);
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
-    // The one Notification left is notify(): the runner is not running or is older than the shell, the hotkey is taken, start on login failed.
-    expect(main.match(/new Notification\(/g)).toHaveLength(1);
-    expect(main.match(/\bnotify\(/g)).toHaveLength(6);
+    // notify(): the runner is not running or is older than the shell, the hotkey is taken, start on login failed, the
+    // Linux desktop may hide the tray or the hotkeys. The other Notification: macOS has not given Screen Recording.
+    expect(main.match(/new Notification\(/g)).toHaveLength(2);
+    expect(main).toContain("new Notification({ title: SCREEN_RECORDING_NOTICE.title, body: SCREEN_RECORDING_NOTICE.body })");
+    expect(main.match(/\bnotify\(/g)).toHaveLength(7);
     expect(main).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
     for (const title of ["intuition: the runner is not running", "intuition: the hotkey is taken", "intuition: the snip hotkey is taken", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
     expect(main).toContain("app.setAppUserModelId(");
@@ -677,6 +684,7 @@ describe("self-test runner", () => {
     snipMs: 240, snipPhases: { warm: 1, captured: 150, drawn: 230 }, snipCaptured: true, snipBridge: "object:close,crop,getCapture:undefined:undefined",
     snipCropRect: SELF_TEST_CROP, snipCropPath: "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\snip-20261113-120000-000.png", snipBadRectsRefused: true,
     snipClosed: true, snipEscClosed: true, externalLinks: expectedExternal("http://127.0.0.1:5000"), errors: [],
+    os: "windows", dockTransparent: true, primaryWorkArea: { ...display, height: 1400 }, screenAccess: "granted",
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
   /** A PNG header of a given size: what the stand-in reader gives for every path. */
@@ -712,12 +720,13 @@ describe("self-test runner", () => {
 
   test("the dock's bounds are judged against the display the shell reported", () => {
     // The same dock on another display is in the wrong place four times: idle, peek, open, and back.
-    expect(check({ ...good, primaryDisplay: { ...display, width: 1920 } })).toHaveLength(4);
+    const narrow = { ...display, width: 1920 };
+    expect(check({ ...good, primaryDisplay: narrow, primaryWorkArea: narrow })).toHaveLength(4);
     // On the display's top edge, wherever that is.
     const lower = { ...display, y: 300 };
-    expect(check({ ...good, primaryDisplay: lower })).toHaveLength(4);
+    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower })).toHaveLength(4);
     const at = { ...good.dockIdleBounds!, y: 300 };
-    expect(check({ ...good, primaryDisplay: lower, dockIdleBounds: at, dockPeekBounds: at, dockOpenBounds: at, dockBackBounds: at })).toEqual([]);
+    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower, dockIdleBounds: at, dockPeekBounds: at, dockOpenBounds: at, dockBackBounds: at })).toEqual([]);
     for (const bad of [null, {}, { x: 0, y: 0, width: 0, height: 0 }, { x: "0", y: 0, width: 100, height: 100 }]) expect(check({ ...good, primaryDisplay: bad as never }).length).toBeGreaterThanOrEqual(5);
     // The window is the same in every state: one that grew, shrank or moved for a state is a failure.
     expect(check({ ...good, dockOpenBounds: { ...good.dockOpenBounds!, height: 481 } })).toHaveLength(1);
@@ -892,11 +901,13 @@ describe("starting the runner from Windows", () => {
   test("main.ts spawns that command without a shell or a window, and waits ten seconds", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     expect(RUNNER_START_MS).toBe(10_000);
-    expect(main).toContain("spawn(file, wslArgs, { stdio: \"ignore\", windowsHide: true, shell: false })");
-    expect(main.match(/\bspawn\(/g)).toHaveLength(1);
+    expect(main).toContain("spawn(how.file, how.args, { stdio: \"ignore\", windowsHide: true, shell: false, detached: how.detached })");
+    // The other spawn asks gnome-extensions what is enabled, also without a shell.
+    expect(main.match(/\bspawn\(/g)).toHaveLength(2);
+    expect(main).toContain('spawn("gnome-extensions", ["list", "--enabled"], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 3000 })');
     expect(main).not.toMatch(/\bexec(Sync|File|FileSync)?\(/);
     // The self-test never starts a runner.
-    expect(main).toContain("if (args.selfTest || !wsl) return false;");
+    expect(main).toContain("if (args.selfTest || !how) return false;");
   });
 });
 
