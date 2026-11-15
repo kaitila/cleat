@@ -92,7 +92,7 @@ A configuration looks like this:
 `permissionMode`, at the top or on one workspace, is `"auto"` (the default) or `"default"`. In `auto`, Claude Code's own classifier allows or denies each tool call, and only the calls it can't decide come to you as Allow / Deny cards. In `default`, every call that would ask you in a terminal waits for you in the chat view. No other mode is accepted: intuition never skips permissions. See [D0012](docs/decisions/D0012-auto-mode.md).
 
 ## Sessions and the terminal
-Sessions sync with Claude Code both ways ([D0015](docs/decisions/D0015-transcript-sync.md)). A session you start with `claude` in a workspace's folder shows up in intuition within a few seconds, and intuition's sessions show up in `claude --resume` by their title. If a terminal wrote to a session in the last two minutes, a reply from intuition asks before sending, so two programs don't write to one conversation at once.
+Sessions sync with Claude Code both ways ([D0015](docs/decisions/D0015-transcript-sync.md)), and Codex threads started in a workspace's folder (`codex`, `codex exec`) show up too, read from `~/.codex/sessions` ([D0031](docs/decisions/D0031-codex-transcript-sync.md)). A session you start with `claude` in a workspace's folder shows up in intuition within a few seconds, and intuition's sessions show up in `claude --resume` by their title. If a terminal wrote to a session in the last two minutes, a reply from intuition asks before sending, so two programs don't write to one conversation at once.
 
 ## Commands
 | Command | What it does |

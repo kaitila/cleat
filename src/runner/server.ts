@@ -34,7 +34,7 @@ import { layoutOrNull, parseReport, ShellState } from "./platform";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
 import { settingsOf, validateSettings, writeSettings } from "./settings";
 import { Store } from "./store";
-import { Sync, noTranscripts, type SyncOptions } from "./sync";
+import { Sync, noThreads, noTranscripts, type SyncOptions } from "./sync";
 
 export const VERSION = "0.1.0";
 const WEB_DIR = join(import.meta.dir, "..", "web");
@@ -324,7 +324,7 @@ const SHELL_TOPIC = "shell";
 /**
  * Starts the runner. `driver` replaces the agent the config asks for, `mounts` the rule for image
  * paths (by default this layout's: /mnt for windows-wsl, <temp>/intuition/ on macOS and Linux), and `sync` the transcript sync's reader and timings (all for tests:
- * CI has no /mnt/c and no transcripts). With the fake agent there are no transcripts to read.
+ * CI has no /mnt/c and no transcripts). With the fake agent there are no transcripts to read, Claude Code's or Codex's.
  * `ops` replaces what renames, forks and deletes transcripts (manage.ts): with the fake agent, nothing does.
  */
 export function startServer(
@@ -341,7 +341,7 @@ export function startServer(
   const notifications = new Notifications((notification) => send({ type: "notification", notification }));
   const sessions = new Sessions(store, driver, send, notifications, (workspace) => permissionModeFor(config, workspace));
   const transcriptSync = new Sync(store, sessions, send, config.workspaces, config.dataDir, {
-    ...(config.fakeAgent ? { transcripts: noTranscripts() } : {}),
+    ...(config.fakeAgent ? { transcripts: noTranscripts(), codex: noThreads() } : {}),
     ...sync,
   });
   sessions.watcher = transcriptSync;
