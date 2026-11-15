@@ -19,7 +19,23 @@ import {
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
-import { archivedLine, canStop, deleteConfirm, manage, menuItems, renameInline, sessionMenu, UNDO_MS, visible, workspacesOf } from "./chat-manage.js";
+import {
+  archivedLine,
+  canStop,
+  deleteConfirm,
+  grouped,
+  isFolded,
+  manage,
+  menuItems,
+  readFolded,
+  renameInline,
+  sessionMenu,
+  showHeadings,
+  UNDO_MS,
+  visible,
+  workspacesOf,
+  writeFolded,
+} from "./chat-manage.js";
 import { resumeControl } from "./chat-resume.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -64,8 +80,11 @@ function h(tag, className, text) {
 
 /** id -> SessionMeta, as last told by the runner. */
 const sessions = new Map();
-/** id -> { link, dot, title, workspace, time } in the sidebar. */
+/** id -> { item, link, dot, title, time, mark, pin, more } in the sidebar. */
 const rows = new Map();
+/** workspace -> { item, head, name, count, list }: its heading and its rows in the sidebar (D0033). */
+const groups = new Map();
+let groupSeq = 0;
 let selected = null;
 /** Goes up with every selection, so an answer that arrives for an earlier one is dropped. */
 let generation = 0;
@@ -93,6 +112,17 @@ let stick = true;
 let followQueued = false;
 /** What the sidebar lists: the archived sessions or the others, one workspace or all, and the search. */
 const view = { archived: false, workspace: "", query: "" };
+/** localStorage, or nothing where the page may not use it. */
+function storage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+/** The workspaces folded in the sidebar, remembered across reloads; and those folded only for the search typed now. */
+const folded = readFolded(storage());
+const searchFolded = new Set();
 const menu = sessionMenu(document);
 
 // ---------- the stream ----------
@@ -469,74 +499,175 @@ function wanted() {
   return new URLSearchParams(location.search).get("session");
 }
 
-/** The session the URL asks for if there is one (archived too), else the first the sidebar lists. */
+/**
+ * The session the URL asks for if there is one (archived too), else the newest the sidebar lists,
+ * in a group that isn't folded when there is one, so opening the page leaves the folds as they were.
+ */
 function pickFor(wantedId) {
   if (wantedId && sessions.has(wantedId)) return wantedId;
-  return pickSession(visible(sessions.values(), { ...view, workspace: "", query: "" }), null);
+  const list = visible(sessions.values(), { ...view, workspace: "", query: "" });
+  const headings = showHeadings(sessions.values(), { archived: view.archived });
+  return pickSession(list.filter((s) => !(headings && folded.has(s.workspace))), null) ?? pickSession(list, null);
+}
+
+/** A group's heading is drawn: is this group folded now (remembered, or for this search)? */
+function foldedNow(workspace, headings) {
+  return isFolded(workspace, { folded, searchFolded, query: view.query, headings });
+}
+
+/** A group in the sidebar: a heading that folds it, and the list of its rows. Made once per workspace. */
+function groupFor(workspace) {
+  let group = groups.get(workspace);
+  if (group) return group;
+  const item = h("li", "group");
+  const head = h("button", "group-head row");
+  head.type = "button";
+  const list = h("ul", "group-list");
+  list.id = `group-${(groupSeq += 1)}`;
+  head.setAttribute("aria-controls", list.id);
+  const name = h("span", "group-name");
+  const count = h("span", "group-count num");
+  head.append(name, count, h("span", "group-chevron"));
+  head.addEventListener("click", () => toggleGroup(workspace));
+  item.append(head, list);
+  group = { item, head, name, count, list };
+  groups.set(workspace, group);
+  return group;
+}
+
+/**
+ * Folds or unfolds a group: while a search is typed, only for that search; otherwise remembered.
+ * Unfolding, its rows drop in on the gentle spring (chat.css, .unfolding) while the groups below
+ * glide down; folding, the rows go at once and the groups below gather up on the same spring.
+ */
+function toggleGroup(workspace) {
+  const set = view.query.trim() ? searchFolded : folded;
+  const group = groups.get(workspace);
+  glideAfter(group?.item, () => {
+    if (set.has(workspace)) set.delete(workspace);
+    else set.add(workspace);
+    if (set === folded) writeFolded(storage(), folded);
+    const hidden = group ? [...group.list.children].filter((li) => li.hidden) : [];
+    renderSidebar();
+    if (reducedMotion.matches) return;
+    for (const li of hidden) {
+      if (li.hidden) continue;
+      li.classList.add("unfolding");
+      li.addEventListener("animationend", () => li.classList.remove("unfolding"), { once: true });
+    }
+  });
+}
+
+/** The sidebar's FLIP: what comes after `el` in the list glides from where it was to its new place. */
+function glideAfter(el, change) {
+  if (reducedMotion.matches || !el) return change();
+  const box = els.sessions.getBoundingClientRect();
+  const before = new Map();
+  for (let next = el.nextElementSibling; next; next = next.nextElementSibling) {
+    const top = next.getBoundingClientRect().top;
+    if (top > box.bottom) break;
+    before.set(next, top);
+  }
+  change();
+  const timing = spring("gentle");
+  for (const [next, top] of before) {
+    const dy = top - next.getBoundingClientRect().top;
+    if (Math.abs(dy) > 0.5) next.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], timing);
+  }
+}
+
+/** A session's one-line row: its dot, the terminal mark if it has one, its title, Pinned, its time. */
+function rowFor(session) {
+  let row = rows.get(session.id);
+  if (row) return row;
+  const item = h("li", "session-item");
+  item.dataset.id = session.id;
+  const link = h("a", "session row");
+  link.href = `/?session=${encodeURIComponent(session.id)}`;
+  link.addEventListener("click", (e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    select(session.id, true);
+  });
+  row = {
+    item,
+    link,
+    dot: h("span", "dot"),
+    title: h("span", "session-title"),
+    time: h("time", "session-time muted small"),
+    mark: terminalMark(),
+    pin: h("span", "pin-mark small", "Pinned"),
+    more: h("button", "more quiet small", "…"),
+  };
+  row.more.type = "button";
+  row.more.setAttribute("aria-label", "Session actions");
+  row.more.setAttribute("aria-haspopup", "menu");
+  row.more.addEventListener("click", () => openMenu(session.id, row.more));
+  link.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    openMenu(session.id, { x: e.clientX, y: e.clientY });
+  });
+  item.append(link, row.more);
+  rows.set(session.id, row);
+  return row;
 }
 
 function renderSidebar() {
-  const ordered = visible(sessions.values(), view);
-  const shown = new Set(ordered.map((s) => s.id));
+  const list = visible(sessions.values(), view);
+  const headings = showHeadings(sessions.values(), view);
+  const byWorkspace = grouped(list);
+  const shown = new Set(list.map((s) => s.id));
   for (const id of [...rows.keys()]) {
     if (!shown.has(id)) {
       rows.get(id).item.remove();
       rows.delete(id);
     }
   }
-  const now = Date.now();
-  ordered.forEach((session, i) => {
-    let row = rows.get(session.id);
-    if (!row) {
-      const item = h("li", "session-item");
-      item.dataset.id = session.id;
-      const link = h("a", "session row");
-      link.href = `/?session=${encodeURIComponent(session.id)}`;
-      link.addEventListener("click", (e) => {
-        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        e.preventDefault();
-        select(session.id, true);
-      });
-      row = {
-        item,
-        link,
-        dot: h("span", "dot"),
-        title: h("span", "session-title"),
-        time: h("time", "session-time muted small"),
-        workspace: h("span", "session-workspace muted small"),
-        place: h("span"),
-        mark: terminalMark(),
-        pin: h("span", "pin-mark", "Pinned"),
-        more: h("button", "more quiet small", "…"),
-      };
-      row.more.type = "button";
-      row.more.setAttribute("aria-label", "Session actions");
-      row.more.setAttribute("aria-haspopup", "menu");
-      row.more.addEventListener("click", () => openMenu(session.id, row.more));
-      link.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        openMenu(session.id, { x: e.clientX, y: e.clientY });
-      });
-      link.append(row.dot, row.title, row.time, row.workspace);
-      item.append(link, row.more);
-      rows.set(session.id, row);
+  const named = new Set(byWorkspace.map((g) => g.workspace));
+  for (const [workspace, group] of [...groups]) {
+    if (!named.has(workspace)) {
+      group.item.remove();
+      groups.delete(workspace);
     }
-    row.dot.dataset.status = session.status;
-    row.dot.title = sessionStatus(session);
-    row.title.textContent = session.title || "Untitled";
-    row.place.textContent = session.workspace;
-    // The mark is in the line only for a session started in the terminal.
-    const parts = [...(session.pinned ? [row.pin] : []), ...(startedInTerminal(session) ? [row.mark] : []), row.place];
-    if (parts.some((p, k) => row.workspace.childNodes[k] !== p) || row.workspace.childNodes.length !== parts.length) row.workspace.replaceChildren(...parts);
-    row.time.dateTime = session.updatedAt;
-    row.time.textContent = relativeTime(session.updatedAt, now);
-    if (session.id === selected) row.link.setAttribute("aria-current", "true");
-    else row.link.removeAttribute("aria-current");
-    // Moved only when the order changed, so a focused row keeps its focus.
-    if (els.sessions.children[i] !== row.item) els.sessions.insertBefore(row.item, els.sessions.children[i] ?? null);
+  }
+  els.sessions.classList.toggle("grouped", headings);
+  const now = Date.now();
+  byWorkspace.forEach(({ workspace, sessions: inGroup }, g) => {
+    const group = groupFor(workspace);
+    const isShut = foldedNow(workspace, headings);
+    const name = workspace || "No workspace";
+    group.head.hidden = !headings;
+    group.head.setAttribute("aria-expanded", String(!isShut));
+    group.head.setAttribute("aria-label", `${name}, ${inGroup.length} ${inGroup.length === 1 ? "session" : "sessions"}`);
+    group.name.textContent = name;
+    group.count.textContent = String(inGroup.length);
+    group.list.setAttribute("aria-label", name);
+    inGroup.forEach((session, i) => {
+      const row = rowFor(session);
+      row.dot.dataset.status = session.status;
+      row.dot.title = sessionStatus(session);
+      row.title.textContent = session.title || "Untitled";
+      // One line: the mark only for a session started in the terminal, Pinned only when pinned.
+      const parts = [row.dot, ...(startedInTerminal(session) ? [row.mark] : []), row.title, ...(session.pinned ? [row.pin] : []), row.time];
+      if (parts.some((p, k) => row.link.childNodes[k] !== p) || row.link.childNodes.length !== parts.length) {
+        // A title being renamed has its input right after it: keep it there.
+        const input = row.link.querySelector("input.rename");
+        row.link.replaceChildren(...parts);
+        if (input) row.title.after(input);
+      }
+      row.time.dateTime = session.updatedAt;
+      row.time.textContent = relativeTime(session.updatedAt, now);
+      if (session.id === selected) row.link.setAttribute("aria-current", "true");
+      else row.link.removeAttribute("aria-current");
+      // A folded group still shows the session that is open, so the list never hides where you are.
+      row.item.hidden = isShut && session.id !== selected;
+      // Moved only when the order changed, so a focused row keeps its focus.
+      if (group.list.children[i] !== row.item) group.list.insertBefore(row.item, group.list.children[i] ?? null);
+    });
+    if (els.sessions.children[g] !== group.item) els.sessions.insertBefore(group.item, els.sessions.children[g] ?? null);
   });
   els.sessionsEmpty.textContent = sessions.size === 0 ? "No sessions yet." : view.query || view.workspace ? "Nothing matches." : view.archived ? "No archived sessions." : "Every session is archived.";
-  els.sessionsEmpty.hidden = ordered.length > 0;
+  els.sessionsEmpty.hidden = list.length > 0;
   els.empty.hidden = sessions.size > 0;
   els.stream.hidden = sessions.size === 0;
   renderWorkspaces();
@@ -637,7 +768,7 @@ function startRename(id) {
   const session = sessions.get(id);
   if (!session) return;
   const row = rows.get(id);
-  const titleEl = row ? row.title : id === selected ? els.title : null;
+  const titleEl = row && !row.item.hidden ? row.title : id === selected ? els.title : null;
   if (!titleEl || titleEl.hidden) return;
   void renameInline(document, titleEl, session.title || "", (title) => run("rename", id, "rename", { title }));
 }
@@ -669,6 +800,8 @@ function setArchivedView(on) {
 
 els.search.addEventListener("input", () => {
   view.query = els.search.value;
+  // Each search starts with every group open.
+  if (!view.query.trim()) searchFolded.clear();
   renderSidebar();
 });
 els.search.addEventListener("keydown", (e) => {
@@ -676,6 +809,7 @@ els.search.addEventListener("keydown", (e) => {
     e.preventDefault();
     els.search.value = "";
     view.query = "";
+    searchFolded.clear();
     renderSidebar();
   }
 });
@@ -830,7 +964,11 @@ els.reply.addEventListener("submit", (e) => e.preventDefault());
 
 // ---------- selecting ----------
 
-function select(id, push = false) {
+/**
+ * Shows a session. `reveal`: it was asked for (a click, the search, a link), so a folded group that
+ * holds it unfolds; a session picked for the person (the newest) leaves the folds alone.
+ */
+function select(id, push = false, reveal = true) {
   if (push) history.pushState(null, "", id ? `/?session=${encodeURIComponent(id)}` : "/");
   if (id === selected) return;
   if (selected) {
@@ -839,6 +977,12 @@ function select(id, push = false) {
   }
   if (selected) crossFade();
   selected = id;
+  // A session chosen in a folded group (from the search, or a link) unfolds its group.
+  const workspace = id ? sessions.get(id)?.workspace : undefined;
+  if (reveal && workspace !== undefined) {
+    searchFolded.delete(workspace);
+    if (folded.delete(workspace)) writeFolded(storage(), folded);
+  }
   generation += 1;
   lastSeq = 0;
   tools.clear();
@@ -858,7 +1002,13 @@ function select(id, push = false) {
   void catchUp();
 }
 
-window.addEventListener("popstate", () => select(pickFor(wanted() ?? selected)));
+/** Selects what the URL asks for, else the newest; only the one asked for unfolds its group. */
+function selectWanted(wantedId) {
+  const id = pickFor(wantedId);
+  select(id, false, id !== null && id === wantedId);
+}
+
+window.addEventListener("popstate", () => selectWanted(wanted() ?? selected));
 
 // ---------- the connection ----------
 
@@ -878,7 +1028,7 @@ function onMessage(message) {
         renderReply();
         void catchUp();
       } else {
-        select(pickFor(wanted()));
+        selectWanted(wanted());
         renderSidebar();
       }
       break;
@@ -887,7 +1037,7 @@ function onMessage(message) {
       const session = message.session;
       if (!session?.id) break;
       sessions.set(session.id, session);
-      if (!selected) select(pickFor(wanted()));
+      if (!selected) selectWanted(wanted());
       renderSidebar();
       if (session.id === selected) {
         renderHead();
@@ -903,7 +1053,7 @@ function onMessage(message) {
       if (id === selected) {
         const next = pickFor(null);
         history.replaceState(null, "", next ? `/?session=${encodeURIComponent(next)}` : "/");
-        select(next);
+        select(next, false, false);
       }
       renderSidebar();
       break;
