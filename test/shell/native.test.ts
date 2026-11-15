@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { dockBounds, islandRect } from "../../shell/src/dock";
 import { autostartEntry, autostartFile, LAUNCH_AGENT, launchAgentFile, launchAgentPlist } from "../../shell/src/login";
 import {
-  defaultHotkeys, dockArea, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
+  ACRYLIC_BUILD, CLEAR, defaultHotkeys, dockArea, materialOptions, windowMaterial, windowsBuild, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
   runnerDownHint, runnerSpawn, SCREEN_RECORDING_PANE, screenAllowed, shellOs,
 } from "../../shell/src/os";
 import { SHELL_DEFAULTS } from "../../shell/src/prefs";
@@ -165,5 +165,48 @@ describe("macOS", () => {
     expect(main).toContain('systemPreferences.getMediaAccessStatus("screen")');
     // On Linux the ozone switch is set before ready, with a DISPLAY only.
     expect(main).toContain('if (OS === "linux" && linuxOzone() === "x11" && !app.commandLine.hasSwitch("ozone-platform")) app.commandLine.appendSwitch("ozone-platform", "x11");');
+  });
+});
+
+describe("the OS's frosted material", () => {
+  test("Windows' build is read from os.release()", () => {
+    expect(windowsBuild("10.0.22631")).toBe(22631);
+    expect(windowsBuild("10.0.19045")).toBe(19045);
+    expect(windowsBuild("6.1.7601 ")).toBe(7601);
+    expect(windowsBuild("")).toBeNull();
+    expect(windowsBuild("Windows")).toBeNull();
+  });
+
+  test("the pop-up: acrylic on Windows 11 22H2 and later, vibrancy on macOS, none on older Windows and Linux", () => {
+    expect(windowMaterial("popup", "windows", "10.0.22631", true)).toBe("acrylic");
+    expect(windowMaterial("popup", "windows", `10.0.${ACRYLIC_BUILD}`, true)).toBe("acrylic");
+    expect(windowMaterial("popup", "windows", "10.0.22000", true)).toBe("none");
+    expect(windowMaterial("popup", "windows", "10.0.19045", true)).toBe("none");
+    expect(windowMaterial("popup", "windows", "", true)).toBe("none");
+    expect(windowMaterial("popup", "macos", "24.1.0", true)).toBe("vibrancy");
+    expect(windowMaterial("popup", "linux", "6.8.0", true)).toBe("none");
+    // Where a transparent window would be black, there is no material either.
+    expect(windowMaterial("popup", "macos", "24.1.0", false)).toBe("none");
+  });
+
+  test("the dock, the snip and Settings never get one: the dock's could not follow the island's rounded shape", () => {
+    for (const which of ["dock", "snip", "settings"] as const) {
+      for (const os of ["windows", "macos", "linux"] as const) expect(windowMaterial(which, os, "10.0.22631", true)).toBe("none");
+    }
+  });
+
+  test("each material's window options: acrylic on a clear, non-layered window; vibrancy active; none transparent or opaque", () => {
+    expect(materialOptions("acrylic", true, "#0f0f11")).toEqual({ backgroundColor: CLEAR, backgroundMaterial: "acrylic" });
+    expect(materialOptions("vibrancy", true, "#0f0f11")).toEqual({ transparent: true, backgroundColor: CLEAR, vibrancy: "popover", visualEffectState: "active" });
+    expect(materialOptions("none", true, "#0f0f11")).toEqual({ transparent: true, backgroundColor: CLEAR });
+    expect(materialOptions("none", false, "#0f0f11")).toEqual({ backgroundColor: "#0f0f11" });
+  });
+
+  test("main.ts makes the pop-up and the dock with the chosen material, and the snip and Settings without one", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main).toContain('windowMaterial("popup", OS, release(), DOCK_TRANSPARENT)');
+    expect(main).toContain("...materialOptions(POPUP_MATERIAL, DOCK_TRANSPARENT, OPAQUE_BACKGROUND)");
+    expect(main).toContain("...materialOptions(DOCK_MATERIAL, DOCK_TRANSPARENT, OPAQUE_BACKGROUND)");
+    expect(main.match(/backgroundMaterial|vibrancy:/g)).toBeNull();
   });
 });
