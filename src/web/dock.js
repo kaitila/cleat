@@ -8,7 +8,6 @@
 import {
   approvalView,
   backoffMs,
-  byActivity,
   decidedLabel,
   isOpenInTerminal,
   OPEN_IN_TERMINAL_HINT,
@@ -21,6 +20,7 @@ import {
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
+import { canStop, manage, menuItems, renameInline, sessionMenu, visible } from "./chat-manage.js";
 import { resumeControl } from "./chat-resume.js";
 import { renderMarkdown } from "./markdown.js";
 import {
@@ -72,7 +72,18 @@ const els = {
 /** Beside the title: "in terminal" while a turn arrives from a terminal, else nothing. */
 const headStatus = h("span", "session-status muted small");
 const resume = resumeControl(document);
-els.openChat.before(headStatus, resume.el);
+/** While the runner runs a turn of the session shown: it stops it. */
+const stopButton = h("button", "stop small", "Stop");
+stopButton.type = "button";
+stopButton.hidden = true;
+els.openChat.before(headStatus, stopButton, resume.el);
+/** The list rows' right-click menu: Rename, Pin, Archive. It lives in the panel, inside the island. */
+const menu = sessionMenu(document, els.panel);
+/** True while a row's title is being edited: like a reply being typed, it holds the dock open. */
+let renaming = false;
+/** A refusal of Stop, Rename, Pin or Archive, said in the head for a few seconds. */
+let manageError = "";
+let manageErrorTimer = 0;
 
 /** An element with a class and text. The text is set as textContent, so it is never parsed. */
 function h(tag, className, text) {
@@ -84,6 +95,8 @@ function h(tag, className, text) {
 
 /** id -> SessionMeta, as last told by the runner. */
 const sessions = new Map();
+/** The sessions the dock counts and lists: archived ones are out of the way here too. */
+const shown = () => [...sessions.values()].filter((s) => s.archived !== true);
 
 // ---------- the three states ----------
 
@@ -157,7 +170,7 @@ sized.observe(els.panel);
 // ---------- idle: the pill ----------
 
 function renderPill() {
-  const pill = pillOf(sessions.values());
+  const pill = pillOf(shown());
   els.pill.dataset.tone = pill.tone;
   els.island.dataset.tone = pill.tone;
   els.pillText.textContent = pill.text;
@@ -187,7 +200,7 @@ let lastPeeked = null;
 /** Shows the next peek that waits, or goes back to the pill when none does. */
 function showPeek() {
   clearTimeout(peekTimer);
-  const next = nextPeek(queue, sessions.values());
+  const next = nextPeek(queue, shown());
   queue = next.queue;
   peeking = next.peek;
   if (!peeking) {
@@ -208,7 +221,7 @@ function showPeek() {
 
 /** After the sessions changed: a peek for an approval that was answered is over. */
 function checkPeek() {
-  if (state === "peek" && peeking && peekOver(peeking, sessions.values(), Date.now() - peekShownAt)) showPeek();
+  if (state === "peek" && peeking && peekOver(peeking, shown(), Date.now() - peekShownAt)) showPeek();
 }
 
 function onNotification(notification) {
@@ -433,6 +446,10 @@ function apply(event) {
       endOpenApprovals();
       add(h("div", "error small", event.message));
       break;
+    case "stopped":
+      endOpenApprovals();
+      add(h("div", "note muted small", "Stopped"));
+      break;
     default:
       add(h("div", "note muted small", unknownNote(event)));
   }
@@ -480,9 +497,10 @@ async function catchUp() {
 const rows = new Map();
 
 function renderList() {
-  const ordered = byActivity(sessions.values());
+  const ordered = visible(sessions.values());
+  const listed = new Set(ordered.map((s) => s.id));
   for (const id of [...rows.keys()]) {
-    if (!sessions.has(id)) {
+    if (!listed.has(id)) {
       rows.get(id).item.remove();
       rows.delete(id);
     }
@@ -501,6 +519,11 @@ function renderList() {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         select(session.id);
+      });
+      link.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const current = sessions.get(session.id);
+        if (current) menu.open(menuItems(current, false), { x: e.clientX, y: e.clientY }, (action) => void act(session.id, action));
       });
       row = {
         item,
@@ -521,6 +544,7 @@ function renderList() {
     row.dot.dataset.status = session.status;
     row.dot.title = sessionStatus(session);
     row.title.textContent = session.title || "Untitled";
+    row.title.classList.toggle("pinned", session.pinned === true);
     row.mark.hidden = !startedInTerminal(session);
     row.workspace.textContent = session.workspace;
     row.time.dateTime = session.updatedAt;
@@ -530,9 +554,56 @@ function renderList() {
     // Moved only when the order changed, so a focused row keeps its focus.
     if (els.sessions.children[i] !== row.item) els.sessions.insertBefore(row.item, els.sessions.children[i] ?? null);
   });
-  els.sessionsEmpty.hidden = sessions.size > 0;
-  els.sessions.hidden = sessions.size === 0;
+  els.sessionsEmpty.hidden = ordered.length > 0;
+  els.sessions.hidden = ordered.length === 0;
 }
+
+/** A refusal said in the head, for a few seconds. */
+function sayError(text) {
+  clearTimeout(manageErrorTimer);
+  manageError = text;
+  renderHead();
+  manageErrorTimer = setTimeout(() => {
+    manageError = "";
+    renderHead();
+  }, 4000);
+}
+
+async function run(verb, id, action, body) {
+  try {
+    return await manage(id, action, body);
+  } catch (e) {
+    sayError(`Couldn't ${verb}: ${e.message}`);
+    return null;
+  }
+}
+
+/** The menu's choice. Archived, a session leaves the list; the chat view's Archived view brings it back. */
+async function act(id, action) {
+  const session = sessions.get(id);
+  if (!session) return;
+  if (action === "pin") await run(session.pinned ? "unpin" : "pin", id, "pin", { pinned: !session.pinned });
+  else if (action === "archive") await run(session.archived ? "unarchive" : "archive", id, "archive", { archived: !session.archived });
+  else if (action === "rename") {
+    const row = rows.get(id);
+    if (!row) return;
+    renaming = true;
+    await renameInline(document, row.title, session.title || "", (title) => run("rename", id, "rename", { title }));
+    renaming = false;
+    scheduleClose();
+  }
+}
+
+let stopping = null;
+stopButton.addEventListener("click", async () => {
+  const id = selected;
+  if (!id || stopping) return;
+  stopping = id;
+  renderHead();
+  await run("stop", id, "stop");
+  stopping = null;
+  renderHead();
+});
 
 function renderHead() {
   const session = selected ? sessions.get(selected) : undefined;
@@ -541,7 +612,10 @@ function renderHead() {
   els.title.textContent = session.title || "Untitled";
   els.openChat.href = `/?session=${encodeURIComponent(session.id)}`;
   const status = sessionStatus(session);
-  headStatus.textContent = status === "in terminal" ? status : "";
+  headStatus.textContent = manageError || (status === "in terminal" ? status : "");
+  stopButton.hidden = !canStop(session);
+  stopButton.disabled = stopping === session.id;
+  stopButton.textContent = stopping === session.id ? "Stopping" : "Stop";
   resume.show(session);
 }
 
@@ -702,7 +776,8 @@ function holds() {
   return {
     pointerInside: inside,
     pointerDown: down,
-    replyFocused: document.hasFocus() && document.activeElement === els.text,
+    // A row's menu or its title being edited holds it open as a focused reply box does.
+    replyFocused: (document.hasFocus() && document.activeElement === els.text) || menu.isOpen || renaming,
     replyText: els.text.value,
   };
 }
@@ -710,7 +785,7 @@ function holds() {
 function open() {
   if (state === "open") return;
   clearTimeout(peekTimer);
-  const pick = preselect([...sessions.values()], peeking?.sessionId ?? null, lastPeeked);
+  const pick = preselect(shown(), peeking?.sessionId ?? null, lastPeeked);
   // Opened, the peeks are answered by the list.
   peeking = null;
   queue = [];
@@ -789,7 +864,7 @@ function onMessage(message) {
       renderList();
       // Connected again: fetch what was missed while away, or pick one if the selected is gone.
       if (selected && sessions.has(selected)) select(selected);
-      else select(preselect([...sessions.values()], null, null));
+      else select(preselect(shown(), null, null));
       renderHead();
       renderReply();
       break;
@@ -809,11 +884,23 @@ function onMessage(message) {
       }
       break;
     }
+    case "removed": {
+      const id = message.sessionId;
+      if (!sessions.delete(id)) break;
+      streamed.delete(id);
+      typed.delete(id);
+      renderPill();
+      checkPeek();
+      if (state !== "open") break;
+      if (id === selected) select(preselect(shown(), null, null));
+      renderList();
+      break;
+    }
     case "event": {
       const event = message.event;
       if (!event) break;
       // The complete text (or the turn's end) replaces what was streamed.
-      if (event.kind === "assistant_text" || event.kind === "result" || event.kind === "error") streamed.delete(message.sessionId);
+      if (event.kind === "assistant_text" || event.kind === "result" || event.kind === "error" || event.kind === "stopped") streamed.delete(message.sessionId);
       // Closed, nothing is drawn: opening fetches what was missed.
       if (state !== "open" || message.sessionId !== selected) break;
       if (loading || event.seq > lastSeq + 1) {

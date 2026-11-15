@@ -16,8 +16,18 @@
         <span class="brand">intuition</span>
         <a class="new-task button quiet" href="/prompt">New task</a>
       </div>
+      <div class="finder">
+        <input id="search" class="input search" type="search" placeholder="Search" aria-label="Search sessions by title or workspace" autocomplete="off">
+        <div class="filters">
+          <select id="workspace-filter" class="filter small" aria-label="Workspace">
+            <option value="">All workspaces</option>
+          </select>
+          <button id="archived-view" class="quiet small" type="button" aria-pressed="false">Archived</button>
+        </div>
+      </div>
       <p id="sessions-empty" class="sessions-empty muted small" hidden>No sessions yet.</p>
       <ul id="sessions" class="sessions"></ul>
+      <p id="undo" class="undo small" role="status" hidden></p>
       <p id="connection" class="connection muted small" role="status" hidden></p>
     </nav>
     <main class="main">
@@ -27,6 +37,7 @@
           <span id="dot" class="dot"></span>
           <span id="workspace"></span>
           <span id="status"></span>
+          <button id="stop" class="stop small" type="button" hidden>Stop</button>
         </p>
       </header>
       <div id="scroller" class="scroller">
@@ -42,5 +53,15 @@
       </form>
     </main>
   </div>
+  <dialog id="confirm" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <form method="dialog" class="confirm-form">
+      <h2 id="confirm-title" class="title"></h2>
+      <p id="confirm-body" class="muted"></p>
+      <div class="confirm-actions">
+        <button value="cancel" class="quiet">Cancel</button>
+        <button id="confirm-ok" value="ok" class="danger"></button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>
