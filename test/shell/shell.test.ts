@@ -318,7 +318,7 @@ describe("settings from the runner", () => {
 
   test("main.ts: applied at start and at every message; the tray writes through PUT; the theme follows", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
-    expect(main).toContain("new net.WebSocket(socketUrl(settings.runnerUrl))");
+    expect(main).toContain("new net.WebSocket(shellSocketUrl(settings.runnerUrl))");
     expect(main).toContain("if (s) applySettings(s);");
     expect(main).toContain("nativeTheme.themeSource = next.theme;");
     expect(main).toContain('{ label: "Show dock", type: "checkbox", checked: prefs.dock, click: (item) => void changePrefs({ dock: item.checked }) }');
@@ -332,8 +332,9 @@ describe("settings from the runner", () => {
     // Nothing is written to the file but the migration's rewrite.
     expect(main).not.toMatch(/saveDock|withDock/);
     expect(main.match(/dropLegacy\(/g)).toHaveLength(1);
-    // PUT only to the runner's own settings route: putSettings, and the self-test standing in for the Settings page.
-    expect(main.match(/method: "PUT"/g)).toHaveLength(2);
+    // PUT only to the runner's own routes: putSettings, the shell's report (REPORT_PATH), and the self-test standing in for the Settings page.
+    expect(main.match(/method: "PUT"/g)).toHaveLength(3);
+    expect(main).toContain('fetch(new URL(REPORT_PATH, settings.runnerUrl), { method: "PUT"');
     const selfTest = main.slice(main.indexOf("async function selfTest()"), main.indexOf("// --- Start ---"));
     expect(selfTest.match(/method: "PUT"/g)).toHaveLength(1);
     expect(main).toContain("fetch(new URL(SETTINGS_PATH, settings.runnerUrl), {");

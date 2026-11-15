@@ -618,6 +618,11 @@ function snip(inactive = false): Promise<SnipOpened | null> {
   return snipOpening;
 }
 
+/** System Settings at Screen Recording: from the notice's click, and when the settings page asks (a shell_action). The pane is the shell's own constant. */
+function openScreenRecordingPane(): void {
+  void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e));
+}
+
 /** Says once per start that macOS has not given Screen Recording, with a click that opens its pane. True when the snip can see the screens. */
 let screenSaid = false;
 function checkScreenAccess(): boolean {
@@ -625,7 +630,7 @@ function checkScreenAccess(): boolean {
   if (!ok && !screenSaid && !args.selfTest && Notification.isSupported()) {
     screenSaid = true;
     const n = new Notification({ title: SCREEN_RECORDING_NOTICE.title, body: SCREEN_RECORDING_NOTICE.body });
-    n.on("click", () => void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e)));
+    n.on("click", openScreenRecordingPane);
     n.show();
   }
   reportShell();
@@ -1216,9 +1221,7 @@ function reportShell(force = false): void {
 
 /** What the runner asks on the shell's socket, from the settings page. Only the actions shellAction knows get here. */
 function doShellAction(action: "open_screen_recording"): void {
-  if (action === "open_screen_recording" && OS === "macos") {
-    void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e));
-  }
+  if (action === "open_screen_recording" && OS === "macos") openScreenRecordingPane();
 }
 
 /**
