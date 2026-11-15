@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { archivedLine, canDelete, canFork, canStop, deleteConfirm, menuItems, ordered, visible, workspacesOf } from "../../src/web/chat-manage.js";
+import { archivedLine, canDelete, canFork, canStop, deleteConfirm, FOLDED_KEY, grouped, isFolded, menuItems, ordered, readFolded, showHeadings, visible, workspacesOf, writeFolded } from "../../src/web/chat-manage.js";
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 10, 15, 12, minutes)).toISOString();
 const s = (id: string, extra: Record<string, unknown> = {}) => ({ id, status: "idle", updatedAt: at(0), title: id, workspace: "work", source: "intuition", claudeSessionId: `c-${id}`, ...extra });
@@ -28,6 +28,62 @@ describe("the list", () => {
     expect(visible(list, { workspace: "web" }).map((x) => x.id).sort()).toEqual(["Docs", "Fix the Login page"]);
     expect(visible(list, { workspace: "web", query: "docs" }).map((x) => x.id)).toEqual(["Docs"]);
     expect(workspacesOf(list)).toEqual(["api", "web"]);
+  });
+});
+
+describe("the sidebar's groups (D0033)", () => {
+  test("one group per workspace, ordered by its newest session; in a group pinned first, then the newest", () => {
+    const list = [
+      s("web-old", { workspace: "web", updatedAt: at(1) }),
+      s("api-new", { workspace: "api", updatedAt: at(9) }),
+      s("web-pinned", { workspace: "web", updatedAt: at(0), pinned: true }),
+      s("web-new", { workspace: "web", updatedAt: at(5) }),
+      s("api-old", { workspace: "api", updatedAt: at(2) }),
+    ];
+    const groups = grouped(list);
+    expect(groups.map((g) => g.workspace)).toEqual(["api", "web"]);
+    expect(groups.map((g) => g.sessions.map((x) => x.id))).toEqual([["api-new", "api-old"], ["web-pinned", "web-new", "web-old"]]);
+    // A pinned session's own time counts for its group's place.
+    expect(grouped([...list, s("web-pin-newest", { workspace: "web", updatedAt: at(20), pinned: true })])[0]!.workspace).toBe("web");
+    expect(grouped([])).toEqual([]);
+  });
+
+  test("headings only with more than one workspace in the list shown, and none with a workspace chosen", () => {
+    const two = [s("a", { workspace: "web" }), s("b", { workspace: "api" })];
+    expect(showHeadings(two)).toBe(true);
+    expect(showHeadings(two, { workspace: "web" })).toBe(false);
+    expect(showHeadings([s("a"), s("b")])).toBe(false);
+    // The Archived view counts its own workspaces.
+    expect(showHeadings([...two, s("c", { archived: true })], { archived: true })).toBe(false);
+  });
+
+  test("folded: the remembered folds, none without headings, and while searching only those folded for that search", () => {
+    const folded = new Set(["web"]);
+    const searchFolded = new Set(["api"]);
+    expect(isFolded("web", { folded, searchFolded })).toBe(true);
+    expect(isFolded("api", { folded, searchFolded })).toBe(false);
+    expect(isFolded("web", { folded, searchFolded, headings: false })).toBe(false);
+    expect(isFolded("web", { folded, searchFolded, query: "login" })).toBe(false);
+    expect(isFolded("api", { folded, searchFolded, query: "login" })).toBe(true);
+    expect(isFolded("web", { folded, searchFolded, query: "  " })).toBe(true);
+  });
+
+  test("the folds are remembered in storage, and a storage that throws or holds junk is no fold", () => {
+    const memory = new Map<string, string>();
+    const storage = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => void memory.set(k, v), removeItem: (k: string) => void memory.delete(k) };
+    writeFolded(storage, new Set(["web", "api"]));
+    expect(memory.get(FOLDED_KEY)).toBe('["api","web"]');
+    expect([...readFolded(storage)].sort()).toEqual(["api", "web"]);
+    writeFolded(storage, new Set());
+    expect(memory.has(FOLDED_KEY)).toBe(false);
+    memory.set(FOLDED_KEY, "{not json");
+    expect(readFolded(storage).size).toBe(0);
+    memory.set(FOLDED_KEY, '[1, "web", null]');
+    expect([...readFolded(storage)]).toEqual(["web"]);
+    const refusing = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); }, removeItem: () => { throw new Error("denied"); } };
+    expect(readFolded(refusing).size).toBe(0);
+    expect(() => writeFolded(refusing, new Set(["web"]))).not.toThrow();
+    expect(readFolded(undefined).size).toBe(0);
   });
 });
 

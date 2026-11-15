@@ -36,19 +36,50 @@
   margin: 0;
   padding: 0 var(--space-2) var(--space-2);
 }
-/* A session: its dot, title and time on one line, its workspace under the title. */
-.session {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  column-gap: var(--space-2);
-  padding: var(--space-2);
-  line-height: var(--leading-tight);
+/* The sessions by workspace (D0033): a heading per workspace, a hairline between groups. With one
+   workspace (or one chosen in the filter) the heading isn't drawn and the list is a plain list. */
+.group { display: grid; gap: var(--hairline); }
+.sessions.grouped > .group + .group { border-top: var(--hairline) solid var(--line); padding-top: var(--space-1); margin-top: var(--space-1); }
+.group-list { display: grid; gap: var(--hairline); list-style: none; margin: 0; padding: 0; }
+/* A heading: the workspace's name and a muted count, its chevron at the end; folds its group. */
+.group-head {
+  justify-content: flex-start;
+  width: 100%;
+  height: auto;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-s);
+  font-weight: var(--medium);
+  text-align: left;
+  cursor: pointer;
 }
+.group-head:hover { color: var(--text); }
+.group-head:hover .group-chevron { border-color: var(--text); }
+.group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-count { font-weight: var(--regular); color: var(--muted); }
+/* The chevron: two hairlines turned into a "v" when open, a ">" when folded, on the gentle spring. */
+.group-chevron {
+  flex: none;
+  width: var(--space-1);
+  height: var(--space-1);
+  margin: 0 var(--space-1) 0 auto;
+  border-right: var(--hairline) solid var(--muted);
+  border-bottom: var(--hairline) solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform var(--dur-gentle) var(--ease-gentle);
+}
+.group-head[aria-expanded="true"] .group-chevron { transform: translateY(calc(var(--space-1) / -2)) rotate(45deg); }
+/* Unfolding, a group's rows drop in from under its heading and fade in (chat.js, .unfolding). */
+.session-item.unfolding { animation: drop-in var(--dur-gentle) var(--ease-gentle), fade-in var(--dur-fade) var(--ease); }
+@keyframes drop-in { from { transform: translateY(calc(var(--rise) * -1)); } }
+/* A session: one line, its dot, the terminal mark if it has one, its title, Pinned, its time. */
+.session { line-height: var(--leading-tight); }
 .session[aria-current="true"] .session-title { font-weight: var(--medium); }
-.session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-workspace { grid-column: 2 / -1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A session started in the terminal: a quiet glyph before its workspace. */
-.terminal-mark { margin-right: var(--space-1); }
+.session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-time { flex: none; }
+/* A session started in the terminal: a quiet glyph before its title. */
+.terminal-mark { flex: none; color: var(--muted); }
 .sessions-empty, .connection { padding: var(--space-2) var(--space-4); }
 
 /* Finding a session: the search box, the workspace filter and the Archived view, above the list. */
@@ -67,8 +98,7 @@
 }
 .session-item:hover .more, .session-item:focus-within .more, .more[aria-expanded="true"] { opacity: 1; }
 .session-item:hover .session-time, .session-item:focus-within .session-time { visibility: hidden; }
-.pin-mark { margin-right: var(--space-1); color: var(--accent); }
-.pin-mark::after { content: "·"; margin-left: var(--space-1); color: var(--muted); }
+.pin-mark { flex: none; color: var(--accent); }
 .session .rename { min-height: var(--control-s); padding-block: 0; padding-inline: var(--space-1); }
 .head .rename { font-size: var(--text-l); font-weight: var(--semibold); }
 /* What was just done, with Undo, for a few seconds. */
