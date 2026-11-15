@@ -17,6 +17,8 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  # deploy-pages looks up the run's github-pages artifact through the Actions API.
+  actions: read
 
 # One deploy at a time; a newer push waits rather than cancelling one mid-deploy.
 concurrency:
