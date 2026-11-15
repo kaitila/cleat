@@ -141,6 +141,14 @@ export interface SyncOptions {
   now: () => number;
 }
 
+/**
+ * Whether the session's conversation is a Claude Code transcript the sync reads. A Codex session's
+ * thread lives in ~/.codex/sessions, which nothing syncs yet (docs/agents.md).
+ */
+export function hasTranscript(session: Pick<SessionMeta, "agent">): boolean {
+  return (session.agent ?? "claude") === "claude";
+}
+
 export class Sync implements TurnWatcher {
   private readonly path: string;
   private readonly file: SyncFile;
@@ -319,7 +327,7 @@ export class Sync implements TurnWatcher {
   private async grow(id: string, mtime: number): Promise<void> {
     if (this.ours(id) || this.stopped) return;
     const session = this.store.get(id);
-    if (!session?.claudeSessionId) return;
+    if (!session?.claudeSessionId || !hasTranscript(session)) return;
     const tracked = this.file.sessions[id];
     if (!tracked) {
       // One of the runner's sessions from before the sync: what it has is what it is now.
@@ -369,7 +377,7 @@ export class Sync implements TurnWatcher {
     if (!tracked || tracked.loaded) return Promise.resolve();
     return this.lock(id, async () => {
       const session = this.store.get(id);
-      if (tracked.loaded || !session?.claudeSessionId) return;
+      if (tracked.loaded || !session?.claudeSessionId || !hasTranscript(session)) return;
       try {
         const info = await this.options.transcripts.info(session.claudeSessionId, session.cwd);
         if ((await this.readNew(id, tracked)) === null) return;
@@ -390,7 +398,7 @@ export class Sync implements TurnWatcher {
   async beforeReply(id: string): Promise<{ openElsewhere: boolean }> {
     await this.load(id);
     const session = this.store.get(id);
-    if (!session?.claudeSessionId) return { openElsewhere: false };
+    if (!session?.claudeSessionId || !hasTranscript(session)) return { openElsewhere: false };
     let info: SDKSessionInfo | undefined;
     try {
       info = await this.options.transcripts.info(session.claudeSessionId, session.cwd);
@@ -495,7 +503,7 @@ export class Sync implements TurnWatcher {
       this.link();
       const session = this.store.get(id);
       const tracked = this.file.sessions[id];
-      if (!session?.claudeSessionId || !tracked) return;
+      if (!session?.claudeSessionId || !hasTranscript(session) || !tracked) return;
       // A turn that wrote nothing readable still leaves the cursor where it was, so nothing is stored twice.
       try {
         const [messages, info] = await Promise.all([

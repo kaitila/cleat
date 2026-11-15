@@ -22,7 +22,9 @@ function isFolder(path: string): boolean {
  * The settings a PUT body asks for, or why it is refused. The body is checked with the schema
  * loadConfig reads the file with; a `port` in it is ignored. A workspace path must be absolute
  * (~/ counts) and an existing folder, unless the current settings already have that path: a folder
- * that went missing must not block every other change.
+ * that went missing must not block every other change. An `agent` left out keeps the current one,
+ * at the top and on a workspace of the same name (a client from before agents existed can't reset
+ * them); a workspace's `agent: null` clears its own.
  */
 export function validateSettings(body: unknown, current: StoredSettings): StoredSettings | SettingsRefusal {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return { field: "", error: "the body must be a JSON object" };
@@ -33,6 +35,14 @@ export function validateSettings(body: unknown, current: StoredSettings): Stored
     return { field: issue.path.join("."), error: issue.message };
   }
   const settings = parsed.data;
+  if (rest.agent === undefined) settings.agent = current.agent;
+  const sent = Array.isArray(rest.workspaces) ? (rest.workspaces as unknown[]) : [];
+  for (const [i, w] of settings.workspaces.entries()) {
+    const raw = sent[i];
+    if (typeof raw === "object" && raw !== null && (raw as Record<string, unknown>).agent !== undefined) continue;
+    const before = current.workspaces.find((c) => c.name === w.name)?.agent;
+    if (before) w.agent = before;
+  }
   const twice = duplicateWorkspace(settings.workspaces);
   if (twice !== null) return { field: `workspaces.${twice}.name`, error: `workspace "${settings.workspaces[twice]!.name}" is listed twice` };
   const known = new Set(current.workspaces.map((w) => w.path));
@@ -64,10 +74,10 @@ export function writeSettings(path: string, settings: StoredSettings): void {
     }
   }
   const workspaces = settings.workspaces.map((w) => {
-    const { name: _n, path: _p, permissionMode: _m, ...unknown } = before.get(w.name) ?? {};
-    return { name: w.name, path: w.path, ...(w.permissionMode ? { permissionMode: w.permissionMode } : {}), ...unknown };
+    const { name: _n, path: _p, permissionMode: _m, agent: _a, ...unknown } = before.get(w.name) ?? {};
+    return { name: w.name, path: w.path, ...(w.permissionMode ? { permissionMode: w.permissionMode } : {}), ...(w.agent ? { agent: w.agent } : {}), ...unknown };
   });
-  const file = { ...raw, theme: settings.theme, permissionMode: settings.permissionMode, workspaces, shell: settings.shell };
+  const file = { ...raw, theme: settings.theme, permissionMode: settings.permissionMode, agent: settings.agent, workspaces, shell: settings.shell };
   const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(temp, JSON.stringify(file, null, 2) + "\n");
   renameSync(temp, path);
