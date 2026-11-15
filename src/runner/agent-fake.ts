@@ -17,10 +17,14 @@
 //      a reply that resumes the conversation gets the first turn's prompt, a new conversation gets
 //      its own. The memory is the process's, as Claude Code's transcripts outlive the runner.
 //      After step 3 the answer is instead `The tool call was allowed.` or `The tool call was denied.`
+//   4b. A prompt containing "count slowly" instead streams "1" to "200", one line every 10 steps
+//      (10 seconds at 5 ms), so a test can stop it; the full count is stored only if nobody did.
 //   5. A prompt containing "fail" then ends in an `error` event ("the fake agent failed");
 //      any other prompt ends in a `result` with ok true.
 //
 // Between steps it waits `stepMs` (5 ms by default), so a test can see the session running.
+// Interrupted (TurnInput.interrupt, the person's Stop), it returns at the next step without a result,
+// as an interrupted Claude Code turn ends; an approval it waits for is denied by the runner first.
 import type { ApprovalDecision } from "../shared/protocol";
 import type { AgentDriver, AgentOutput, TurnInput } from "./agent";
 import { DENIED } from "./agent-claude";
@@ -40,6 +44,7 @@ export function fakeFirst(firstPrompt: string): string {
 export const NEEDS_APPROVAL = "needs approval";
 export const NO_AUTO_MODE = "no auto mode";
 export const AUTO_DENY = "auto deny";
+export const COUNT_SLOWLY = "count slowly";
 export const FAKE_CLASSIFIER = "the fake classifier blocks deletions";
 export const FAKE_REASON = "the fake agent asks before it writes";
 
@@ -50,10 +55,18 @@ export function fakeDecided(decision: ApprovalDecision): string {
 /** Each fake conversation's prompts, by its fake Claude Code session id. */
 const conversations = new Map<string, string[]>();
 
+/** A fork of a fake conversation (the fake TranscriptOps' fork): a new id that remembers the same prompts. */
+export function fakeFork(from: string): string {
+  const id = `fake-${crypto.randomUUID()}`;
+  conversations.set(id, [...(conversations.get(from) ?? [])]);
+  return id;
+}
+
 export function fakeDriver(stepMs = 5): AgentDriver {
   return {
     async *run(input: TurnInput): AsyncIterable<AgentOutput> {
       const started = Date.now();
+      const cut = () => input.signal.aborted || input.interrupt?.aborted === true;
       const id = input.resume ?? `fake-${crypto.randomUUID()}`;
       const prompts = conversations.get(id) ?? [];
       conversations.set(id, prompts);
@@ -82,21 +95,39 @@ export function fakeDriver(stepMs = 5): AgentDriver {
         steps.push({ type: "event", event: { kind: "tool_use", toolUseId, name: "Write", input: toolInput } });
         for (const step of steps.splice(0)) {
           await Bun.sleep(stepMs);
-          if (input.signal.aborted) return;
+          if (cut()) return;
           yield step;
         }
         const decision = await input.approve({ toolUseId, toolName: "Write", input: toolInput, reason: FAKE_REASON });
-        if (input.signal.aborted) return;
+        if (cut()) return;
         const allowed = decision === "allow";
         steps.push({ type: "event", event: { kind: "tool_result", toolUseId, content: allowed ? "fake: written" : DENIED, isError: !allowed } });
         text = fakeDecided(decision);
+      }
+      if (input.prompt.toLowerCase().includes(COUNT_SLOWLY)) {
+        for (const step of steps.splice(0)) {
+          await Bun.sleep(stepMs);
+          if (cut()) return;
+          yield step;
+        }
+        const lines: string[] = [];
+        for (let n = 1; n <= 200; n++) {
+          await Bun.sleep(stepMs * 10);
+          if (cut()) return;
+          lines.push(String(n));
+          yield { type: "delta", text: `${n}\n` };
+        }
+        text = lines.join("\n");
+        yield { type: "event", event: { kind: "assistant_text", text } };
+        yield { type: "event", event: { kind: "result", ok: true, text, costUsd: 0, durationMs: Date.now() - started } };
+        return;
       }
       const size = Math.ceil(text.length / 3);
       for (let i = 0; i < text.length; i += size) steps.push({ type: "delta", text: text.slice(i, i + size) });
       steps.push({ type: "event", event: { kind: "assistant_text", text } });
       for (const step of steps) {
         await Bun.sleep(stepMs);
-        if (input.signal.aborted) return;
+        if (cut()) return;
         yield step;
       }
       if (input.prompt.includes("fail")) {

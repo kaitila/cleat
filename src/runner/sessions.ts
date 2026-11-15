@@ -12,6 +12,8 @@ export const FAILED = "The turn failed.";
 export const BUSY = "a turn is running: wait for it to finish";
 export const APPROVAL_OPEN = "an approval is open: answer it first";
 export const NO_APPROVAL = "no such open approval";
+/** How long POST .../stop waits for the interrupted turn to end before it answers. */
+export const STOP_WAIT_MS = 10_000;
 
 /** Why a session can't take a reply now, or null. Only an idle or failed session can. */
 export function busy(session: SessionMeta): string | null {
@@ -38,7 +40,7 @@ export interface TurnWatcher {
 export class Sessions {
   /** Set by the server once the sync exists. */
   watcher: TurnWatcher | null = null;
-  private readonly turns = new Map<string, { abort: AbortController; done: Promise<void> }>();
+  private readonly turns = new Map<string, { abort: AbortController; interrupt: AbortController; done: Promise<void> }>();
   /** The open approvals, by approvalId. `settle` gives the waiting tool call its answer. */
   private readonly approvals = new Map<string, { sessionId: string; settle: (decision: ApprovalDecision) => void }>();
 
@@ -98,11 +100,13 @@ export class Sessions {
     this.record(id, { kind: "user", text, ...(imagePath ? { imagePath } : {}) }, "running");
     const prompt = promptWithImage(text, imagePath);
     const abort = new AbortController();
+    const interrupt = new AbortController();
     const entry = {
       abort,
+      interrupt,
       // A turn's last event sets the status before this runs, so a quick reply may already have
       // put the next turn in the map: only the turn's own entry is removed.
-      done: this.turn(id, prompt, abort.signal).finally(() => {
+      done: this.turn(id, prompt, abort.signal, interrupt.signal).finally(() => {
         if (this.turns.get(id) === entry) this.turns.delete(id);
       }),
     };
@@ -113,6 +117,24 @@ export class Sessions {
   /** True while the runner runs a turn of this session. */
   isRunning(id: string): boolean {
     return this.turns.has(id);
+  }
+
+  /**
+   * The person stops the session's turn: its open approvals are denied, the driver is interrupted,
+   * and once the turn has ended the session is idle with a `stopped` event. Resolves with the
+   * session when the turn has ended (or after STOP_WAIT_MS), null when the runner runs no turn of it.
+   */
+  async interrupt(id: string, waitMs = STOP_WAIT_MS): Promise<SessionMeta | null> {
+    const entry = this.turns.get(id);
+    if (!entry) return null;
+    if (!entry.interrupt.signal.aborted) {
+      entry.interrupt.abort();
+      for (const [approvalId, open] of [...this.approvals]) if (open.sessionId === id) this.close(approvalId, "deny");
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([entry.done, new Promise((resolve) => (timer = setTimeout(resolve, waitMs)))]);
+    clearTimeout(timer);
+    return this.store.get(id) ?? null;
   }
 
   /** Stores an event and tells the clients: the event, then the session with its new lastSeq. `ts` is the event's time (now by default). */
@@ -161,7 +183,7 @@ export class Sessions {
     }
   }
 
-  private async turn(id: string, prompt: string, signal: AbortSignal): Promise<void> {
+  private async turn(id: string, prompt: string, signal: AbortSignal, interrupt: AbortSignal): Promise<void> {
     const session = this.store.get(id)!;
     const permissionMode = this.modeFor(session.workspace);
     /** This turn's open approvals. */
@@ -171,7 +193,7 @@ export class Sessions {
     let lastText = "";
     const approve = (ask: ApprovalAsk, callSignal?: AbortSignal): Promise<ApprovalDecision> => {
       // Nobody can be asked any more: the call is denied, never allowed.
-      if (ended || signal.aborted || callSignal?.aborted) return Promise.resolve("deny");
+      if (ended || signal.aborted || interrupt.aborted || callSignal?.aborted) return Promise.resolve("deny");
       const approvalId = crypto.randomUUID();
       return new Promise((resolve) => {
         // The agent gave up on the call. While the runner stops, nothing more is recorded.
@@ -199,10 +221,18 @@ export class Sessions {
       if (event.kind === "result" && event.ok) this.notify(id, "finished", bodyOf(event.text || lastText) || NO_TEXT);
       else this.notify(id, "error", bodyOf(event.kind === "error" ? event.message : (event.kind === "result" && event.text) || lastText) || FAILED);
     };
+    /** The end of a turn the person stopped: whatever the driver said last, the session is idle. No notification: they know. */
+    const stopped = () => {
+      ended = true;
+      for (const approvalId of [...mine]) this.close(approvalId, "deny");
+      this.record(id, { kind: "stopped" }, "idle");
+    };
     try {
-      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, title: session.title, permissionMode, signal, approve })) {
+      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, title: session.title, permissionMode, signal, interrupt, approve })) {
         // A turn cut off by the runner stopping stays "running" on disk, and the next start records it as failed.
         if (signal.aborted) return;
+        // Stopped: only the conversation's id is still worth keeping; the rest (an aborted result) is not stored.
+        if (interrupt.aborted && out.type !== "session_id") continue;
         if (out.type === "delta") {
           this.send({ type: "delta", sessionId: id, text: out.text });
         } else if (out.type === "permission_mode") {
@@ -220,9 +250,13 @@ export class Sessions {
           this.record(id, out.event);
         }
       }
-      if (!signal.aborted) end({ kind: "error", message: NO_RESULT }, "error");
+      if (signal.aborted) return;
+      if (interrupt.aborted) stopped();
+      else end({ kind: "error", message: NO_RESULT }, "error");
     } catch (e) {
-      if (!signal.aborted) end({ kind: "error", message: (e as Error).message || String(e) }, "error");
+      if (signal.aborted) return;
+      if (interrupt.aborted) stopped();
+      else end({ kind: "error", message: (e as Error).message || String(e) }, "error");
     } finally {
       ended = true;
       // Still in `turns` here, so the sync can't take the turn's own transcript entries for another process's.

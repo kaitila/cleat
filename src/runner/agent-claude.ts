@@ -142,6 +142,9 @@ export function reduce(message: SDKMessage, inputs: Map<string, unknown> = new M
   }
 }
 
+/** After the person's Stop, how long an interrupted turn may take to end before it is aborted outright. */
+export const STOP_GRACE_MS = 5000;
+
 export function claudeDriver(): AgentDriver {
   return {
     async *run(input: TurnInput): AsyncIterable<AgentOutput> {
@@ -150,6 +153,8 @@ export function claudeDriver(): AgentDriver {
       if (input.signal.aborted) return;
       input.signal.addEventListener("abort", abort, { once: true });
       let stderr = "";
+      let hard: ReturnType<typeof setTimeout> | undefined;
+      let onStop: (() => void) | undefined;
       let sessionId: string | null = null;
       const inputs = new Map<string, unknown>();
       try {
@@ -157,7 +162,15 @@ export function claudeDriver(): AgentDriver {
         const options = claudeOptions(input, abortController, (data) => {
           stderr = (stderr + data).slice(-2000);
         });
-        for await (const message of query({ prompt: input.prompt, options })) {
+        const q = query({ prompt: input.prompt, options });
+        // Stop: the SDK's interrupt ends the turn as Claude Code's Esc does; one that doesn't end soon is aborted.
+        onStop = () => {
+          void q.interrupt().catch(() => abortController.abort());
+          hard = setTimeout(() => abortController.abort(), STOP_GRACE_MS);
+        };
+        if (input.interrupt?.aborted) onStop();
+        else input.interrupt?.addEventListener("abort", onStop, { once: true });
+        for await (const message of q) {
           if (input.signal.aborted) return;
           const id = (message as { session_id?: unknown }).session_id;
           if (typeof id === "string" && id && id !== sessionId) {
@@ -169,11 +182,13 @@ export function claudeDriver(): AgentDriver {
           if (message.type === "result") return;
         }
       } catch (e) {
-        if (input.signal.aborted) return;
+        if (input.signal.aborted || input.interrupt?.aborted) return;
         const detail = stderr.trim();
         yield { type: "event", event: { kind: "error", message: (e as Error).message + (detail ? `\n${detail}` : "") } };
       } finally {
         input.signal.removeEventListener("abort", abort);
+        if (onStop) input.interrupt?.removeEventListener("abort", onStop);
+        clearTimeout(hard);
       }
     },
   };
