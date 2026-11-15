@@ -400,6 +400,9 @@ export class Sync implements TurnWatcher {
       this.log(`sync: reading ${session.claudeSessionId} before a reply failed: ${(e as Error).message}`);
     }
     if (!info) return { openElsewhere: false };
+    // The runner's own turn is still closing (its result is in, the query shuts down) or its end is
+    // being caught up with: the newest writes are its own.
+    if (this.ours(id)) return { openElsewhere: false };
     const ownWrite = this.file.sessions[id]?.ownWrite ?? 0;
     const now = this.options.now();
     return { openElsewhere: now - info.lastModified < OPEN_MS && info.lastModified > ownWrite + OWN_SLACK_MS };

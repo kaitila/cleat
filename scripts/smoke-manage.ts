@@ -124,6 +124,7 @@ async function manageTrack(): Promise<void> {
   await expectThat(info?.customTitle === title, `${what}: the transcript has it as its custom title (${info?.customTitle})`);
 
   const forked = await post(`/api/sessions/${id}/fork`, {});
+  if (forked.status !== 201) await expectThat(false, `${what}: fork answered ${forked.status}: ${await forked.text()} (session: ${JSON.stringify(await find(id))})`);
   const fork = await sessionOf(forked);
   if (fork?.claudeSessionId) made.add(fork.claudeSessionId);
   await expectThat(forked.status === 201 && fork.status === "idle" && fork.title === `${title} (fork)`, `${what}: fork makes an idle '${title} (fork)' (${forked.status})`);
@@ -157,7 +158,7 @@ async function stopTrack(): Promise<void> {
   const session = await startIdle("Reply with exactly: ok", what);
   const streaming = firstDelta(session.id, 60_000);
   const replied = await post(`/api/sessions/${session.id}/messages`, { prompt: COUNT });
-  await expectThat(replied.status === 202, `${what}: the long reply is taken (${replied.status})`);
+  await expectThat(replied.status === 202, `${what}: the long reply is taken (${replied.status}${replied.status === 202 ? "" : `: ${await replied.text()}`})`);
   await expectThat(await streaming, `${what}: its answer streams`);
   await Bun.sleep(1500);
   const stopped = await post(`/api/sessions/${session.id}/stop`, {});

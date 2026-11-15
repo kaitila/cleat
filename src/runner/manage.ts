@@ -76,10 +76,14 @@ export class Manage {
     private readonly log: (line: string) => void = (line) => console.error(line),
   ) {}
 
-  /** Why a session can't be forked or deleted now: a turn runs, here or in a terminal. */
+  /**
+   * Why a session can't be forked or deleted now: a turn runs, here or in a terminal (a session
+   * shown running only because its transcript grows is "running" too). A turn whose result is in
+   * but whose query still closes counts as over, as for a reply: `closed` waits for it.
+   */
   private busy(id: string): string | null {
     if (this.deleting.has(id)) return DELETING;
-    if (this.sessions.isRunning(id) || this.sync.isLive(id)) return BUSY;
+    if (this.sync.isLive(id)) return BUSY;
     return busy(this.store.get(id)!);
   }
 
@@ -124,10 +128,14 @@ export class Manage {
   async fork(id: string): Promise<SessionMeta | Refused> {
     const why = this.busy(id);
     if (why) return { status: 409, error: why };
-    // A terminal session's history is read first, so the fork's copy has it.
+    // A terminal session's history is read first, so the fork's copy has it, and the last turn has closed.
+    await this.sessions.closed(id);
     await this.sync.load(id);
     const source = this.store.get(id);
     if (!source) return { status: 404, error: "no such session" };
+    // A reply may have come in meanwhile.
+    const now = this.busy(id);
+    if (now) return { status: 409, error: now };
     if (!source.claudeSessionId) return { status: 409, error: NOTHING_TO_FORK };
     const title = forkTitle(source.title);
     // The new transcript isn't the runner's until its session exists: the sync waits for it.
@@ -173,6 +181,7 @@ export class Manage {
     if (why) return { status: 409, error: why };
     this.deleting.add(id);
     try {
+      await this.sessions.closed(id);
       const claudeId = session.claudeSessionId;
       if (claudeId) {
         try {

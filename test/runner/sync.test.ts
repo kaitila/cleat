@@ -318,6 +318,35 @@ describe("replying to a session open in a terminal", () => {
     expect(res.status).toBe(409);
     expect(((await res.json()) as { error: string }).error).toBe(BUSY);
   });
+
+  test("a reply while the runner's own turn is still closing (its result in) is not taken for a terminal's", async () => {
+    const t = new FakeTranscripts();
+    // The turn started "long ago" on the sync's clock, so its own writes are newer than its start by more than the slack.
+    let clock = Date.now() - 60_000;
+    let closing: () => void = () => {};
+    const lingering: AgentDriver = {
+      async *run(input) {
+        const id = input.resume ?? "claude-linger";
+        yield { type: "session_id", id };
+        t.write(id, input.cwd, [user(input.prompt), assistant("ok")]);
+        try {
+          yield { type: "event", event: { kind: "result", ok: true, text: "ok" } };
+        } finally {
+          // As the SDK's query, it shuts Claude Code down after the result.
+          await new Promise<void>((resolve) => (closing = resolve));
+        }
+      },
+    };
+    const r = testRunner({ driver: lingering, sync: { transcripts: t, ...SYNC, now: () => clock } });
+    runners.push(r);
+    const s = await socketOf(r);
+    const session = await r.startSession("first");
+    await settled(s, session.id);
+    clock = Date.now();
+    const res = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "right away" });
+    closing();
+    expect(res.status).toBe(202);
+  });
 });
 
 describe("a transcript that can't be read", () => {

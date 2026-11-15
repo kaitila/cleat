@@ -114,6 +114,18 @@ export class Sessions {
     this.watcher?.turnStarted(id);
   }
 
+  /**
+   * Waits (at most `ms`) for a turn that has already ended, idle or failed, to finish closing: the
+   * SDK's query still shuts Claude Code down after the result. Then nothing writes to the transcript.
+   */
+  async closed(id: string, ms = 5000): Promise<void> {
+    const entry = this.turns.get(id);
+    if (!entry) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([entry.done, new Promise((resolve) => (timer = setTimeout(resolve, ms)))]);
+    clearTimeout(timer);
+  }
+
   /** True while the runner runs a turn of this session. */
   isRunning(id: string): boolean {
     return this.turns.has(id);
