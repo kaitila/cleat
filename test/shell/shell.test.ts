@@ -8,13 +8,14 @@ import { acceptedRect, acceptedSender, captureSize, cropPlan, isSnipPage, matchS
 import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
 import { centred, iconBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
-import { chatUrl, dockUrl, externalLink, promptUrl, sameOrigin, sessionOf, windowTarget } from "../../shell/src/origin";
+import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, sessionOf, settingsUrl, windowTarget } from "../../shell/src/origin";
+import { hotkeyNotice, migratedPrefs, parseRunnerSettings, releaseBoth, parseShellPrefs, RECONNECT_MAX_MS, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_WINDOW, SHELL_DEFAULTS, settingsMessage, socketUrl, swapHotkey, withShell } from "../../shell/src/prefs";
 import type { SelfTestResult } from "../../shell/src/result";
-import { DEFAULT_SETTINGS, loadSettings, parseSettings, PID_FILE, saveDock, SETTINGS_FILE, withDock, withWsl } from "../../shell/src/settings";
+import { DEFAULT_SETTINGS, dropLegacy, hasLegacy, loadSettings, parseSettings, PID_FILE, SETTINGS_FILE, withoutLegacy, withWsl } from "../../shell/src/settings";
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
 import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
-import { expectedExternal, pngSize, problems, selfTestRun, SNIP_SLOW_MS, STUB_SESSION, stubRunner } from "../../src/shell/selftest-run";
+import { expectedExternal, pngSize, problems, selfTestRun, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
@@ -130,10 +131,10 @@ describe("bundle", () => {
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
     expect(main).toContain("sandbox: true, contextIsolation: true, nodeIntegration: false");
-    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(4);
-    // The pop-up and the chat window: no preload. The dock and the snip overlays: the same preferences, plus their preload.
-    expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(2);
-    expect(main.match(/webPreferences:/g)).toHaveLength(4);
+    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(5);
+    // The pop-up, the chat and the Settings window: no preload. The dock and the snip overlays: the same preferences, plus their preload.
+    expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(3);
+    expect(main.match(/webPreferences:/g)).toHaveLength(5);
     expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) }");
     expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) }");
     expect(main.match(/preload\s*:/g)).toHaveLength(2);
@@ -141,48 +142,195 @@ describe("bundle", () => {
   });
 });
 
-describe("settings", () => {
-  test("a first start writes the defaults", () => {
+describe("the shell's file", () => {
+  test("a first start writes runnerUrl alone", () => {
     const file = join(dir, "data", "settings.json");
-    expect(loadSettings(file)).toEqual({ runnerUrl: "http://127.0.0.1:4777", hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true });
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(DEFAULT_SETTINGS);
+    expect(loadSettings(file)).toEqual({ runnerUrl: "http://127.0.0.1:4777", legacy: {} });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ runnerUrl: "http://127.0.0.1:4777" });
+    expect(DEFAULT_SETTINGS).toEqual({ runnerUrl: "http://127.0.0.1:4777" });
   });
 
-  test("a changed file is read, and is not overwritten", () => {
+  test("an older shell's hotkey, snip hotkey and dock are read as values to migrate, and only when they are valid", () => {
     const file = join(dir, "changed.json");
     writeFileSync(file, JSON.stringify({ runnerUrl: "http://localhost:5000/", hotkey: " Alt+F9 " }));
-    expect(loadSettings(file)).toEqual({ runnerUrl: "http://localhost:5000", hotkey: "Alt+F9", snipHotkey: "Control+Alt+S", dock: true });
+    expect(loadSettings(file)).toEqual({ runnerUrl: "http://localhost:5000", legacy: { hotkey: "Alt+F9" } });
+    // Read, not written.
     expect(JSON.parse(readFileSync(file, "utf8")).hotkey).toBe(" Alt+F9 ");
+    expect(parseSettings('{"snipHotkey":" Alt+Shift+S ","dock":false}').legacy).toEqual({ snipHotkey: "Alt+Shift+S", dock: false });
+    for (const odd of ['""', '"  "', "7", "null", "{}"]) expect(parseSettings(`{"hotkey":${odd},"snipHotkey":${odd},"dock":${odd}}`).legacy).toEqual({});
+    expect(parseSettings('{"dock":"no"}').legacy).toEqual({});
+    expect(hasLegacy(parseSettings('{"dock":true}'))).toBe(true);
+    expect(hasLegacy(parseSettings('{"runnerUrl":"http://127.0.0.1:4777"}'))).toBe(false);
   });
 
   test("anything missing or malformed falls back to its default", () => {
-    expect(parseSettings("not json")).toEqual(DEFAULT_SETTINGS);
-    expect(parseSettings("null")).toEqual(DEFAULT_SETTINGS);
-    expect(parseSettings('{"hotkey":"Alt+F9"}')).toEqual({ ...DEFAULT_SETTINGS, hotkey: "Alt+F9" });
-    expect(parseSettings('{"runnerUrl":"file:///c:/x","hotkey":7}')).toEqual(DEFAULT_SETTINGS);
-    expect(parseSettings('{"runnerUrl":"javascript:alert(1)"}')).toEqual(DEFAULT_SETTINGS);
+    const empty = { ...DEFAULT_SETTINGS, legacy: {} };
+    expect(parseSettings("not json")).toEqual(empty);
+    expect(parseSettings("null")).toEqual(empty);
+    expect(parseSettings("[1]")).toEqual(empty);
+    expect(parseSettings('{"runnerUrl":"file:///c:/x","hotkey":7}')).toEqual(empty);
+    expect(parseSettings('{"runnerUrl":"javascript:alert(1)"}')).toEqual(empty);
   });
 
-  test("the snip hotkey is Control+Alt+S unless the file names another", () => {
-    expect(DEFAULT_SETTINGS.snipHotkey).toBe("Control+Alt+S");
-    expect(parseSettings('{"snipHotkey":" Alt+Shift+S "}')).toEqual({ ...DEFAULT_SETTINGS, snipHotkey: "Alt+Shift+S" });
-    for (const odd of ['""', '"  "', "7", "null", "{}"]) expect(parseSettings(`{"snipHotkey":${odd}}`).snipHotkey).toBe("Control+Alt+S");
+  test("after the migration the file keeps runnerUrl and wsl, as they were, and nothing else", () => {
+    const wsl = { distro: "Ubuntu", repo: "/r", bun: "/b" };
+    expect(JSON.parse(withoutLegacy(JSON.stringify({ runnerUrl: "http://127.0.0.1:5000", hotkey: "Alt+F9", snipHotkey: "Alt+S", dock: false, wsl, mine: 1 })))).toEqual({ runnerUrl: "http://127.0.0.1:5000", wsl });
+    expect(JSON.parse(withoutLegacy(JSON.stringify({ hotkey: "Alt+F9" })))).toEqual({});
+    expect(JSON.parse(withoutLegacy("not json"))).toEqual(DEFAULT_SETTINGS);
+    const file = join(dir, "migrate", "settings.json");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ runnerUrl: "http://127.0.0.1:5000", hotkey: "Alt+F9", dock: false, wsl }));
+    dropLegacy(file);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ runnerUrl: "http://127.0.0.1:5000", wsl });
+    expect(loadSettings(file)).toEqual({ runnerUrl: "http://127.0.0.1:5000", wsl, legacy: {} });
+    // No file: nothing is written.
+    dropLegacy(join(dir, "migrate", "none.json"));
+    expect(readdirSync(join(dir, "migrate"))).toEqual(["settings.json"]);
+  });
+});
+
+describe("settings from the runner", () => {
+  const shell = { hotkey: "Alt+F9", snipHotkey: "Alt+S", dock: false, startOnLogin: true };
+  const good: RunnerSettings = { theme: "dark", permissionMode: "auto", workspaces: [{ name: "a", path: "/a" }, { name: "b", path: "/b", permissionMode: "default" }], shell, port: 4777 };
+
+  test("settings as the contract has them are taken; anything else is not", () => {
+    expect(parseRunnerSettings(good)).toEqual(good);
+    expect(parseRunnerSettings({ ...good, shell: null })).toEqual({ ...good, shell: null });
+    expect(parseShellPrefs({ ...shell, hotkey: " Alt+F9 " })).toEqual(shell);
+    for (const bad of [
+      null, [], "x", { ...good, theme: "blue" }, { ...good, permissionMode: "bypassPermissions" }, { ...good, port: "4777" }, { ...good, workspaces: {} },
+      { ...good, workspaces: [{ name: "a" }] }, { ...good, workspaces: [{ name: "a", path: "/a", permissionMode: "acceptEdits" }] }, { ...good, shell: undefined },
+      { ...good, shell: { ...shell, hotkey: "" } }, { ...good, shell: { ...shell, snipHotkey: 7 } }, { ...good, shell: { ...shell, dock: "yes" } }, { ...good, shell: { ...shell, startOnLogin: undefined } },
+    ]) {
+      expect(`${JSON.stringify(bad)} ${parseRunnerSettings(bad)}`).toBe(`${JSON.stringify(bad)} null`);
+    }
   });
 
-  test("the dock is on unless the file says false, and the tray's checkbox is written keeping the rest", () => {
-    expect(DEFAULT_SETTINGS.dock).toBe(true);
-    expect(parseSettings('{"dock":false}').dock).toBe(false);
-    expect(parseSettings('{"dock":true}').dock).toBe(true);
-    for (const odd of ['"no"', "0", "null", "{}"]) expect(parseSettings(`{"dock":${odd}}`).dock).toBe(true);
+  test("the 'settings' message on /ws is read; every other message is not", () => {
+    expect(settingsMessage(JSON.stringify({ type: "settings", settings: good }))).toEqual(good);
+    for (const other of [
+      JSON.stringify({ type: "hello", sessions: [] }), JSON.stringify({ type: "delta", sessionId: "s", text: "settings" }), JSON.stringify({ type: "settings", settings: { theme: "x" } }),
+      "not json", '{"settings"', 7, null, Buffer.from(JSON.stringify({ type: "settings", settings: good })),
+    ]) {
+      expect(settingsMessage(other)).toBeNull();
+    }
+  });
 
-    const file = join(dir, "dock", "settings.json");
-    saveDock(file, false);
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...DEFAULT_SETTINGS, dock: false });
-    writeFileSync(file, JSON.stringify({ hotkey: "Alt+F9", mine: true, dock: false }));
-    saveDock(file, true);
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ hotkey: "Alt+F9", mine: true, dock: true });
-    expect(loadSettings(file)).toMatchObject({ hotkey: "Alt+F9", dock: true });
-    expect(JSON.parse(withDock("not json", false))).toEqual({ ...DEFAULT_SETTINGS, dock: false });
+  test("a PUT sends everything back as it came, with the shell's part replaced", () => {
+    const next = { ...shell, dock: true };
+    expect(withShell(good, next)).toEqual({ ...good, shell: next });
+    expect(withShell({ ...good, shell: null }, next).workspaces).toEqual(good.workspaces);
+  });
+
+  test("the socket is /ws on the runner's host, and reconnects quietly: a second, doubling, fifteen at most, forever", () => {
+    expect(socketUrl("http://127.0.0.1:4777")).toBe("ws://127.0.0.1:4777/ws");
+    expect(socketUrl("https://example.invalid:8443/x")).toBe("wss://example.invalid:8443/ws");
+    expect([0, 1, 2, 3, 4, 5, 100, -1].map(reconnectMs)).toEqual([1000, 2000, 4000, 8000, 15_000, 15_000, 15_000, 1000]);
+    expect(RECONNECT_MAX_MS).toBe(15_000);
+  });
+
+  test("the migration sends the old file's values, the defaults for the rest, and start on login as Windows has it", () => {
+    expect(migratedPrefs({}, false)).toEqual({ ...SHELL_DEFAULTS, startOnLogin: false });
+    expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: "Control+Alt+S", dock: false, startOnLogin: true });
+    expect(SHELL_DEFAULTS).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true });
+  });
+
+  /** A stand-in for globalShortcut: some accelerators are taken by another program, some throw as Electron does for one that is not valid. */
+  const shortcuts = (taken: string[] = []) => {
+    const held = new Set<string>();
+    const calls: string[] = [];
+    return {
+      held,
+      calls,
+      register(a: string) {
+        calls.push(`register ${a}`);
+        if (a.includes("Nope")) throw new TypeError(`conversion failure from ${a}`);
+        if (taken.includes(a) || held.has(a)) return false;
+        held.add(a);
+        return true;
+      },
+      unregister(a: string) {
+        calls.push(`unregister ${a}`);
+        held.delete(a);
+      },
+      isRegistered: (a: string) => {
+        if (a.includes("Nope")) throw new TypeError(`conversion failure from ${a}`);
+        return held.has(a);
+      },
+    };
+  };
+
+  test("a hotkey change registers the new one first, then releases the old one", () => {
+    const ops = shortcuts();
+    expect(swapHotkey(null, "Alt+F9", ops)).toEqual({ active: "Alt+F9", failed: null });
+    expect(swapHotkey("Alt+F9", "Alt+F10", ops)).toEqual({ active: "Alt+F10", failed: null });
+    expect([...ops.held]).toEqual(["Alt+F10"]);
+    expect(ops.calls).toEqual(["register Alt+F9", "register Alt+F10", "unregister Alt+F9"]);
+    // The same one: nothing is touched.
+    expect(swapHotkey("Alt+F10", "Alt+F10", ops)).toEqual({ active: "Alt+F10", failed: null });
+    expect(ops.calls).toHaveLength(3);
+  });
+
+  test("one that cannot be registered (taken, held by the other hotkey, or not an accelerator) keeps the old one working", () => {
+    const ops = shortcuts(["Control+Alt+T"]);
+    swapHotkey(null, "Alt+F9", ops);
+    swapHotkey(null, "Alt+S", ops);
+    for (const wanted of ["Control+Alt+T", "Alt+S", "Control+Alt+Nope"]) {
+      expect(swapHotkey("Alt+F9", wanted, ops)).toEqual({ active: "Alt+F9", failed: wanted });
+      expect([...ops.held].sort()).toEqual(["Alt+F9", "Alt+S"]);
+    }
+    expect(ops.calls.filter((c) => c.startsWith("unregister"))).toEqual([]);
+    // Nothing registered yet, and the first one fails: none works, and that is said.
+    expect(swapHotkey(null, "Control+Alt+T", shortcuts(["Control+Alt+T"]))).toEqual({ active: null, failed: "Control+Alt+T" });
+  });
+
+  test("two hotkeys that trade keys, or one moving onto the key the other leaves, are both released first; one wanting the key the other keeps is not", () => {
+    const now = { hotkey: "A", snipHotkey: "B" };
+    expect(releaseBoth(now, { hotkey: "B", snipHotkey: "A" })).toBe(true);
+    expect(releaseBoth(now, { hotkey: "B", snipHotkey: "C" })).toBe(true);
+    expect(releaseBoth(now, { hotkey: "C", snipHotkey: "A" })).toBe(true);
+    expect(releaseBoth(now, { hotkey: "B", snipHotkey: "B" })).toBe(false);
+    expect(releaseBoth(now, { hotkey: "A", snipHotkey: "B" })).toBe(false);
+    expect(releaseBoth(now, { hotkey: "C", snipHotkey: "D" })).toBe(false);
+    expect(releaseBoth({ hotkey: null, snipHotkey: null }, { hotkey: "A", snipHotkey: "B" })).toBe(false);
+    // After the release, the trade registers both.
+    const held = new Set<string>();
+    const ops = { register: (a: string) => (held.has(a) ? false : (held.add(a), true)), unregister: (a: string) => void held.delete(a), isRegistered: (a: string) => held.has(a) };
+    swapHotkey(null, "A", ops);
+    swapHotkey(null, "B", ops);
+    held.clear();
+    expect([swapHotkey(null, "B", ops), swapHotkey(null, "A", ops)]).toEqual([{ active: "B", failed: null }, { active: "A", failed: null }]);
+  });
+
+  test("the notification names the hotkey that failed and the one that still works", () => {
+    const n = hotkeyNotice("hotkey", "Control+Alt+T", "Alt+F9");
+    expect(n.title).toBe("intuition: the hotkey could not be set");
+    expect(n.body).toContain("Control+Alt+T could not be registered");
+    expect(n.body).toContain("Alt+F9 still works.");
+    expect(hotkeyNotice("snip hotkey", "X", null)).toEqual({ title: "intuition: the snip hotkey could not be set", body: expect.stringContaining("No snip hotkey works") });
+  });
+
+  test("main.ts: applied at start and at every message; the tray writes through PUT; the theme follows", () => {
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    expect(main).toContain("new net.WebSocket(socketUrl(settings.runnerUrl))");
+    expect(main).toContain("if (s) applySettings(s);");
+    expect(main).toContain("nativeTheme.themeSource = next.theme;");
+    expect(main).toContain('{ label: "Show dock", type: "checkbox", checked: prefs.dock, click: (item) => void changePrefs({ dock: item.checked }) }');
+    expect(main).toContain('{ label: "Start on login", type: "checkbox", checked: onLogin, click: (item) => void changePrefs({ startOnLogin: item.checked }) }');
+    expect(main).toContain('{ label: "Settings…", click: () => void openSettings() }');
+    // The hotkeys are registered in one place, through swapHotkey.
+    expect(main.match(/globalShortcut\.register\(/g)).toHaveLength(3);
+    // The other two are the self-test's own registration checks.
+    expect(main.match(/globalShortcut\.register\(SELF_TEST_/g)).toHaveLength(2);
+    expect(main).toContain("register: (accelerator: string) => globalShortcut.register(accelerator, press),");
+    // Nothing is written to the file but the migration's rewrite.
+    expect(main).not.toMatch(/saveDock|withDock/);
+    expect(main.match(/dropLegacy\(/g)).toHaveLength(1);
+    // PUT only to the runner's own settings route: putSettings, and the self-test standing in for the Settings page.
+    expect(main.match(/method: "PUT"/g)).toHaveLength(2);
+    const selfTest = main.slice(main.indexOf("async function selfTest()"), main.indexOf("// --- Start ---"));
+    expect(selfTest.match(/method: "PUT"/g)).toHaveLength(1);
+    expect(main).toContain("fetch(new URL(SETTINGS_PATH, settings.runnerUrl), {");
   });
 });
 
@@ -270,6 +418,13 @@ describe("origin", () => {
     }
   });
 
+  test("the Settings window's page", () => {
+    expect(settingsUrl("http://127.0.0.1:4777")).toBe("http://127.0.0.1:4777/assets/settings.html");
+    expect(isSettingsLink("http://127.0.0.1:4777/settings", "http://127.0.0.1:4777")).toBe(true);
+    expect(isSettingsLink("http://127.0.0.1:4778/settings", "http://127.0.0.1:4777")).toBe(false);
+    expect(SETTINGS_WINDOW).toEqual({ width: 720, height: 640 });
+  });
+
   test("the pages' addresses", () => {
     expect(promptUrl(RUNNER)).toBe("http://127.0.0.1:4777/prompt");
     expect(chatUrl(RUNNER)).toBe("http://127.0.0.1:4777/");
@@ -299,6 +454,8 @@ describe("origin", () => {
     for (const fromDock of [true, false]) {
       expect(windowTarget("http://127.0.0.1:4777/?session=a+b%26c", RUNNER, fromDock)).toEqual({ kind: "chat", session: "a b&c" });
       expect(windowTarget("http://127.0.0.1:4777/", RUNNER, fromDock)).toEqual({ kind: "chat", session: undefined });
+      for (const url of ["http://127.0.0.1:4777/settings", "http://127.0.0.1:4777/settings/", "http://127.0.0.1:4777/assets/settings.html", "http://127.0.0.1:4777/settings?x=1#y"]) expect(windowTarget(url, RUNNER, fromDock)).toEqual({ kind: "settings" });
+      for (const url of ["http://localhost:4777/settings", "http://127.0.0.1:4777/settingsx", "http://127.0.0.1:4777/assets/settings.js", "https://example.com/settings"]) expect(`${url} ${windowTarget(url, RUNNER, fromDock)}`).toBe(`${url} null`);
       for (const url of ["http://127.0.0.1:4777/dock", "http://127.0.0.1:4777/assets/base.css", "http://127.0.0.1:4777/prompt/x", "http://127.0.0.1:4777/api/sessions", "http://localhost:4777/prompt", "http://localhost:4777/?session=x", "https://example.com/", "file:///C:/x", "javascript:alert(1)", "about:blank", ""]) {
         expect(`${url} ${windowTarget(url, RUNNER, fromDock)}`).toBe(`${url} null`);
       }
@@ -498,7 +655,7 @@ describe("the dock", () => {
     expect(main).toContain("if (dockStatus < 200 || dockStatus >= 300) throw");
     expect(main).toContain('win.webContents.on("render-process-gone", () => hideDock());');
     expect(main).toContain("if (isMainFrame && code !== -3) hideDock();");
-    expect(main).toContain('{ label: "Show dock", type: "checkbox", checked: settings.dock, click: (item) => setDock(item.checked) }');
+    expect(main).toContain('{ label: "Show dock", type: "checkbox", checked: prefs.dock, click: (item) => void changePrefs({ dock: item.checked }) }');
   });
 
   test("main.ts: a runner that answers but has no dock is said once, and the check keeps loading the page", () => {
@@ -514,7 +671,7 @@ describe("the dock", () => {
     // The retry: every check while the runner answers loads the page again when no dock is shown.
     const check = main.slice(main.indexOf("async function checkDock()"), main.indexOf("/** Checks every few seconds."));
     expect(check).toContain("await showDock();");
-    expect(main).toContain("if (!settings.dock || dockLoaded) return Promise.resolve();");
+    expect(main).toContain("if (!prefs.dock || dockLoaded) return Promise.resolve();");
   });
 });
 
@@ -620,7 +777,7 @@ describe("the snip", () => {
     // One write, by name from the clock, in <temp>\intuition. Nothing the page sends names a file.
     expect(section.match(/saveClip\(|writeFileSync\(|writeFile\(/g)).toEqual(["saveClip("]);
     expect(section).toContain('saveClip(join(app.getPath("temp"), "intuition"), cut.toPNG(), new Date(), "snip")');
-    expect(main).toContain('globalShortcut.register(settings.snipHotkey, () => void snip())');
+    expect(main).toContain('activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, () => void snip());');
     expect(main).toContain('{ label: "Snip", click: () => void snip() }');
   });
 
@@ -646,11 +803,12 @@ describe("no toasts for sessions", () => {
       expect(`${name}: ${/api\/notifications|toastOf|pollOnce|Open last session|lastSession/.test(code)}`).toBe(`${name}: false`);
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
-    // The one Notification left is notify(): the runner is not running or is older than the shell, the hotkey is taken, start on login failed.
+    // The one Notification left is notify(): the runner is not running or is older than the shell, a hotkey could not be set, a setting or start on login was not changed.
     expect(main.match(/new Notification\(/g)).toHaveLength(1);
     expect(main.match(/\bnotify\(/g)).toHaveLength(6);
     expect(main).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
-    for (const title of ["intuition: the runner is not running", "intuition: the hotkey is taken", "intuition: the snip hotkey is taken", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
+    expect(main).toContain("notify(n.title, n.body);");
+    for (const title of ["intuition: the runner is not running", "intuition: the setting was not changed", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
     expect(main).toContain("app.setAppUserModelId(");
   });
 });
@@ -676,9 +834,24 @@ describe("self-test runner", () => {
     snipOverlayBounds: [display, { x: 2560, y: 0, width: 1920, height: 1080 }], snipOverlaysShown: true, snipUrl: "http://127.0.0.1:5000/assets/snip.html",
     snipMs: 240, snipPhases: { warm: 1, captured: 150, drawn: 230 }, snipCaptured: true, snipBridge: "object:close,crop,getCapture:undefined:undefined",
     snipCropRect: SELF_TEST_CROP, snipCropPath: "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\snip-20261113-120000-000.png", snipBadRectsRefused: true,
-    snipClosed: true, snipEscClosed: true, externalLinks: expectedExternal("http://127.0.0.1:5000"), errors: [],
+    snipClosed: true, snipEscClosed: true,
+    settingsFileKeys: ["runnerUrl"], settingsHotkeyRegistered: true, settingsHotkeyChanged: true, settingsInvalidHotkeyKept: true, settingsTakenHotkeyKept: true,
+    settingsNotices: [
+      hotkeyNotice("hotkey", SELF_TEST_PREFS.invalid, SELF_TEST_PREFS.changed), hotkeyNotice("hotkey", SELF_TEST_PREFS.snipHotkey, SELF_TEST_PREFS.changed),
+    ].map((n) => `${n.title}: ${n.body}`),
+    settingsDockShown: true, settingsDockHidden: true, settingsTheme: "dark", settingsOpenAtLogin: false,
+    settingsWindowUrl: "http://127.0.0.1:5000/assets/settings.html", settingsWindowWidth: 720, settingsWindowHeight: 640, settingsWindowReused: true,
+    settingsLinkOpened: "http://127.0.0.1:5000/assets/settings.html",
+    externalLinks: expectedExternal("http://127.0.0.1:5000"), errors: [],
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
+  const base = stubSettings(5000);
+  const migration = (startOnLogin: boolean) => withShell(base, { hotkey: SELF_TEST_PREFS.hotkey, snipHotkey: SELF_TEST_PREFS.snipHotkey, dock: false, startOnLogin });
+  const puts = (startOnLogin = false) => {
+    const m = migration(startOnLogin);
+    const changed = withShell(m, { ...m.shell!, hotkey: SELF_TEST_PREFS.changed });
+    return [m, changed, withShell(changed, { ...changed.shell!, dock: true }), withShell(changed, { ...changed.shell!, dock: false })];
+  };
   /** A PNG header of a given size: what the stand-in reader gives for every path. */
   const header = (width: number, height: number) => {
     const b = Buffer.concat([PNG_SIGNATURE, Buffer.alloc(16)]);
@@ -690,7 +863,7 @@ describe("self-test runner", () => {
   };
   // SELF_TEST_CROP at 150%: 10.5..111.5 x 20.25..69.75 is 15..168 x 30..105 device pixels.
   const png = () => header(153, 75);
-  const check = (r: Partial<SelfTestResult>, p = posts, read: (windowsPath: string) => Uint8Array | null = png) => problems(r, { posts: p }, "http://127.0.0.1:5000", read);
+  const check = (r: Partial<SelfTestResult>, p = posts, read: (windowsPath: string) => Uint8Array | null = png, put = puts()) => problems(r, { posts: p, puts: put }, "http://127.0.0.1:5000", read);
 
   test("a clean result has no problems", () => {
     expect(check(good)).toEqual([]);
@@ -763,9 +936,27 @@ describe("self-test runner", () => {
   });
 
   test("start on login is reported, on or off: either passes, and only an unread one fails", () => {
-    expect(check({ ...good, openAtLogin: true })).toEqual([]);
+    expect(check({ ...good, openAtLogin: true, settingsOpenAtLogin: true }, posts, png, puts(true))).toEqual([]);
     expect(check({ ...good, openAtLogin: false })).toEqual([]);
-    expect(check({ ...good, openAtLogin: null })).toHaveLength(1);
+    expect(check({ ...good, openAtLogin: null, settingsOpenAtLogin: null }, posts, png, [withShell(base, { ...migration(false).shell!, startOnLogin: null as never }), ...puts().slice(1)])).toHaveLength(2);
+    // Changed by the self-test: a failure.
+    expect(check({ ...good, settingsOpenAtLogin: true })).toHaveLength(1);
+  });
+
+  test("settings: the migration sent once with the old file's values, the tray's PUT, the notices naming each hotkey, and the Settings window", () => {
+    // No migration, or a migration with other values.
+    expect(check(good, posts, png, puts().slice(1)).length).toBeGreaterThanOrEqual(2);
+    expect(check(good, posts, png, [withShell(base, { ...SHELL_DEFAULTS, startOnLogin: false }), ...puts().slice(1)]).length).toBeGreaterThanOrEqual(2);
+    // Sent twice.
+    expect(check(good, posts, png, [migration(false), ...puts()])).toHaveLength(1);
+    // The tray never wrote.
+    expect(check(good, posts, png, puts().filter((p) => !p.shell?.dock))).toHaveLength(1);
+    expect(check({ ...good, settingsFileKeys: ["dock", "runnerUrl"] })).toHaveLength(1);
+    expect(check({ ...good, settingsNotices: good.settingsNotices.slice(0, 1) })).toHaveLength(1);
+    expect(check({ ...good, settingsNotices: [...good.settingsNotices].reverse() })).toHaveLength(1);
+    expect(check({ ...good, settingsWindowUrl: "http://127.0.0.1:5000/settings" })).toHaveLength(1);
+    expect(check({ ...good, settingsWindowWidth: 721 })).toEqual([]);
+    expect(check({ ...good, settingsWindowHeight: 720 })).toHaveLength(1);
   });
 
   test("what the stub runner received and the saved file are asserted too", () => {
@@ -798,7 +989,36 @@ describe("self-test runner", () => {
       for (const file of ["snip.js", "snip-geometry.js", "snip.css", "base.css"]) expect(`${file} ${(await fetch(`${runner.url}/assets/${file}`)).status}`).toBe(`${file} 200`);
       for (const path of ["/assets/../../package.json", "/assets/%2e%2e/%2e%2e/package.json", "/assets/nope.js"]) expect(`${path} ${(await fetch(`${runner.url}${path}`)).status}`).toBe(`${path} 404`);
       expect(await (await fetch(`${runner.url}/api/workspaces`)).json()).toEqual({ workspaces: [], lastUsed: null });
+      // The Settings page, a stand-in until src/web has it, and its alias.
+      for (const path of ["/assets/settings.html", "/settings"]) expect((await fetch(`${runner.url}${path}`)).headers.get("content-type")).toContain("text/html");
     } finally {
+      await runner.stop();
+    }
+  });
+
+  test("the stub runner keeps settings, records each PUT and sends it to every socket", async () => {
+    const runner = stubRunner();
+    const ws = new WebSocket(`${runner.url.replace("http:", "ws:")}/ws`);
+    const messages: unknown[] = [];
+    ws.onmessage = (e) => messages.push(JSON.parse(String(e.data)));
+    try {
+      await new Promise((resolve, reject) => ((ws.onopen = resolve), (ws.onerror = reject)));
+      const first = parseRunnerSettings(await (await fetch(`${runner.url}/api/settings`)).json());
+      expect(first).toEqual(stubSettings(Number(new URL(runner.url).port)));
+      expect(first!.shell).toBeNull();
+      const next = withShell(first!, { ...SHELL_DEFAULTS, startOnLogin: false });
+      const res = await fetch(`${runner.url}/api/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...next, port: 1 }) });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(next);
+      expect(runner.puts).toHaveLength(1);
+      const bad = await fetch(`${runner.url}/api/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...next, theme: "blue" }) });
+      expect(bad.status).toBe(400);
+      expect(await bad.json()).toMatchObject({ field: expect.any(String) });
+      for (let i = 0; i < 20 && messages.length < 2; i++) await Bun.sleep(25);
+      expect(messages).toEqual([{ type: "hello", sessions: [] }, { type: "settings", settings: next }]);
+      expect(runner.settings()).toEqual(next);
+    } finally {
+      ws.close();
       await runner.stop();
     }
   });
@@ -857,8 +1077,8 @@ describe("starting the runner from Windows", () => {
   });
 
   test("the settings carry it only when it is whole", () => {
-    expect(parseSettings(JSON.stringify({ wsl }))).toEqual({ ...DEFAULT_SETTINGS, wsl });
-    expect(parseSettings(JSON.stringify({ wsl: { ...wsl, distro: "--exec" } }))).toEqual(DEFAULT_SETTINGS);
+    expect(parseSettings(JSON.stringify({ wsl }))).toEqual({ ...DEFAULT_SETTINGS, wsl, legacy: {} });
+    expect(parseSettings(JSON.stringify({ wsl: { ...wsl, distro: "--exec" } }))).toEqual({ ...DEFAULT_SETTINGS, legacy: {} });
     expect("wsl" in parseSettings("{}")).toBe(false);
   });
 
@@ -871,7 +1091,7 @@ describe("starting the runner from Windows", () => {
     const lines: string[] = [];
     expect(writeRunnerLocation(file, wsl, (l) => lines.push(l))).toBe(true);
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...DEFAULT_SETTINGS, wsl });
-    expect(loadSettings(file)).toEqual({ ...DEFAULT_SETTINGS, wsl });
+    expect(loadSettings(file)).toEqual({ ...DEFAULT_SETTINGS, wsl, legacy: {} });
     expect(lines).toHaveLength(1);
 
     writeFileSync(file, JSON.stringify({ hotkey: "Alt+F9", mine: true, wsl: { distro: "Old", repo: "/old", bun: "/old/bun" } }));
@@ -920,9 +1140,11 @@ describe("start on login", () => {
   test("only the tray's checkbox and --login set it; the self-test and the scripts only read", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     expect(main.match(/setLoginItemSettings\(/g)).toHaveLength(1);
-    // The function itself, the checkbox's click, and --login on|off.
+    // The function itself, the runner's settings applied, and --login on|off. The checkbox writes to the runner.
     expect(main.match(/setStartOnLogin\(/g)).toHaveLength(3);
-    expect(main).toContain("setStartOnLogin(item.checked)");
+    expect(main).toContain("if (startsOnLogin() !== next.startOnLogin) setStartOnLogin(next.startOnLogin);");
+    // Never in the self-test.
+    expect(main).toContain("if (!args.selfTest) {\n    try {\n      if (startsOnLogin() !== next.startOnLogin)");
     expect(main).toContain('if (action !== "status") setStartOnLogin(action === "on");');
     const selfTest = main.slice(main.indexOf("async function selfTest()"), main.indexOf("// --- Start ---"));
     expect(selfTest).toContain("startsOnLogin()");
