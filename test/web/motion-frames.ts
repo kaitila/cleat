@@ -12,6 +12,20 @@ export interface FramePage {
   close(): Promise<void>;
 }
 
+/**
+ * Brings the page to rest for a screenshot: what a strip left paused (a page's arrival, a mark)
+ * is finished, and what is still running is waited for, up to a second. Loops (a breathing dot)
+ * are left alone. The springs are 680ms now, so a fixed short wait catches them mid-flight.
+ */
+export async function atRest(page: Pick<FramePage, "evaluate">): Promise<void> {
+  await page.evaluate(() => {
+    const finite = (a: Animation) => a.effect?.getComputedTiming().iterations !== Infinity;
+    for (const a of document.getAnimations()) if (a.playState === "paused" && finite(a)) a.finish();
+    const running = document.getAnimations().filter((a) => a.playState === "running" && finite(a));
+    return Promise.race([Promise.all(running.map((a) => a.finished.catch(() => undefined))), new Promise((done) => setTimeout(done, 1000))]).then(() => document.fonts.ready).then(() => undefined);
+  }, undefined);
+}
+
 /** Pauses every animation on the page where it is, so a strip taken after another still finds it running. */
 export async function pauseAll(page: FramePage): Promise<void> {
   await page.evaluate(() => {

@@ -11,7 +11,7 @@ import { deflateSync } from "node:zlib";
 import type { EventsResponse, SessionsResponse } from "../../src/shared/protocol";
 import { loadConfig } from "../../src/runner/config";
 import { startServer } from "../../src/runner/server";
-import { frameStrip, pauseAll, type FramePage } from "./motion-frames";
+import { atRest, frameStrip, pauseAll, type FramePage } from "./motion-frames";
 
 interface Rect { x: number; y: number; width: number; height: number }
 // The little of playwright's API this script uses (the package isn't a dependency, so no types).
@@ -214,7 +214,7 @@ const look = () => {
 /** A colour with no hue: its red, green and blue within 2 of each other. */
 const neutral = (c: number[]) => c.length >= 3 && Math.max(c[0]!, c[1]!, c[2]!) - Math.min(c[0]!, c[1]!, c[2]!) <= 2;
 async function shot(page: Page, name: string): Promise<void> {
-  await page.evaluate(() => document.fonts.ready);
+  await atRest(page as unknown as FramePage);
   const path = join(shots, `${name}.png`);
   await page.screenshot({ path });
   console.log(`screenshot: ${path}`);

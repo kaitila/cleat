@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { EventsResponse, SessionsResponse, WorkspacesResponse } from "../../src/shared/protocol";
 import { loadConfig } from "../../src/runner/config";
 import { startServer } from "../../src/runner/server";
-import { frameStrip, pauseAll, type FramePage } from "./motion-frames";
+import { atRest, frameStrip, pauseAll, type FramePage } from "./motion-frames";
 
 // The little of playwright's API this script uses (the package isn't a dependency, so no types).
 interface Page {
@@ -165,10 +165,7 @@ const blank = async () => (await (await browser.newContext({ viewport: { width: 
 const TIMES = [0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 350];
 
 async function shot(page: Page, name: string): Promise<void> {
-  await page.evaluate(() => document.fonts.ready);
-  // At rest: the springs are long now (680ms), so wait for what is moving, not for what loops.
-  // A paused one (a frame strip's) never finishes: give up after a second.
-  await page.evaluate(() => Promise.race([Promise.all(document.getAnimations().filter((a) => a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))), new Promise((done) => setTimeout(done, 1000))]));
+  await atRest(page as unknown as FramePage);
   const path = join(shots, `${name}.png`);
   await page.screenshot({ path });
   console.log(`screenshot: ${path}`);

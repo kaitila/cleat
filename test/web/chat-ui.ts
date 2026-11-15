@@ -11,6 +11,7 @@ import { startServer, type Runner } from "../../src/runner/server";
 import { testRunner } from "../runner/helpers";
 import { MARKDOWN_EXPECTED, markdownProblems, seedMarkdown } from "./markdown-sample";
 import { assistantEntry, MemoryTranscripts, userEntry } from "./chat-transcripts";
+import { atRest } from "./motion-frames";
 
 const PLAYWRIGHT = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
 /** Markup that would run if any of it reached the page as HTML. */
@@ -96,9 +97,10 @@ try {
   const text = (selector: string) => page.locator(selector).allTextContents() as Promise<string[]>;
   const shot = async (name: string) => {
     const path = join(shots, `${name}.png`);
-    // Away from whatever was clicked, and after the colour transitions.
+    // Away from whatever was clicked, and after the springs and the colour transitions.
     await page.mouse.move(0, 0);
     await page.waitForTimeout(250);
+    await atRest(page);
     await page.screenshot({ path });
     console.log(`  screenshot: ${path}`);
   };
