@@ -17,7 +17,7 @@ import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wa
 import { REPO } from "../../src/shell/paths";
 import { defaultHotkeys, dockArea, opaqueDockBounds, shellOs } from "../../shell/src/os";
 import type { Area } from "../../shell/src/geometry";
-import { captureWithheld, expectedExternal, pngSize, problems, selfTestRun, skipped, type Where, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
+import { captureWithheld, expectedExternal, notes, pngSize, problems, selfTestRun, skipped, type Where, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
@@ -944,6 +944,14 @@ describe("self-test runner", () => {
       expect(at(wslg, { layout: "linux" }).length).toBeGreaterThan(0);
       expect(at({ ...wslg, snipOverlayBounds: [{ ...macDisplay, width: 1510 }] }, { layout: "linux", wslg: true })).toHaveLength(1);
       expect(at({ ...mac, snipOverlayBounds: [{ ...macDisplay, width: 1511 }] }, { layout: "macos" })).toHaveLength(1);
+    });
+
+    test("a crash the self-test had to kill itself, and an opaque dock, are printed as notes, not failures", () => {
+      const killed = { ...linux, dockCrashKilledBySelfTest: true };
+      expect(at(killed, { layout: "linux" })).toEqual([]);
+      expect(notes(killed)).toEqual([expect.stringContaining("killed it with SIGKILL")]);
+      expect(notes({ ...killed, dockTransparent: false })).toEqual([expect.stringContaining("killed it with SIGKILL"), expect.stringContaining("opaque window")]);
+      expect(notes({ ...mac, dockTransparent: true })).toEqual([]);
     });
 
     test("an opaque dock is judged as the island of each state", () => {
