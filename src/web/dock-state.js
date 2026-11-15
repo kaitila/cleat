@@ -161,3 +161,42 @@ export function preselect(sessions, peeking, lastPeeked) {
 export function recentEvents(events, max = RECENT_EVENTS) {
   return events.slice(Math.max(0, events.length - max));
 }
+
+/** Where the open dock keeps the workspace it shows (localStorage): "" or absent for all of them. */
+export const WORKSPACE_KEY = "intuition.dock.workspace";
+
+/** The workspace the dock was last left on, from `storage` (localStorage); "" for all, or when it can't be read. */
+export function savedWorkspace(storage) {
+  try {
+    const value = storage?.getItem(WORKSPACE_KEY);
+    return typeof value === "string" ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+/** Remembers the workspace chosen ("" for all). Storage that refuses (a private window) only forgets. */
+export function saveWorkspace(storage, workspace) {
+  try {
+    if (workspace) storage?.setItem(WORKSPACE_KEY, workspace);
+    else storage?.removeItem(WORKSPACE_KEY);
+  } catch {
+    // Not remembered: the dock still filters until it is reloaded.
+  }
+}
+
+/**
+ * The workspace switch's choices after "All workspaces": each workspace that has a session the dock
+ * lists (archived ones are out of the way), by name, and the one chosen even when none is left in it.
+ */
+export function dockWorkspaces(sessions, chosen = "") {
+  const names = new Set();
+  for (const s of sessions) if (s.archived !== true && typeof s.workspace === "string" && s.workspace) names.add(s.workspace);
+  if (chosen) names.add(chosen);
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+/** The sessions of one workspace, or all of them for "". */
+export function inWorkspace(sessions, workspace) {
+  return workspace ? [...sessions].filter((s) => s.workspace === workspace) : [...sessions];
+}

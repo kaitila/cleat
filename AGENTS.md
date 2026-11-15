@@ -12,7 +12,8 @@ Three parts:
 - `bun test test/base.test.ts`: one test file.
 - `bun run typecheck`.
 - `bun run dev`: the runner with reload on change. `bun run start`: without.
-- `bun src/cli.ts <command>`: the app's own commands (start, stop, status, and the shell's install and start), once their tasks have built them.
+- `bun src/cli.ts <command>`: the app's own commands (start, stop, status, and the shell's install and start), once their tasks have built them. They print through `src/cli/ui.ts` (marks, spinners, colour): plain lines into a pipe.
+- `env -u CI bun scripts/cli-setup-pty.ts`: setup for real in a pseudo-terminal, typed by the script, rendered at 80 and 120 columns.
 - `bun src/shell/selftest-run.ts`: the shell's self-test on this machine's layout; `INTUITION_PLATFORM=linux` runs the linux layout under WSLg. Skipped when `CI` is set (CI's desktop jobs run it with `env -u CI`).
 - Windows programs run from WSL directly: `/mnt/c/.../electron.exe <args>` (start from a `/mnt/c` folder and pass Windows paths; `wslpath -w` converts).
 
@@ -38,5 +39,5 @@ Work here is tracked in foreman: the MCP server `foreman` in `.mcp.json`, or its
 - Tests that run in CI use the fake agent (`INTUITION_FAKE_AGENT=1`): CI has no Claude Code login. A check that needs real Claude Code, Windows or a desktop is a script under `scripts/` that a person or verifier runs on a machine that has them, and the test suite skips it when `CI` is set.
 - Never start a real Claude Code or Codex session in a real workspace from a test or a script. Use a throwaway folder made with `mkdtemp`.
 - Pages use only the tokens in `src/web/base.css`: no colours or font sizes anywhere else. The feel is small, clean and calm.
-- Don't add dependencies: `package.json` and `bun.lock` need a person's approval. Use bun's built-ins and what is installed. The approved ones: `@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk` (for the Codex agent, approved by the owner on 2026-11-15), `zod`, and the dev tools.
+- Don't add dependencies: `package.json` and `bun.lock` need a person's approval. Use bun's built-ins and what is installed. The approved ones: `@anthropic-ai/claude-agent-sdk`, `@openai/codex-sdk` (for the Codex agent, approved by the owner on 2026-11-15), `@clack/prompts` (setup's prompts, approved by the owner on 2026-11-15; colour is written by `src/cli/ui.ts`, not picocolors), `zod`, and the dev tools.
 - Every non-obvious choice gets a decision file in `docs/decisions/` (number from foreman's `reserve_number`), and a line in its README.

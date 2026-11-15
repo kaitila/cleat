@@ -115,8 +115,10 @@ describe("bundle", () => {
     expect(shellHalf).toContain("!(await isCurrent(paths))");
     expect(shellHalf.indexOf("await stopAndWait(paths, pidFile(platform.settingsFile()), undefined, platform);")).toBeGreaterThan(-1);
     expect(shellHalf.indexOf("await stopAndWait(")).toBeLessThan(shellHalf.lastIndexOf("await install(paths, log, platform);"));
-    expect(up.indexOf("await installCurrentShell(platform);")).toBeGreaterThan(-1);
-    expect(up.indexOf("await installCurrentShell(platform);")).toBeLessThan(up.indexOf("startShell();"));
+    // up runs it under a spinner: shellInstall is installCurrentShell(platform, log).
+    expect(cli).toContain("(log) => installCurrentShell(platform, log)");
+    expect(up.indexOf("await shellInstall(platform)")).toBeGreaterThan(-1);
+    expect(up.indexOf("await shellInstall(platform)")).toBeLessThan(up.indexOf("startShell();"));
     // The shell writes its pid beside its settings, and removes it as it quits.
     expect(pidFile(join("/x", SETTINGS_FILE))).toBe(join("/x", PID_FILE));
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
