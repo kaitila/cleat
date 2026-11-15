@@ -10,7 +10,7 @@ type Attachment = { capturedAt: string; kind: "image"; imagePath: string } | { c
 const { initialWorkspace, noWorkspaceText, altDigit, errorText, UNREACHABLE, attachmentOf, preview, sessionBody, FRESH_MS, CLIPBOARD_POLLS } = (await import(modulePath)) as {
   attachmentOf(capture: unknown, now?: number): Attachment | null;
   preview(text: string): string;
-  sessionBody(workspace: string, task: string, attachment: Attachment | null): { workspace: string; prompt: string; imagePath?: string };
+  sessionBody(workspace: string, task: string, attachment: Attachment | null, agent?: string | null): { workspace: string; prompt: string; imagePath?: string; agent?: string };
   FRESH_MS: number;
   CLIPBOARD_POLLS: number[];
   initialWorkspace(workspaces: { name: string; exists: boolean }[], lastUsed: string | null): string | null;
@@ -149,6 +149,12 @@ describe("preview", () => {
 });
 
 describe("sessionBody", () => {
+  test("carries the agent on the switch, with or without an attachment; nothing for no agent or an unknown one", () => {
+    expect(sessionBody("work", "Do it", null, "codex")).toEqual({ workspace: "work", prompt: "Do it", agent: "codex" });
+    expect(sessionBody("work", "Do it", { capturedAt: "t", kind: "image", imagePath: "/mnt/c/a.png" }, "claude")).toEqual({ workspace: "work", prompt: "Do it", imagePath: "/mnt/c/a.png", agent: "claude" });
+    expect(sessionBody("work", "Do it", null, null)).toEqual({ workspace: "work", prompt: "Do it" });
+    expect(sessionBody("work", "Do it", null, "gpt")).toEqual({ workspace: "work", prompt: "Do it" });
+  });
   test("without an attachment it is the task", () => {
     expect(sessionBody("work", "Do it", null)).toEqual({ workspace: "work", prompt: "Do it" });
   });

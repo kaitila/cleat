@@ -16,9 +16,13 @@ body { overflow: hidden; }
   animation: page-in var(--dur-gentle) var(--ease-gentle) backwards, fade-in calc(var(--dur-fade) * 2) var(--ease) backwards;
 }
 
+/* The top row: the workspace chips, and at its end the agent switch. */
+.pick { flex: none; display: flex; align-items: flex-start; min-width: 0; }
+
 /* Workspaces: real radio buttons (Tab and the arrow keys work), drawn as chips with their key. */
 .workspaces {
-  flex: none;
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
@@ -68,6 +72,18 @@ body { overflow: hidden; }
 .workspace input:focus-visible + span { outline: var(--ring) solid var(--accent); outline-offset: var(--hairline); }
 .workspace input:disabled { cursor: default; }
 .workspace input:disabled + span { opacity: 0.5; text-decoration: line-through; }
+
+/* The agent switch: a quiet pill the chips' height, the agent's glyph and name. A click or Alt+A
+   turns it to the other agent, with the little spring of a choice made. */
+.agent-switch {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: var(--space-3) var(--space-3) 0 0;
+}
+button.agent-switch.small { height: var(--control); padding: 0 var(--space-3) 0 var(--space-2); border-radius: var(--radius-pill); }
+.agent-switch[data-in] .agent-glyph { animation: turn-in var(--dur-bouncy) var(--ease-bouncy) backwards; }
 
 /* The task box is the window: no border, no ring (it holds the focus from the start, and its
    caret says so). It takes the room that is left. */
@@ -142,11 +158,12 @@ body { overflow: hidden; }
 .keys span:last-child { margin-right: 0; }
 
 @keyframes page-in { from { transform: scale(calc((1 + var(--pop)) / 2)); } }
+@keyframes turn-in { from { transform: rotate(-60deg) scale(var(--pop)); } }
 @keyframes pop-in { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
 /* The fade in clears a blur as it goes. */
 @keyframes fade-in { from { opacity: 0; filter: var(--blur-in); } }
 
 /* Reduced motion: base.css stops every animation; the fades come back, plain. The mark jumps. */
 @media (prefers-reduced-motion: reduce) {
-  .prompt, .clipboard[data-in] { animation: fade-in var(--dur-fade) linear backwards !important; }
+  .prompt, .clipboard[data-in], .agent-switch[data-in] .agent-glyph { animation: fade-in var(--dur-fade) linear backwards !important; }
 }

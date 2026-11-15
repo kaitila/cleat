@@ -1,9 +1,11 @@
 // The pop-up prompt (/prompt): pick a workspace, type a task, Enter starts the session.
 // The shell opens it in a small window on the hotkey, so everything works from the keyboard:
-// Enter starts, Shift+Enter is a new line, Alt+1..9 picks a workspace, Esc closes.
+// Enter starts, Shift+Enter is a new line, Alt+1..9 picks a workspace, Alt+A flips the agent
+// (Claude Code or Codex, the workspace's own until flipped), Esc closes.
 // The shell captures the clipboard as the window opens: the capture shows under the task box and
 // goes with the task, unless it is removed (its × or Alt+Backspace).
 // The API is docs/protocol.md; the types are src/shared/protocol.ts.
+import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
 
 export const UNREACHABLE = "the runner is not reachable";
 
@@ -68,11 +70,15 @@ export function preview(text) {
     .join("\n");
 }
 
-/** The body of POST /api/sessions: an attached image goes by its path, attached text after the task. */
-export function sessionBody(workspace, task, attachment) {
-  if (attachment?.kind === "image") return { workspace, prompt: task, imagePath: attachment.imagePath };
-  if (attachment?.kind === "text") return { workspace, prompt: `${task.trimEnd()}\n\nClipboard:\n${attachment.text}` };
-  return { workspace, prompt: task };
+/**
+ * The body of POST /api/sessions: an attached image goes by its path, attached text after the task,
+ * and the agent shown on the switch, when there is one.
+ */
+export function sessionBody(workspace, task, attachment, agent = null) {
+  const on = agent === "claude" || agent === "codex" ? { agent } : {};
+  if (attachment?.kind === "image") return { workspace, prompt: task, imagePath: attachment.imagePath, ...on };
+  if (attachment?.kind === "text") return { workspace, prompt: `${task.trimEnd()}\n\nClipboard:\n${attachment.text}`, ...on };
+  return { workspace, prompt: task, ...on };
 }
 
 /** Fetches JSON from the runner. Throws an Error whose message is the line to show. */
@@ -100,6 +106,12 @@ function start() {
   let attachment = null;
   /** capturedAt of the capture that was removed: a later poll doesn't bring it back. */
   let removed = null;
+  const agentButton = document.getElementById("agent");
+  /** The workspaces as the runner sent them, for each one's agent. */
+  let listed = [];
+  /** The agent the person flipped to, or null to follow the workspace's. */
+  let agentOverride = null;
+  const agent = () => pickAgent(listed, chosen(), agentOverride);
 
   /** The chosen workspace's background, behind the chips (prompt.css). */
   const mark = document.createElement("span");
@@ -141,8 +153,10 @@ function start() {
       }),
       mark,
     );
+    listed = workspaces;
     markAt = null;
     placeMark();
+    drawAgent();
     loaded = true;
     if (selected === null) say(noWorkspaceText(workspaces), "error");
   }
@@ -180,6 +194,28 @@ function start() {
     void mark.offsetWidth;
     mark.dataset.moving = "";
     mark.style.transform = at(to, 1);
+  }
+
+  /** The switch shows the agent the task starts on: its glyph and name; the task box asks who does it. */
+  function drawAgent() {
+    const kind = agent();
+    agentButton.hidden = false;
+    agentButton.dataset.agent = kind;
+    const name = document.createElement("span");
+    name.textContent = agentName(kind);
+    agentButton.replaceChildren(agentSvg(document, kind), name);
+    agentButton.title = `Starts on ${agentName(kind)}. Alt+A switches to ${agentName(flipAgent(kind))}`;
+    agentButton.setAttribute("aria-label", `Agent: ${agentName(kind)}. Switch to ${agentName(flipAgent(kind))}`);
+    task.placeholder = taskPlaceholder(kind);
+  }
+
+  function flip() {
+    agentOverride = flipAgent(agent());
+    drawAgent();
+    // It springs a little each time it turns (prompt.css).
+    agentButton.removeAttribute("data-in");
+    void agentButton.offsetWidth;
+    agentButton.setAttribute("data-in", "");
   }
 
   function drawAttachment() {
@@ -267,7 +303,7 @@ function start() {
       const { session } = await api("/api/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(sessionBody(workspace, prompt, attachment)),
+        body: JSON.stringify(sessionBody(workspace, prompt, attachment, agent())),
       });
       started(session);
     } catch (e) {
@@ -280,7 +316,14 @@ function start() {
 
   form.addEventListener("submit", (e) => e.preventDefault());
   // A click on a workspace goes back to typing. Keyboard changes (arrows) keep their focus.
-  row.addEventListener("change", placeMark);
+  row.addEventListener("change", () => {
+    placeMark();
+    drawAgent();
+  });
+  agentButton.addEventListener("click", (e) => {
+    flip();
+    if (e.detail > 0) task.focus();
+  });
   row.addEventListener("click", (e) => {
     if (e.detail > 0) task.focus();
   });
@@ -302,6 +345,12 @@ function start() {
       removeAttachment();
       return;
     }
+    if (isAgentKey(e)) {
+      // Swallowed: on a Mac Option+A would type a character.
+      e.preventDefault();
+      if (!busy) flip();
+      return;
+    }
     const position = altDigit(e);
     if (position === null) return;
     e.preventDefault();
@@ -309,6 +358,7 @@ function start() {
     if (radio && !radio.disabled) {
       radio.checked = true;
       placeMark();
+      drawAgent();
     }
   });
 

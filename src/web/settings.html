@@ -39,13 +39,31 @@
       <p class="field-error small" data-error-for="workspaces" hidden></p>
     </section>
 
+    <section class="section" aria-labelledby="h-agents">
+      <h2 id="h-agents" class="label">Agents</h2>
+      <div class="card glass">
+        <div class="setting">
+          <div class="setting-text">
+            <span class="strong" id="agent-name">Default agent</span>
+            <span class="muted small" id="agent-help">New sessions run on it, unless their workspace picks its own or the pop-up is switched (Alt+A). A session stays on its agent.</span>
+          </div>
+          <div class="segmented" role="radiogroup" aria-labelledby="agent-name" aria-describedby="agent-help" data-field="agent">
+            <label><input type="radio" name="agent" value="claude"><span>Claude Code</span></label>
+            <label><input type="radio" name="agent" value="codex"><span>Codex</span></label>
+          </div>
+        </div>
+        <p class="field-error small" data-error-for="agent" hidden></p>
+        <ul id="agents" class="setup agents" aria-label="Agents' status"></ul>
+      </div>
+    </section>
+
     <section class="section" aria-labelledby="h-sessions">
       <h2 id="h-sessions" class="label">Sessions</h2>
       <div class="card glass">
         <div class="setting">
           <div class="setting-text">
             <span class="strong" id="mode-name">Permission mode</span>
-            <span class="muted small" id="mode-help">Auto lets Claude Code's classifier allow safe tool calls and refuse risky ones on its own. A call it can't decide still comes to you to Allow or Deny. Ask brings you every call that would prompt in a terminal.</span>
+            <span class="muted small" id="mode-help">Auto lets Claude Code's classifier allow safe tool calls and refuse risky ones on its own. A call it can't decide still comes to you to Allow or Deny. Ask brings you every call that would prompt in a terminal. With Codex no call comes to you: Auto lets it write in the workspace, without the network, and Ask keeps it read-only.</span>
           </div>
           <div class="segmented" role="radiogroup" aria-labelledby="mode-name" aria-describedby="mode-help" data-field="permissionMode">
             <label><input type="radio" name="permissionMode" value="auto"><span>Auto</span></label>
@@ -167,6 +185,12 @@
           <option value="">As above</option>
           <option value="auto">Auto</option>
           <option value="default">Ask</option>
+        </select>
+        <select class="select agent" aria-label="Agent">
+          <button><selectedcontent></selectedcontent></button>
+          <option value="">Default</option>
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
         </select>
       </div>
       <div class="workspace-actions">

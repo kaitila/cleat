@@ -23,6 +23,7 @@ import {
 } from "./chat-format.js";
 import { canStop, manage, menuItems, renameInline, sessionMenu, visible } from "./chat-manage.js";
 import { renderMarkdown } from "./markdown.js";
+import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.js";
 import {
   CLOSE_MS,
   DOCK_SIZES,
@@ -75,13 +76,15 @@ const els = {
   text: $("reply-text"),
   hint: $("reply-hint"),
 };
+/** Beside the title: the agent the session runs on, its glyph and name. */
+const headAgent = h("span", "session-agent muted small");
 /** Beside the title: "in terminal" while a turn arrives from a terminal, else nothing. */
 const headStatus = h("span", "session-status muted small");
 /** While the runner runs a turn of the session shown: it stops it. */
 const stopButton = h("button", "stop quiet small", "Stop");
 stopButton.type = "button";
 stopButton.hidden = true;
-els.more.before(headStatus, stopButton);
+els.more.before(headAgent, headStatus, stopButton);
 /**
  * The list rows' right-click menu (Rename, Pin, Archive) and the head's "…" (Open in chat, Continue
  * in terminal, then the same three). It lives in the panel, inside the island.
@@ -609,6 +612,7 @@ function renderList() {
         item,
         link,
         dot: h("span", "dot"),
+        agent: agentMark(document, agentOf(session)),
         title: h("span", "row-title"),
         mark: h("span", "terminal-mark mono muted small", ">_"),
         workspace: h("span", "row-workspace muted small"),
@@ -617,12 +621,13 @@ function renderList() {
       row.mark.title = TERMINAL_MARK_TITLE;
       row.mark.setAttribute("aria-label", TERMINAL_MARK_TITLE);
       row.mark.setAttribute("role", "img");
-      link.append(row.dot, row.title, row.mark, row.workspace, row.time);
+      link.append(row.dot, row.agent, row.title, row.mark, row.workspace, row.time);
       item.append(link);
       rows.set(session.id, row);
     }
     row.dot.dataset.status = session.status;
     row.dot.title = sessionStatus(session);
+    setAgentMark(row.agent, agentOf(session));
     row.title.textContent = session.title || "Untitled";
     row.title.classList.toggle("pinned", session.pinned === true);
     row.mark.hidden = !startedInTerminal(session);
@@ -761,6 +766,11 @@ function renderHead() {
   if (!session) return;
   els.title.textContent = session.title || "Untitled";
   els.title.title = session.title || "";
+  const kind = agentOf(session);
+  if (headAgent.dataset.agent !== kind) {
+    headAgent.dataset.agent = kind;
+    headAgent.replaceChildren(agentSvg(document, kind), agentName(kind));
+  }
   const status = sessionStatus(session);
   headStatus.textContent = manageError || (status === "in terminal" ? status : "");
   headStatus.hidden = !headStatus.textContent;

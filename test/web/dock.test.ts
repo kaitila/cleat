@@ -70,7 +70,7 @@ describe("served by the runner", () => {
 
   test("every module the dock imports is one the runner serves", async () => {
     const imports = (file: string) => [...source(file).matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "markdown.js", "dock-state.js"]);
+    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "markdown.js", "agent.js", "dock-state.js"]);
     expect(imports("dock-state.js")).toEqual(["chat-format.js"]);
     for (const file of [...imports("dock.js"), ...imports("dock-state.js")]) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
   });
