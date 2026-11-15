@@ -8,6 +8,8 @@ export interface Args {
   runnerUrl?: string;
   /** --session <id>: open the chat view on this session. */
   session?: string;
+  /** --prompt: open the pop-up (setup ends with it). */
+  prompt: boolean;
   /** --quit: ask the running shell to quit. */
   quit: boolean;
   /** --login on|off|status: set or read start on login, write the outcome to --login-result, quit. */
@@ -21,5 +23,5 @@ export function parseArgs(argv: string[]): Args {
     const v = argv[argv.indexOf(flag) + 1];
     return argv.includes(flag) && v !== undefined && !v.startsWith("--") ? v : undefined;
   };
-  return { selfTest: value("--self-test"), runnerUrl: value("--runner-url"), session: value("--session"), quit: argv.includes("--quit"), login: parseLogin(value("--login")), loginResult: value("--login-result") };
+  return { selfTest: value("--self-test"), runnerUrl: value("--runner-url"), session: value("--session"), prompt: argv.includes("--prompt"), quit: argv.includes("--quit"), login: parseLogin(value("--login")), loginResult: value("--login-result") };
 }

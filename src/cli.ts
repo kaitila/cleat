@@ -6,11 +6,21 @@ import { resume } from "./cli/resume";
 import * as runner from "./cli/runner";
 import { parseLogin } from "../shell/src/login";
 import { doctor } from "./cli/doctor";
-import { install, isCurrent, isInstalled, login, pidFile, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
+import { firstRun, parseSetupArgs, setup, DEFAULTS, terminalAsk } from "./cli/setup";
+import { parseUninstallArgs, uninstall } from "./cli/uninstall";
+import { installCurrentShell } from "./cli/up";
+import { install, isInstalled, login, pidFile, prompt, removeShell, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
 import { currentPlatform } from "./shell/platform";
 
-const USAGE = `usage: intuition <command>     (no command: intuition up)
+const USAGE = `usage: intuition <command>     (no command: intuition up, or intuition setup when there is no config yet)
 
+  setup [--yes] [--workspace <folder>]... [--link-dir <folder>]
+                  from a fresh clone to a running app: checks what it needs (each with a fix), asks for the
+                  workspaces, the hotkeys and start at login, writes the config, starts the runner, installs and
+                  starts the shell, links the command and opens the pop-up. --yes takes every default without asking
+  uninstall [--purge] [--link-dir <folder>]
+                  start at login off, the shell stopped and removed, the runner stopped, the command unlinked.
+                  The config and the sessions stay, unless --purge
   up              start the runner, install the shell, and start it: the one command to run. A runner or
                   shell that runs older code than this repo's is restarted (a runner with sessions running is kept)
   start           start the runner in the background and print its URL (--login-env: with the login shell's environment).
@@ -73,17 +83,46 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
       console.log(`${unavailable}: only the runner was started`);
       return code;
     }
-    const paths = platform.shellPaths();
-    if (!isInstalled(paths)) {
-      await install(paths);
-    } else if (!(await isCurrent(paths))) {
-      console.log("the installed shell is older than this repo's: stopping it, installing it again and starting it");
-      await stopAndWait(paths, pidFile());
-      await install(paths);
-    }
-    writeRunnerLocation();
+    await installCurrentShell(platform);
     startShell();
     return code;
+  },
+  setup: (rest) => {
+    const options = parseSetupArgs(rest);
+    if (!options) usageError();
+    const platform = currentPlatform();
+    return setup(options, platform, {
+      claudeLogin: async () => {
+        await Bun.spawn(["claude", "auth", "login"], { stdio: ["inherit", "inherit", "inherit"] }).exited;
+      },
+      startRunner: () => runner.start(),
+      installShell: () => installCurrentShell(platform),
+      startShell: (open) => (open ? prompt(undefined, platform) : start(undefined, platform)),
+      login: async (on) => (await login(on ? "on" : "off", undefined, platform)).openAtLogin === true,
+      link: (dir) => link(dir),
+    }, options.yes ? DEFAULTS : terminalAsk());
+  },
+  uninstall: (rest) => {
+    const options = parseUninstallArgs(rest);
+    if (!options) usageError();
+    const platform = currentPlatform();
+    const installed = () => {
+      try {
+        return isInstalled(platform.shellPaths());
+      } catch {
+        return false;
+      }
+    };
+    return uninstall(options, platform, {
+      shellInstalled: installed,
+      loginOff: async () => {
+        await login("off", undefined, platform);
+      },
+      stopShell: () => stopAndWait(platform.shellPaths(), pidFile(platform.settingsFile()), undefined, platform),
+      removeShell: () => removeShell(undefined, platform),
+      stopRunner: () => runner.stop(),
+      unlink: (dir) => unlink(dir),
+    });
   },
   "shell install": async () => {
     await install();
@@ -109,11 +148,13 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
   },
 };
 
-const picked = pick(process.argv.slice(2), Object.keys(commands));
+const words = process.argv.slice(2);
+// The first plain `intuition`, before there is a config: setup.
+const picked = words.length === 0 && firstRun() ? { name: "setup", rest: [] } : pick(words, Object.keys(commands));
 if (!picked) usageError();
 const { name, rest } = picked;
 /** How many words each command takes after its name; the others take none. */
-const takes: Record<string, number> = { start: 1, restart: 1, resume: 1, "shell login": 1, link: 1, unlink: 1 };
+const takes: Record<string, number> = { setup: Infinity, uninstall: Infinity, start: 1, restart: 1, resume: 1, "shell login": 1, link: 1, unlink: 1 };
 if (rest.length > (takes[name] ?? 0)) usageError();
 try {
   const code = await commands[name]!(rest);

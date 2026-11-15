@@ -4,7 +4,7 @@ An Electron app in TypeScript (`shell/src/`) that lives in the tray. It does wha
 
 It is installed and started from WSL. Nothing is built or run with the Node on the Windows side.
 
-The commands below are written `intuition …`. That command exists once `bun src/cli.ts link` has been run in the repo, one time ([README](../README.md), "Setup"); before that, or without it, `bun src/cli.ts …` from the repo does the same. The shell itself never uses the link: it starts the runner with bun and the repo's path ("Starting the runner" below).
+The commands below are written `intuition …`. That command exists once `bun run setup` (or `bun src/cli.ts link`) has been run in the repo, one time ([README](../README.md), "Setup"); before that, or without it, `bun src/cli.ts …` from the repo does the same. The shell itself never uses the link: it starts the runner with bun and the repo's path ("Starting the runner" below).
 
 ## Install, start, stop
 | Command | What it does |
@@ -64,6 +64,7 @@ A value that is missing or malformed falls back to its default. A `wsl` with any
 - **Snip hotkey, and Snip**: freezes every display and lets the person drag an area and type the task right beside it. See "The snip" below.
 - **Links elsewhere**: a link from one of the runner's pages to `http:`, `https:` or `mailto:` on another origin opens in the default browser (`shell.openExternal`), from a new window or a link followed in the page. Anything else (`file:`, `javascript:`, other protocols, a URL with a user name or password, a redirect) opens nothing.
 - **Settings…**: a normal 720x640 window titled "intuition settings", on the runner's Settings page (`/assets/settings.html`). It is focused if already open. A link from any of the runner's pages to `/settings` or `/assets/settings.html`, opened in a new window or followed in the page, opens this window.
+- **The pop-up from the command line**: `electron.exe <app> --prompt` opens the pop-up, as the hotkey does; a running shell is handed it, and a shell that starts with it opens the pop-up once the runner answers. `intuition setup` ends with it.
 - **Open chat**: a 1100x720 window on `/`, or `/?session=<id>` (`electron.exe <app> --session <id>`, and a link to `/?session=<id>` that a page, the dock among them, opens in a new window). Focused if already open.
 - **Runner not running**: when `GET /health` does not answer within 1.5 seconds, the shell starts the runner itself: at its own start, on the hotkey and New task, and on Open chat (the dock's links to the pop-up and the chat among them). It runs `wsl.exe -d <distro> --exec <bun> <repo>/src/cli.ts start --login-env` from its `wsl` settings, with no window, and asks `/health` again for up to ten seconds. The pop-up or the chat then opens as if the runner had been there; the clipboard was read when the key was pressed and is posted once the runner answers. If nothing answers after ten seconds, or there are no `wsl` settings, no window opens and a notification says the runner is not running. See "Starting the runner" below.
 - **Dock**: a clear window on the runner's `/dock` page at the top centre of the primary display, in which the page draws an island that grows when something happens or the pointer rests on it. It shows what the sessions are doing, in place of the Windows toasts the shell used to show. See "The dock" below.

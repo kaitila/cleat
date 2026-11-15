@@ -487,10 +487,11 @@ describe("geometry and arguments", () => {
   });
 
   test("the command line", () => {
-    expect(parseArgs(["electron.exe", "C:\\app"])).toEqual({ selfTest: undefined, runnerUrl: undefined, session: undefined, quit: false });
+    expect(parseArgs(["electron.exe", "C:\\app"])).toEqual({ selfTest: undefined, runnerUrl: undefined, session: undefined, prompt: false, quit: false });
     expect(parseArgs(["electron.exe", "C:\\app", "--self-test", "C:\\r.json", "--runner-url", "http://127.0.0.1:5"])).toMatchObject({ selfTest: "C:\\r.json", runnerUrl: "http://127.0.0.1:5" });
     expect(parseArgs(["e", "app", "--quit"]).quit).toBe(true);
     expect(parseArgs(["e", "app", "--session", "s1"]).session).toBe("s1");
+    expect(parseArgs(["e", "app", "--prompt"]).prompt).toBe(true);
     expect(parseArgs(["e", "app", "--self-test"]).selfTest).toBeUndefined();
     expect(parseArgs(["e", "app", "--self-test", "--quit"]).selfTest).toBeUndefined();
   });

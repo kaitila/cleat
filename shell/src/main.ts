@@ -1721,6 +1721,11 @@ function start(): void {
   syncSettings();
   // The runner is started here when it is not up: after a login, nobody has started it yet.
   if (args.session) void openChat(args.session);
+  else if (args.prompt)
+    void ensureRunner().then((up) => {
+      if (up) void openPopup();
+      else runnerDown();
+    });
   else void ensureRunner().then((up) => (up ? undefined : runnerDown()));
   watchDock();
 }
@@ -1782,6 +1787,7 @@ if (args.login) {
       tray?.setContextMenu(trayMenu());
       reportShell();
     }
+    else if (second.prompt) void openPopup();
     else void openChat(second.session);
   });
   void app.whenReady().then(start);
