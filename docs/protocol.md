@@ -27,6 +27,8 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 | `GET /api/clipboard` | | The latest `ClipboardCapture`, or `{}` before the first one |
 | `POST /api/clipboard` | `ClipboardPostRequest` | 200 the stored `ClipboardCapture`, which replaces the one before (an empty body stores an empty capture). Sent by the Windows shell on the hotkey. `text` is cut to 20,000 characters. 400 for an `imagePath` that is refused, and the capture before it stays. |
 | `GET /api/clipboard/image` | | The latest capture's PNG (`image/png`), for the pop-up's thumbnail. 404 when the latest capture has no image or its file is gone. The request names no file. |
+| `GET /api/settings` | | `Settings`. See "Settings". |
+| `PUT /api/settings` | `SettingsRequest` | 200 the stored `Settings`, after the file is written and the change is in effect. 400 `SettingsErrorResponse` `{ error, field }` naming the first bad field as a dotted path (`"theme"`, `"workspaces.1.path"`, `""` for the body itself); the file is untouched. See "Settings". |
 | `GET /api/notifications?after=<seq>` | | `NotificationsResponse`: the kept notifications with a higher seq, and the newest seq given out. For a client that polls; the dock gets them on the WebSocket. |
 
 ## WebSocket
@@ -35,6 +37,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 - `session` whenever a session's metadata changes (status, title, lastSeq).
 - `event` for every stored event, for all sessions. A client that reconnects fetches what it missed with `GET /api/sessions/:id/events?after=<seq>`.
 - `delta` for assistant text as it streams. Deltas aren't stored; the complete text follows as an `assistant_text` event, and the client replaces the streamed text with it.
+- `settings` with the whole `Settings` after every change (`PUT /api/settings`). Not sent on connect: a client reads `GET /api/settings` when it loads.
 - `notification` for each `Notification`, at the moment it is recorded. None is sent again on connect: a client shows only what arrives while it is connected. It follows the `session` message that carries the status it is about (`waiting_approval`, `idle` or `error`).
 
 ## Sessions and events
@@ -96,11 +99,28 @@ What the page does in each state (`src/web/dock.js`; the rules are pure function
 - **Open**: when the pointer has rested on the island for 80 ms, anywhere in the state's rectangle. It closes 400 ms after the pointer left, or at once on Esc or on a press beside it, but not while the pointer is held down, or while the reply box has the focus or text in it (a press beside it closes it all the same, and the draft is kept). It lists the sessions, newest activity first, and shows the last 30 events of one: the session peeking when it opened, else the newest that waits for approval, else the one that peeked last, else the newest. Allow and Deny answer through `POST /api/sessions/:id/approvals/:approvalId`, and the reply box continues the session through `POST /api/sessions/:id/messages`, as in the chat view.
 - **The motion**: the island is one shape whose clip grows out of the pill in 320 ms and shrinks back in 220 ms; the new state's content fades in when the shape is most of the way there. With `prefers-reduced-motion` the shape changes at once and the content fades in.
 
+## Settings
+The runner owns the user's settings ([D0022](decisions/D0022-runner-owns-the-settings.md)). They live in its config file (`~/.config/intuition/config.json`, or `INTUITION_CONFIG`), which stays hand-editable; `config.ts` reads them with one zod schema (`SettingsSchema`) and `PUT /api/settings` validates with the same one.
+
+`Settings = { theme, permissionMode, workspaces, shell, port }`:
+- `theme`: `"system"` (the default), `"light"` or `"dark"`.
+- `permissionMode`: `"auto"` (the default) or `"default"`, and per workspace in `workspaces[].permissionMode` (see "Permissions").
+- `workspaces`: `{ name, path, permissionMode? }[]`, at least one, names unique, in order: the first is the default when none was used. `path` is as written in the file (it may start with `~/`).
+- `shell`: `{ hotkey, snipHotkey, dock, startOnLogin }` or `null`. The runner only stores it. It is `null` until something sets it: the shell then sends its own local values once (migration) and from then on reads them from the runner.
+- `port`: the port the runner serves on. Read-only: a `port` in a PUT body is ignored, and the file's is changed only by hand (a page served on that port can't move it).
+
+`PUT /api/settings` takes a whole `Settings` (a key left out takes its default, as in the file). It refuses, with 400 and the field:
+- anything the schema refuses (an unknown theme or mode, an empty name or hotkey, a `dock` that isn't a boolean, no workspaces);
+- a workspace name listed twice;
+- a workspace `path` that isn't absolute (after `~/`) or isn't an existing folder. A path the current settings already have is not checked again, so a folder that went missing doesn't block other changes.
+
+On success it writes the file atomically (a temp file beside it, renamed over it), keeping every key it doesn't know, at the top and on a workspace of the same name, and the file's `port`. The change is in effect at once: `GET /api/workspaces`, new sessions and the next turn of every session use the new workspaces and modes. Then every client gets a `settings` message. A hand edit to the file applies when the runner restarts, as before; a PUT made before then overwrites the keys it knows.
+
 ## Guarding the port
 The runner binds `127.0.0.1` only. A web page in any browser can still send requests to a local port, so every request is checked:
 - `Host` must be `127.0.0.1:<port>` or `localhost:<port>`.
 - A request with an `Origin` header must have the runner's own origin. The WebSocket upgrade is checked the same way.
-- `POST` bodies must be `content-type: application/json`.
+- `POST` and `PUT` bodies must be `content-type: application/json`.
 
 ## Test hooks
 - `INTUITION_CONFIG`: path of the config file. `INTUITION_DATA_DIR`: the data folder. `INTUITION_PORT`: the port (0 picks a free one).
