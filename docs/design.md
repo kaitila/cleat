@@ -50,6 +50,7 @@ Every border is `var(--hairline) solid` a line colour: one device pixel, so 1px,
 ## Components
 - **Button**: `<button>` or `.button` (a link). Plain has a hairline; `.primary` is filled with the accent, one per view at most; `.quiet` has no border until hovered. `.small` is 20px tall.
 - **Input**: `.input` on an `<input>` or `<textarea>`. Focus is an accent border and a soft halo.
+- **Dropdown**: `.select` on a `<select>`; `.quiet` and `.small` as for buttons. Closed, it is an input with a chevron. Open, its list floats like a menu (surface, `--shadow`, `--radius`, springing in on `--ease-snappy` and fading out): rows highlighted with `--selected` under the pointer or the keys, a muted check at the end of the chosen one. Drawn by `appearance: base-select`, so it stays the browser's select, keys and all; a browser without it shows the OS's list ([D0027](decisions/D0027-custom-select.md)).
 - **Card**: `.card`, a surface inside a hairline with the larger radius. Padding is the page's.
 - **List row**: `.row`, 28px or taller, hover and `aria-current="true"` (or `aria-selected`) backgrounds, no border.
 - **Status dot**: `.dot` with `data-status` set to the session's status. `running` pulses.
