@@ -191,18 +191,13 @@ sized.observe(els.panel);
 
 // ---------- idle: the pill ----------
 
-<<<<<<< HEAD
-function renderPill() {
-  const pill = pillOf(shown());
-=======
 /**
  * Draws the pill. `quiet`: what the runner said on connecting, not news: a "needs you" in it doesn't
  * nudge.
  */
 function renderPill(quiet = false) {
-  const pill = pillOf(sessions.values());
+  const pill = pillOf(shown());
   const news = !quiet && pill.tone === "needs" && els.pill.dataset.tone !== "needs" && state === "idle";
->>>>>>> origin/main
   els.pill.dataset.tone = pill.tone;
   els.island.dataset.tone = pill.tone;
   els.pillText.textContent = pill.text;

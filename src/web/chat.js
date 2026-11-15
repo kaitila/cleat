@@ -40,7 +40,6 @@ const els = {
   text: $("reply-text"),
   hint: $("reply-hint"),
   meta: $("meta"),
-<<<<<<< HEAD
   search: $("search"),
   workspaceFilter: $("workspace-filter"),
   archivedView: $("archived-view"),
@@ -50,9 +49,7 @@ const els = {
   confirmTitle: $("confirm-title"),
   confirmBody: $("confirm-body"),
   confirmOk: $("confirm-ok"),
-=======
   main: document.querySelector(".main"),
->>>>>>> origin/main
 };
 const resume = resumeControl(document);
 els.meta.append(resume.el);

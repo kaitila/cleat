@@ -201,6 +201,3 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .menu-item { justify-content: flex-start; color: var(--text); font-weight: var(--regular); }
 .row-title.pinned::before { content: "Pinned"; margin-right: var(--space-2); color: var(--accent); font-size: var(--text-s); }
 .session-row .rename { flex: 1; min-width: 0; min-height: var(--control-s); padding-block: 0; padding-inline: var(--space-1); }
-@media (prefers-reduced-motion: reduce) {
-  .menu { animation: layer-fade var(--motion) linear; }
-}

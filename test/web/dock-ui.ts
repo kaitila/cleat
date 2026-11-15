@@ -498,6 +498,8 @@ try {
     await slowRow.click({ button: "right" });
     const items = () => d.text(".menu:not([hidden]) .menu-item");
     check((await items()).join(",") === "Rename,Pin,Archive", "right-click on a row opens a small menu: Rename, Pin, Archive");
+    // The panel grew by the Stopped line: the island follows it first.
+    await d.settle("open");
     await d.fits("open");
     await d.shot("open-menu");
     await page.locator(".menu-item", { hasText: "Pin" }).click();

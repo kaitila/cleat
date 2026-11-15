@@ -488,7 +488,8 @@ try {
       await page.locator(".menu-item", { hasText: "Fork" }).click();
       await page.locator('.session[aria-current="true"]', { hasText: "alpha renamed (fork)" }).waitFor();
       check(true, "Fork makes '<title> (fork)' and shows it");
-      await page.locator(".msg.user .user-text", { hasText: "alpha task" }).waitFor();
+      // The session before it may still be fading out: the stream is the one that stays.
+      await page.locator("#stream .msg.user .user-text", { hasText: "alpha task" }).waitFor();
       check((await page.locator("#status").textContent()) === "idle", "with the conversation so far, idle until replied to");
 
       // Archive with the Delete key, and Undo.
