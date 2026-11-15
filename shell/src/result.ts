@@ -87,6 +87,8 @@ export interface SelfTestResult {
   dockIgnoresMouseUnreported: boolean;
   /** The page's process was crashed: the window hid, and the cursor where the open island was was ignored. */
   dockIgnoresMouseAfterCrash: boolean;
+  /** forcefullyCrashRenderer() left the page's process running (under Chromium's sandbox on Linux), so the self-test killed it with SIGKILL. */
+  dockCrashKilledBySelfTest?: boolean;
   /** With no runner answering, the dock stayed for one check and was hidden by the second. */
   dockHiddenWithoutRunner: boolean;
   /** The runner answering again, the next check loaded the page and showed the dock, idle. */

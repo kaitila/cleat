@@ -64,7 +64,7 @@ It shares the runner (port 4777) with the Windows shell, and both shells registe
 ## The self-test, per layout
 `bun src/shell/selftest-run.ts` installs the shell for this machine's layout, starts a stub runner and runs the shell with `--self-test`, then checks every field it wrote against that layout: the paths it saves (`<temp>\intuition\` on Windows, `<temp>/intuition/` elsewhere), the dock's place (below the menu bar on a Mac, the island's size when opaque), and the rest as on Windows. It is skipped when `CI` is set; the CI jobs with a desktop run it with `env -u CI`. What it cannot judge for a known reason is printed as `skipped:` with why, and does not fail it: macOS without Screen Recording, and WSLg's empty captures.
 
-CI runs it on `macos-latest` (job `macos`, after the unit tests). An Ubuntu job under Xvfb was tried and left out: it got through the hotkeys, the tray, the clipboard, the pop-up and every state of the opaque dock, then the dock's page crash was not noticed and the self-test ran out of time (T-0032's PR, follow-up task).
+CI runs it on `macos-latest` (job `macos`, after the unit tests) and on `ubuntu-latest` under Xvfb with no window manager (job `linux-shell`: the opaque dock, Chromium's sandbox on, as a normal user). There `webContents.forcefullyCrashRenderer()` leaves the sandboxed page process running (`isCrashed()` stays false, no `render-process-gone`) and a load into that window hangs, so the self-test kills the dock's page process with SIGKILL itself and says so in its output; the shell's part is judged the same. The shell itself replaces a dock window whose page process died instead of loading into it, hides a crashed dock at the next check if the event was missed, and gives up on a dock page that has not loaded in 15 s (the window goes, the next check makes a new one).
 
 ## What was tried where
 | What | Where | When | Seen |
@@ -76,6 +76,8 @@ CI runs it on `macos-latest` (job `macos`, after the unit tests). An Ubuntu job 
 | `shell login on|status|off`, linux | WSLg, temp HOME | 2026-11-15 | Wrote, read and removed `~/.config/autostart/intuition.desktop` |
 | `intuition doctor`, linux | WSLg | 2026-11-15 | Exit 0 with nothing installed (parts shown with `--` and their fix), and with the shell installed and running |
 | The shell's self-test, linux | WSLg, as root (`--no-sandbox`), X11 through XWayland | 2026-11-15 | Passed. Hotkeys, tray, clipboard text and image, the pop-up (placed again once shown: WSLg's window manager put it at 0,0), the dock (transparent), the snip's overlays and bridge, start on login read. The capture came back empty after about 3 s: skipped |
+| The shell's self-test, linux | WSLg's Xvfb (`xvfb-run`, no window manager), as root | 2026-11-15 | Passed, the dock opaque |
+| The shell's self-test, linux | CI `linux-shell` (ubuntu-latest, Xvfb, sandbox on), PR #36 | 2026-11-15 | Passed. The renderer crash was not taken by `forcefullyCrashRenderer()` under the sandbox: the self-test kills it |
 | The shell's self-test, windows-wsl | this machine | 2026-11-15 | Passed, after the change: the same checks as before |
 
 ## What nobody has seen

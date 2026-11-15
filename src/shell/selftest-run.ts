@@ -162,6 +162,14 @@ export function skipped(r: Partial<SelfTestResult>, where: Where): string[] {
   return why ? [`the snip's capture, its crop and PNG, and its time: ${why}`] : [];
 }
 
+/** How something was judged in another way than the self-test's first one: printed, not a failure. */
+export function notes(r: Partial<SelfTestResult>): string[] {
+  const said: string[] = [];
+  if (r.dockCrashKilledBySelfTest) said.push("the dock's crash: forcefullyCrashRenderer() left the page's process running (Chromium's sandbox on Linux), so the self-test killed it with SIGKILL; the shell's part, hiding and replacing the window, was judged the same");
+  if (r.dockTransparent === false) said.push("the dock was an opaque window the island's size: no compositor was found for a transparent one");
+  return said;
+}
+
 /** What is wrong with a self-test result, given what the stub runner received. Empty when all is well. */
 export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: string, readImage: (path: string) => Uint8Array | null, where: Where = { layout: "windows-wsl" }): string[] {
   const { layout } = where;
@@ -366,7 +374,7 @@ export async function selfTestRun(): Promise<number> {
       return 1;
     }
     for (const s of skipped(result, where)) console.log(`skipped: ${s}`);
-    if (!result.dockTransparent) console.log("the dock was an opaque window the island's size: no compositor was found for a transparent one");
+    for (const n of notes(result)) console.log(n);
     console.log(`start on login is ${result.openAtLogin ? "on" : "off"} on this machine (read, not changed)`);
     console.log("the shell's self-test passed");
     return 0;
