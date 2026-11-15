@@ -26,4 +26,10 @@ declare module "*/web/dock-state.js" {
   export function mayClose(holds: { pointerInside: boolean; pointerDown: boolean; replyFocused: boolean; replyText?: string }): boolean;
   export function preselect(sessions: SessionLike[], peeking: string | null, lastPeeked: string | null): string | null;
   export function recentEvents<T>(events: T[], max?: number): T[];
+  interface StorageLike { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
+  export const WORKSPACE_KEY: string;
+  export function savedWorkspace(storage: StorageLike | null | undefined): string;
+  export function saveWorkspace(storage: StorageLike | null | undefined, workspace: string): void;
+  export function dockWorkspaces(sessions: Iterable<{ workspace?: string; archived?: boolean }>, chosen?: string): string[];
+  export function inWorkspace<T extends { workspace?: string }>(sessions: Iterable<T>, workspace: string): T[];
 }

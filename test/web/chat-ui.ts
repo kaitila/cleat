@@ -112,7 +112,7 @@ try {
   await page.locator(".session", { hasText: prompt }).waitFor();
   check(true, "the session is in the sidebar");
   check((await page.locator('.session[aria-current="true"] .session-title').textContent()) === prompt, "with no ?session, the newest session is selected");
-  check((await page.locator('.session[aria-current="true"] .session-workspace').textContent()) === "work", "the sidebar shows its workspace");
+  check((await page.locator(".group-head:visible").count()) === 0 && (await page.locator(".session", { hasText: "work" }).count()) === 0, "with one workspace there is no heading, and no row names its workspace");
   check(await page.locator('.session[aria-current="true"] .dot[data-status]').count(), "and a status dot");
   check((await page.locator(".new-task").getAttribute("href")) === "/prompt", "'New task' links to /prompt");
 
@@ -480,6 +480,59 @@ try {
       await page.locator("#workspace-filter").selectOption("elsewhere");
       check((await titles()).join("|") === "gamma notes", "and narrows the list to one");
       await page.locator("#workspace-filter").selectOption("");
+
+      // Grouped by workspace, and folding (D0033).
+      const group = (w: string) => page.locator(".group", { has: page.locator(".group-name", { hasText: new RegExp(`^${w}$`) }) });
+      const head = (w: string) => group(w).locator(".group-head");
+      const shownTitles = (w: string) => group(w).locator(".session-item:visible .session-title").allTextContents() as Promise<string[]>;
+      check((await page.locator(".group-head:visible").count()) === 2 && (await text(".group-name")).join("|") === "work|elsewhere", "two workspaces: a heading each, the one with the newest session first");
+      check((await text(".group-count")).join("|") === "3|1", "each heading has a count");
+      check((await shownTitles("work")).join("|") === "beta task|alpha task|from the terminal" && (await shownTitles("elsewhere")).join("|") === "gamma notes", "each session is under its own workspace, newest first");
+      check((await page.locator(".session", { hasText: /work|elsewhere/ }).count()) === 0, "and no row repeats its workspace's name");
+      const heights = (await page.locator(".session").evaluateAll((els: Element[]) => els.map((e) => e.getBoundingClientRect().height))) as number[];
+      check(heights.every((v) => v <= 30), `each row is one line (${heights.map((v) => v.toFixed(0)).join(", ")}px)`);
+      check((await page.locator(".group-head:visible .group-chevron").count()) === 2, "with a chevron on each heading");
+      check((await head("work").getAttribute("aria-expanded")) === "true" && (await head("elsewhere").getAttribute("aria-expanded")) === "true", "every group starts unfolded");
+      await shot("chat-groups-light");
+      await page.emulateMedia({ colorScheme: "dark" });
+      await shot("chat-groups-dark");
+      await page.emulateMedia({ colorScheme: "light" });
+      await head("elsewhere").click();
+      check((await head("elsewhere").getAttribute("aria-expanded")) === "false" && (await shownTitles("elsewhere")).length === 0, "clicking a heading folds its group: aria-expanded=false, its rows hidden");
+      await head("work").focus();
+      await page.keyboard.press("Enter");
+      check((await head("work").getAttribute("aria-expanded")) === "false", "Enter on a heading folds it too");
+      check((await shownTitles("work")).join("|") === "alpha task", "a folded group still shows the session that is open, and only that one");
+      await shot("chat-groups-folded-light");
+      await page.goto(`${m.url}/`);
+      await page.locator(".note", { hasText: "Done" }).waitFor();
+      check((await head("elsewhere").getAttribute("aria-expanded")) === "false" && (await head("work").getAttribute("aria-expanded")) === "false" && (await shownTitles("elsewhere")).length === 0, "the folds survive a reload");
+      check((await shownTitles("work")).length === 1, "and the session opened without a link is the newest, shown in its folded group");
+      await page.goto(`${m.url}/?session=${alpha.id}`);
+      await page.locator(".note", { hasText: "Done" }).waitFor();
+      check((await head("work").getAttribute("aria-expanded")) === "true" && (await head("elsewhere").getAttribute("aria-expanded")) === "false", "a link to a session in a folded group unfolds that group, and only that one");
+      await page.locator("#search").fill("notes");
+      check((await head("elsewhere").getAttribute("aria-expanded")) === "true" && (await shownTitles("elsewhere")).join("|") === "gamma notes", "typing a search shows the matches under unfolded headings");
+      check((await page.locator(".group-head:visible").count()) === 1 && (await text(".group-count")).join("|") === "1", "only the groups with a match, each counting its matches");
+      await shot("chat-groups-search-light");
+      await page.locator("#search").fill("task");
+      await head("work").click();
+      check((await head("work").getAttribute("aria-expanded")) === "false", "a heading folds while searching, for that search");
+      await page.locator("#search").fill("notes");
+      await page.locator(".session", { hasText: "gamma notes" }).click();
+      await page.locator("#search").press("Escape");
+      check((await head("elsewhere").getAttribute("aria-expanded")) === "true" && (await shownTitles("elsewhere")).join("|") === "gamma notes", "selecting a session in a folded group from the search unfolds it");
+      check((await head("work").getAttribute("aria-expanded")) === "true", "and a fold made while searching ends with the search");
+      await page.locator("#workspace-filter").selectOption("elsewhere");
+      check((await page.locator(".group-head:visible").count()) === 0 && (await shownTitles("elsewhere")).join("|") === "gamma notes", "the workspace filter narrows to one group, with no heading");
+      await page.locator("#workspace-filter").selectOption("");
+      await head("elsewhere").focus();
+      await page.keyboard.press("Space");
+      check((await head("elsewhere").getAttribute("aria-expanded")) === "false", "Space folds a heading");
+      await page.keyboard.press("Space");
+      check((await head("elsewhere").getAttribute("aria-expanded")) === "true", "and unfolds it again");
+      await row("alpha task").locator("a").click();
+      await page.locator("#title", { hasText: "alpha task" }).waitFor();
       await shot("chat-manage-list-light");
 
       // The menu.
@@ -519,11 +572,11 @@ try {
       check((await input.count()) === 0 && (await row("beta via F2").count()) === 1, "Esc leaves the title as it was");
 
       // Pin.
-      await row("gamma notes").locator("a").click({ button: "right" });
+      await row("from the terminal").locator("a").click({ button: "right" });
       await page.locator(".menu-item", { hasText: "Pin" }).click();
       await page.locator(".session-item:first-child .pin-mark").waitFor();
-      check((await titles())[0] === "gamma notes", "a pinned session goes to the top, marked Pinned");
-      await row("gamma notes").locator("a").click({ button: "right" });
+      check((await shownTitles("work"))[0] === "from the terminal", "a pinned session goes to the top of its group, marked Pinned");
+      await row("from the terminal").locator("a").click({ button: "right" });
       check((await items())[1] === "Unpin", "and its menu offers Unpin");
       await page.keyboard.press("Escape");
 

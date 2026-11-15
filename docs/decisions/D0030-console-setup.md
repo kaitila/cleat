@@ -1,0 +1,21 @@
+# D0030: setup as a guided console flow on @clack/prompts; one ui module for every command's output
+
+Date: 2026-11-16. Status: active. Task: T-0055. Supersedes parts of [D0026](D0026-setup-command.md) (how setup asks, and what it does about the Claude Code login).
+
+## Context
+The owner asked for a setup that feels like create-astro, gh auth login or vercel: a guided flow that feels fast and calm, and the same look across the rest of the command line. Setup used to read typed answers line by line (numbers for the workspaces, y/n), and each command printed its own kind of line (`ok`, `MISS`, `--`).
+
+## Decision
+- **Prompts from @clack/prompts** (approved by the owner for this task), behind setup's own `Ask` interface (multiselect, select, text, confirm, each returning `CANCEL` on Esc or Ctrl+C). The terminal gets `clackAsk`, `--yes` gets `DEFAULTS` (each question's initial value), and tests get a scripted Ask. No picocolors: `src/cli/ui.ts` writes the few SGR codes itself, and clack's own colours (from `node:util`'s `styleText`, which bun does not turn off for NO_COLOR) are taken out by `promptOutput` when colour is off.
+- **One ui module** (`src/cli/ui.ts`) for every command: what the terminal allows (`termOf`), the marks (✓ done, ✗ missing or failed, – optional or skipped, ▲ done with something to notice, and ASCII ones on a console without Unicode), spinners, and setup's frame (┌ │ ◇ └, as clack draws). A terminal means stdin and stdout are TTYs, CI is not set and TERM is not dumb; only then are there spinners, cursor movement or wrapping. Colour follows FORCE_COLOR first, then NO_COLOR, then whether stdout is a TTY: never into a pipe unless forced. Without a terminal a spinner prints nothing until it ends, then one line.
+- **Setup asks everything, then writes once.** The order is requirements, workspaces, hotkeys, permissions, start at login, then the work. A missing config is not created until then (loadConfig would write a default one, so setup reads the defaults from the schema instead), and the config is written by `writeSettings`, atomically. A cancelled prompt therefore leaves nothing behind, and exits 130.
+- **Without a terminal setup does not ask**: unless `--yes` or every question's flag is given (`--workspace`, `--hotkey`, `--snip-hotkey`, `--permission-mode`; start at login is on unless `--no-login`), it says which to pass and exits 2, instead of waiting on a read.
+- **Setup never logs in or installs for the person.** A missing Claude Code login is a warning with the command to run (`claude auth login`); a missing requirement stops setup with each fix, and on a terminal offers Check again (after the person ran the fix elsewhere) or Quit. D0026's offer to run the login in setup's terminal is gone.
+- **The work runs after the questions**, each step under a spinner that ends as the checklist line: config written, command linked, shell installed (the spinner's progress line is install's newest line, with the seconds), runner started, shell started, login item set. A failed step says why and the command that retries it, and the rest still run where they can; the outro names the hotkeys as keycaps, the chat and settings URLs, and `intuition doctor`.
+- **Workspace suggestions** are newest first (the latest change to the folder, its `.git` or its `CLAUDE.md`) and at most 12, down from 30 sorted by name: a list to toggle has to fit on a screen. "Add a folder…" checks the path is a folder and suggests the folder's name. With more than one workspace, the default (the one the pop-up picks first) is asked and put first in the list, as the pop-up already picks the first.
+- **`doctor --json`** prints `{ layout, ok, checks }` for scripts (`scripts/setup-check.ts` uses it). The doctor's commands (and setup's checks) run through `firstLineAsync`, warmed in the background, so a spinner keeps turning while git, node or claude answer.
+- **The help is grouped like gh's** (USAGE, GET STARTED, RUNNER, SHELL, MORE, SETUP FLAGS, EXAMPLES) and fits 80 columns. A usage error says what was wrong, then prints the help on stderr, exit 2.
+
+## Risk
+- Lines meant for people changed (marks in front, columns in doctor). Anything that parsed them should use `doctor --json` or the exit codes.
+- clack's raw-mode input is checked for real only by `scripts/cli-setup-pty.ts` (Linux's `script`), not in CI.

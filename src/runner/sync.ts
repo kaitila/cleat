@@ -1,19 +1,21 @@
-// The transcript sync (D0015). Claude Code keeps every session as a transcript under
-// ~/.claude/projects, the runner's and the terminal's alike. Every few seconds the runner lists each
-// workspace's transcripts and:
+// The transcript sync (D0015, and D0031 for Codex). Claude Code keeps every session as a transcript
+// under ~/.claude/projects, and Codex every thread as a rollout file under ~/.codex/sessions
+// (codex-sync.ts), the runner's and the terminal's alike. Every few seconds the runner lists each
+// workspace's transcripts of both agents and:
 //   - imports the ones it doesn't own as sessions with source "terminal" (their events are read on
 //     first request: load());
 //   - reads the new entries of any session's transcript that grew while the runner wasn't running its
 //     turn (continued in a terminal, say), stores them as events and shows the session running until
 //     a few seconds after its last assistant entry.
-// It only reads transcripts. Nothing here writes under ~/.claude: the runner's own turns go through
+// It only reads transcripts. Nothing here writes under ~/.claude or ~/.codex: the runner's own turns go through
 // the SDK's query, and the person's rename, fork and delete through manage.ts, which tells the sync
 // (own, hold, adopt, forget) so none of them is taken for another process's write. The SDK changes often: read its sdk.d.ts before changing this.
 import { join } from "node:path";
 import type { SDKSessionInfo, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { ServerMessage, SessionMeta, Workspace } from "../shared/protocol";
+import type { AgentKind, ServerMessage, SessionMeta, Workspace } from "../shared/protocol";
 import type { NewEvent } from "./agent";
 import { cut, resultText } from "./agent-claude";
+import { codexThreads } from "./codex-sync";
 import { titleOf, type Sessions, type TurnWatcher } from "./sessions";
 import { readJson, writeJson, type Store } from "./store";
 
@@ -33,7 +35,7 @@ export const MAX_PER_WORKSPACE = 50;
 /** The title of an imported session whose transcript gives none. */
 export const UNTITLED = "Terminal session";
 
-/** What the sync reads, as the SDK gives it. A test passes its own. */
+/** Claude Code's transcripts, as the SDK gives them. A test passes its own. */
 export interface Transcripts {
   /** The newest `limit` sessions of the project folder `dir`, newest first. */
   list(dir: string, limit: number): Promise<SDKSessionInfo[]>;
@@ -63,6 +65,67 @@ export function sdkTranscripts(): Transcripts {
 export function noTranscripts(): Transcripts {
   return { list: async () => [], info: async () => undefined, messages: async () => [] };
 }
+
+/** One conversation as the sync sees it, whichever agent keeps it. */
+export interface ThreadInfo {
+  /** The agent's id for it: Claude Code's session id, Codex's thread id. */
+  id: string;
+  /** The folder it runs in; "" when the transcript doesn't say. */
+  cwd: string;
+  /** Its title, "" when it has none yet. */
+  title: string;
+  createdAt: number;
+  /** When its file was last written, ms since the epoch. */
+  lastModified: number;
+}
+
+/** One entry of a conversation: what it adds to the session's events. */
+export interface Entry {
+  /** Names the entry within its conversation, so the sync knows where it stopped reading. */
+  key: string;
+  events: NewEvent[];
+  /** When it was written. */
+  time?: string;
+  /** The turn may be over after it (an assistant message, the end of a Codex turn): the session goes idle IDLE_MS after it. */
+  idle: boolean;
+}
+
+/** An agent's conversations, read-only: what the sync reads, one per agent. */
+export interface Threads {
+  /** The newest `limit` conversations started in the folder `dir`, newest first. */
+  list(dir: string, limit: number): Promise<ThreadInfo[]>;
+  info(id: string, dir: string): Promise<ThreadInfo | undefined>;
+  /** Its entries, oldest first. */
+  entries(id: string, dir: string): Promise<Entry[]>;
+}
+
+/** No conversations: the fake agent's runs (tests and CI) have no Codex threads to read. */
+export function noThreads(): Threads {
+  return { list: async () => [], info: async () => undefined, entries: async () => [] };
+}
+
+function claudeInfo(info: SDKSessionInfo): ThreadInfo {
+  return { id: info.sessionId, cwd: info.cwd ?? "", title: titleFrom(info), createdAt: info.createdAt ?? info.lastModified, lastModified: info.lastModified };
+}
+
+/** Claude Code's transcripts as the sync's Threads. */
+export function claudeThreads(t: Transcripts): Threads {
+  return {
+    list: async (dir, limit) => (await t.list(dir, limit)).map(claudeInfo),
+    info: async (id, dir) => {
+      const info = await t.info(id, dir);
+      return info && claudeInfo(info);
+    },
+    entries: async (id, dir) =>
+      (await t.messages(id, dir)).map((m) => {
+        const time = timeOf(m);
+        return { key: m.uuid, events: eventsOf(m), idle: m.type === "assistant", ...(time ? { time } : {}) };
+      }),
+  };
+}
+
+/** The agents the sync reads, in the order it lists them. */
+const AGENTS: AgentKind[] = ["claude", "codex"];
 
 export function titleFrom(info: SDKSessionInfo): string {
   return titleOf(info.customTitle || info.summary || info.firstPrompt || "") || UNTITLED;
@@ -118,7 +181,7 @@ function timeOf(message: SessionMessage): string | undefined {
 
 /** What the sync remembers of a session, kept in sync.json under the data folder. */
 interface Tracked {
-  /** uuid of the newest transcript message already stored as events (or seen), null before any. */
+  /** Key of the newest transcript entry already stored as events (or seen), null before any. */
   cursor: string | null;
   /** False for an imported session whose transcript hasn't been read yet. */
   loaded: boolean;
@@ -126,27 +189,44 @@ interface Tracked {
   mtime: number;
   /** When the runner's own last turn of it ended (or started, while it runs). */
   ownWrite: number;
+  /** A terminal session's title as its transcript last gave it: a new one there replaces the session's. */
+  title?: string;
+  /**
+   * Set when a runner turn of a Codex session ended: Codex may write the turn's last lines (its
+   * task_complete) after the SDK reported the end, so what comes next before a user message is
+   * still the runner's turn, and is passed over.
+   */
+  tail?: true;
 }
 
 interface SyncFile {
-  /** Every Claude Code session id the runner knows, to the runner's session id: one id per session, kept across restarts. */
+  /** Every Claude Code session id and Codex thread id the runner knows, to the runner's session id: one id per session, kept across restarts. */
   ids: Record<string, string>;
   sessions: Record<string, Tracked>;
+  /** Set once Codex threads are synced (D0031): a file without it may have Codex sessions whose cursor was never kept. */
+  codex?: true;
 }
 
 export interface SyncOptions {
+  /** Claude Code's transcripts. */
   transcripts: Transcripts;
+  /** Codex's threads (codexThreads(), $CODEX_HOME or ~/.codex). */
+  codex: Threads;
   pollMs: number;
   idleMs: number;
   now: () => number;
 }
 
 /**
- * Whether the session's conversation is a Claude Code transcript the sync reads. A Codex session's
- * thread lives in ~/.codex/sessions, which nothing syncs yet (docs/agents.md).
+ * Whether the session's conversation is a Claude Code transcript, which rename, fork and delete act
+ * on (manage.ts). A Codex thread in ~/.codex/sessions is synced too, but only read (docs/agents.md).
  */
 export function hasTranscript(session: Pick<SessionMeta, "agent">): boolean {
-  return (session.agent ?? "claude") === "claude";
+  return agentOf(session) === "claude";
+}
+
+function agentOf(session: Pick<SessionMeta, "agent">): AgentKind {
+  return session.agent ?? "claude";
 }
 
 export class Sync implements TurnWatcher {
@@ -166,6 +246,7 @@ export class Sync implements TurnWatcher {
   private polling: Promise<void> | null = null;
   private stopped = false;
   private readonly options: SyncOptions;
+  private readonly threads: Record<AgentKind, Threads>;
 
   constructor(
     private readonly store: Store,
@@ -176,10 +257,17 @@ export class Sync implements TurnWatcher {
     options: Partial<SyncOptions> = {},
     private readonly log: (line: string) => void = (line) => console.error(line),
   ) {
-    this.options = { transcripts: sdkTranscripts(), pollMs: POLL_MS, idleMs: IDLE_MS, now: Date.now, ...options };
+    this.options = { pollMs: POLL_MS, idleMs: IDLE_MS, now: Date.now, ...options, transcripts: options.transcripts ?? sdkTranscripts(), codex: options.codex ?? codexThreads() };
+    this.threads = { claude: claudeThreads(this.options.transcripts), codex: this.options.codex };
     this.path = join(dataDir, "sync.json");
     const file = readJson<Partial<SyncFile>>(this.path, {});
-    this.file = { ids: file.ids ?? {}, sessions: file.sessions ?? {} };
+    this.file = { ids: file.ids ?? {}, sessions: file.sessions ?? {}, codex: true };
+    if (!file.codex) {
+      // Before D0031 a Codex session's turns never moved its cursor: it is tracked again from its
+      // thread's end at the next round, so nothing it already has is stored twice.
+      for (const id of Object.keys(this.file.sessions)) if (this.store.get(id)?.agent === "codex") delete this.file.sessions[id];
+      this.save();
+    }
   }
 
   private save(): void {
@@ -217,21 +305,23 @@ export class Sync implements TurnWatcher {
     this.polling = (async () => {
       try {
         for (const workspace of this.workspaces) {
-          if (this.stopped) return;
-          let infos: SDKSessionInfo[];
-          try {
-            infos = await this.options.transcripts.list(workspace.path, MAX_PER_WORKSPACE);
-          } catch (e) {
-            this.log(`sync: listing ${workspace.path} failed: ${(e as Error).message}`);
-            continue;
-          }
-          const since = this.options.now() - MAX_AGE_MS;
-          for (const info of infos.filter((i) => i.lastModified >= since).slice(0, MAX_PER_WORKSPACE)) {
+          for (const agent of AGENTS) {
             if (this.stopped) return;
+            let infos: ThreadInfo[];
             try {
-              await this.see(workspace, info);
+              infos = await this.threads[agent].list(workspace.path, MAX_PER_WORKSPACE);
             } catch (e) {
-              this.log(`sync: reading ${info.sessionId} failed: ${(e as Error).message}`);
+              this.log(`sync: listing ${workspace.path} (${agent}) failed: ${(e as Error).message}`);
+              continue;
+            }
+            const since = this.options.now() - MAX_AGE_MS;
+            for (const info of infos.filter((i) => i.lastModified >= since).slice(0, MAX_PER_WORKSPACE)) {
+              if (this.stopped) return;
+              try {
+                await this.see(workspace, agent, info);
+              } catch (e) {
+                this.log(`sync: reading ${info.id} failed: ${(e as Error).message}`);
+              }
             }
           }
         }
@@ -247,7 +337,7 @@ export class Sync implements TurnWatcher {
     return this.polling;
   }
 
-  /** Records every Claude Code id the runner's sessions have, so none is ever imported as a terminal session. */
+  /** Records every agent id (Claude Code's, Codex's) the runner's sessions have, so none is ever imported as a terminal session. */
   private link(): void {
     let changed = false;
     for (const s of this.store.list()) {
@@ -260,65 +350,80 @@ export class Sync implements TurnWatcher {
   }
 
   /** One transcript of a workspace: imported when it is new, read when it grew. */
-  private async see(workspace: Workspace, info: SDKSessionInfo): Promise<void> {
+  private async see(workspace: Workspace, agent: AgentKind, info: ThreadInfo): Promise<void> {
     this.link();
-    const id = this.file.ids[info.sessionId];
+    const id = this.file.ids[info.id];
     if (id === undefined) {
       // A session the runner just started may not have reported its Claude Code id yet, or a fork is
       // being written: wait a round.
       if (this.held.has(workspace.name)) return;
       if (this.store.list().some((s) => s.workspace === workspace.name && s.claudeSessionId === null && this.sessions.isRunning(s.id))) return;
-      this.import(workspace, info);
+      this.import(workspace, agent, info);
       return;
     }
     const session = this.store.get(id);
     if (!session) return;
-    if (session.source === "terminal") {
-      const title = titleFrom(info);
-      if (title !== session.title) this.send({ type: "session", session: this.store.update(id, { title, updatedAt: session.updatedAt }) });
+    const tracked = this.file.sessions[id];
+    if (session.source === "terminal" && tracked) {
+      // Only a title the transcript changed replaces the session's: a Codex session renamed in the
+      // runner keeps its name (its thread isn't renamed), and so does a Claude Code one whose
+      // transcript couldn't be.
+      const title = info.title || UNTITLED;
+      if (title !== tracked.title) {
+        tracked.title = title;
+        this.save();
+        if (title !== session.title) this.send({ type: "session", session: this.store.update(id, { title, updatedAt: session.updatedAt }) });
+      }
     }
     await this.lock(id, () => this.grow(id, info.lastModified));
   }
 
-  private import(workspace: Workspace, info: SDKSessionInfo): void {
+  private import(workspace: Workspace, agent: AgentKind, info: ThreadInfo): void {
     const id = crypto.randomUUID();
     const modified = new Date(info.lastModified).toISOString();
+    const title = info.title || UNTITLED;
     const session: SessionMeta = {
       id,
-      claudeSessionId: info.sessionId,
+      claudeSessionId: info.id,
+      ...(agent === "claude" ? {} : { agent }),
       workspace: workspace.name,
       cwd: info.cwd || workspace.path,
-      title: titleFrom(info),
+      title,
       source: "terminal",
       status: "idle",
       createdAt: info.createdAt ? new Date(info.createdAt).toISOString() : modified,
       updatedAt: modified,
       lastSeq: 0,
     };
-    this.file.ids[info.sessionId] = id;
-    this.file.sessions[id] = { cursor: null, loaded: false, mtime: info.lastModified, ownWrite: 0 };
+    this.file.ids[info.id] = id;
+    this.file.sessions[id] = { cursor: null, loaded: false, mtime: info.lastModified, ownWrite: 0, title };
     this.store.create(session);
     this.save();
     this.send({ type: "session", session });
   }
 
   /**
-   * Stores the entries after the cursor as events. Returns the messages stored, or null when a runner
+   * Stores the entries after the cursor as events. Returns the entries stored, or null when a runner
    * turn started meanwhile. `live`: they were written just now, so the session is running first.
    */
-  private async readNew(id: string, tracked: Tracked, live = false): Promise<SessionMessage[] | null> {
+  private async readNew(id: string, tracked: Tracked, live = false): Promise<Entry[] | null> {
     const session = this.store.get(id)!;
     const gen = this.generation.get(id) ?? 0;
-    const messages = await this.options.transcripts.messages(session.claudeSessionId!, session.cwd);
+    const entries = await this.threadsOf(session).entries(session.claudeSessionId!, session.cwd);
     if (this.ours(id) || (this.generation.get(id) ?? 0) !== gen) return null;
-    const at = tracked.cursor === null ? -1 : messages.findIndex((m) => m.uuid === tracked.cursor);
+    const at = tracked.cursor === null ? -1 : entries.findIndex((m) => m.key === tracked.cursor);
     // A cursor that is gone (the transcript was compacted or rewritten): nothing can be told new, start over from its end.
-    const fresh = tracked.cursor !== null && at === -1 ? [] : messages.slice(at + 1);
-    if (live && fresh.length) this.grew(id, fresh.at(-1)!.type === "assistant");
-    for (const message of fresh) {
-      for (const event of eventsOf(message)) this.sessions.record(id, event, undefined, timeOf(message));
+    let fresh = tracked.cursor !== null && at === -1 ? [] : entries.slice(at + 1);
+    if (tracked.tail && fresh.length) {
+      const user = fresh.findIndex((e) => e.events.some((ev) => ev.kind === "user"));
+      fresh = user === -1 ? [] : fresh.slice(user);
+      delete tracked.tail;
     }
-    if (messages.length) tracked.cursor = messages.at(-1)!.uuid;
+    if (live && fresh.length) this.grew(id, fresh.at(-1)!.idle);
+    for (const entry of fresh) {
+      for (const event of entry.events) this.sessions.record(id, event, undefined, entry.time);
+    }
+    if (entries.length) tracked.cursor = entries.at(-1)!.key;
     tracked.loaded = true;
     return fresh;
   }
@@ -327,12 +432,12 @@ export class Sync implements TurnWatcher {
   private async grow(id: string, mtime: number): Promise<void> {
     if (this.ours(id) || this.stopped) return;
     const session = this.store.get(id);
-    if (!session?.claudeSessionId || !hasTranscript(session)) return;
+    if (!session?.claudeSessionId) return;
     const tracked = this.file.sessions[id];
     if (!tracked) {
-      // One of the runner's sessions from before the sync: what it has is what it is now.
-      const messages = await this.options.transcripts.messages(session.claudeSessionId, session.cwd);
-      this.file.sessions[id] = { cursor: messages.at(-1)?.uuid ?? null, loaded: true, mtime, ownWrite: 0 };
+      // One of the runner's sessions from before the sync (of Codex's: from before D0031): what it has is what it is now.
+      const entries = await this.threadsOf(session).entries(session.claudeSessionId, session.cwd);
+      this.file.sessions[id] = { cursor: entries.at(-1)?.key ?? null, loaded: true, mtime, ownWrite: 0 };
       this.save();
       return;
     }
@@ -343,14 +448,19 @@ export class Sync implements TurnWatcher {
     this.save();
   }
 
+  /** The reader of the session's agent's conversations. */
+  private threadsOf(session: Pick<SessionMeta, "agent">): Threads {
+    return this.threads[agentOf(session)];
+  }
+
   /** True while what the transcript gets is the runner's own turn's. */
   private ours(id: string): boolean {
     return this.sessions.isRunning(id) || this.ending.has(id);
   }
 
-  /** The transcript grew: the session is running until it stops. */
-  private grew(id: string, assistant: boolean): void {
-    this.live.set(id, { at: this.options.now(), assistant });
+  /** The transcript grew: the session is running until it stops. `idle`: its last entry may end the turn. */
+  private grew(id: string, idle: boolean): void {
+    this.live.set(id, { at: this.options.now(), assistant: idle });
     const session = this.store.get(id)!;
     if (session.status !== "running" || !session.terminalTurn) {
       this.send({ type: "session", session: this.store.update(id, { status: "running", terminalTurn: true }) });
@@ -377,9 +487,9 @@ export class Sync implements TurnWatcher {
     if (!tracked || tracked.loaded) return Promise.resolve();
     return this.lock(id, async () => {
       const session = this.store.get(id);
-      if (tracked.loaded || !session?.claudeSessionId || !hasTranscript(session)) return;
+      if (tracked.loaded || !session?.claudeSessionId) return;
       try {
-        const info = await this.options.transcripts.info(session.claudeSessionId, session.cwd);
+        const info = await this.threadsOf(session).info(session.claudeSessionId, session.cwd);
         if ((await this.readNew(id, tracked)) === null) return;
         if (info) tracked.mtime = Math.max(tracked.mtime, info.lastModified);
         this.save();
@@ -398,10 +508,10 @@ export class Sync implements TurnWatcher {
   async beforeReply(id: string): Promise<{ openElsewhere: boolean }> {
     await this.load(id);
     const session = this.store.get(id);
-    if (!session?.claudeSessionId || !hasTranscript(session)) return { openElsewhere: false };
-    let info: SDKSessionInfo | undefined;
+    if (!session?.claudeSessionId) return { openElsewhere: false };
+    let info: ThreadInfo | undefined;
     try {
-      info = await this.options.transcripts.info(session.claudeSessionId, session.cwd);
+      info = await this.threadsOf(session).info(session.claudeSessionId, session.cwd);
       if (info) await this.lock(id, () => this.grow(id, info!.lastModified));
     } catch (e) {
       // The transcript can't be read: the reply resumes it all the same, as before the sync.
@@ -459,11 +569,9 @@ export class Sync implements TurnWatcher {
       if (!session?.claudeSessionId) return;
       const tracked: Tracked = { cursor: null, loaded: true, mtime: 0, ownWrite: this.options.now() };
       try {
-        const [messages, info] = await Promise.all([
-          this.options.transcripts.messages(session.claudeSessionId, session.cwd),
-          this.options.transcripts.info(session.claudeSessionId, session.cwd),
-        ]);
-        tracked.cursor = messages.at(-1)?.uuid ?? null;
+        const threads = this.threadsOf(session);
+        const [entries, info] = await Promise.all([threads.entries(session.claudeSessionId, session.cwd), threads.info(session.claudeSessionId, session.cwd)]);
+        tracked.cursor = entries.at(-1)?.key ?? null;
         tracked.mtime = info?.lastModified ?? 0;
       } catch (e) {
         this.log(`sync: reading the fork ${session.claudeSessionId} failed: ${(e as Error).message}`);
@@ -475,8 +583,8 @@ export class Sync implements TurnWatcher {
   }
 
   /**
-   * A deleted session: what the sync kept of it goes. Its Claude Code ids stay linked to the gone id,
-   * so a transcript left behind is never imported as a new session.
+   * A deleted session: what the sync kept of it goes. Its agent ids stay linked to the gone id, so a
+   * transcript left behind (a Codex thread always is) is never imported as a new session.
    */
   forget(id: string): void {
     this.live.delete(id);
@@ -503,18 +611,17 @@ export class Sync implements TurnWatcher {
       this.link();
       const session = this.store.get(id);
       const tracked = this.file.sessions[id];
-      if (!session?.claudeSessionId || !hasTranscript(session) || !tracked) return;
+      if (!session?.claudeSessionId || !tracked) return;
       // A turn that wrote nothing readable still leaves the cursor where it was, so nothing is stored twice.
       try {
-        const [messages, info] = await Promise.all([
-          this.options.transcripts.messages(session.claudeSessionId, session.cwd),
-          this.options.transcripts.info(session.claudeSessionId, session.cwd),
-        ]);
-        if (messages.length) tracked.cursor = messages.at(-1)!.uuid;
+        const threads = this.threadsOf(session);
+        const [entries, info] = await Promise.all([threads.entries(session.claudeSessionId, session.cwd), threads.info(session.claudeSessionId, session.cwd)]);
+        if (entries.length) tracked.cursor = entries.at(-1)!.key;
         if (info) tracked.mtime = Math.max(tracked.mtime, info.lastModified);
       } catch (e) {
         this.log(`sync: reading ${session.claudeSessionId} after its turn failed: ${(e as Error).message}`);
       }
+      if (agentOf(session) === "codex") tracked.tail = true;
       tracked.ownWrite = this.options.now();
       this.save();
     }).finally(() => this.ending.delete(id));

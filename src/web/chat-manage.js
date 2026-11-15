@@ -32,6 +32,62 @@ export function workspacesOf(sessions) {
   return [...new Set([...sessions].map((s) => s.workspace).filter((w) => typeof w === "string" && w))].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * The chat view's sidebar, grouped by workspace (D0033): [{ workspace, sessions }]. Each group is in
+ * `ordered` order (pinned first, then the newest); the groups by their newest session, pinned or not.
+ */
+export function grouped(sessions) {
+  const groups = new Map();
+  for (const s of byActivity(sessions)) {
+    const w = typeof s.workspace === "string" ? s.workspace : "";
+    if (!groups.has(w)) groups.set(w, []);
+    groups.get(w).push(s);
+  }
+  return [...groups].map(([workspace, list]) => ({ workspace, sessions: ordered(list) }));
+}
+
+/**
+ * True when the sidebar draws a heading over each group: more than one workspace among the sessions
+ * of the list shown (archived or not), and no workspace chosen in the filter.
+ */
+export function showHeadings(sessions, { archived = false, workspace = "" } = {}) {
+  if (workspace) return false;
+  return workspacesOf(visible(sessions, { archived })).length > 1;
+}
+
+/**
+ * Whether a group is drawn folded. With no headings nothing is. While a search is typed the groups
+ * start unfolded, and a heading folds only for that search (`searchFolded`); otherwise the
+ * remembered folds count (`folded`).
+ */
+export function isFolded(workspace, { folded, searchFolded, query = "", headings = true }) {
+  if (!headings) return false;
+  return query.trim() ? searchFolded.has(workspace) : folded.has(workspace);
+}
+
+/** Where the folded workspaces are remembered, per browser. */
+export const FOLDED_KEY = "intuition.chat.folded";
+
+/** The workspaces folded last time, from `storage` (localStorage); none when it can't be read. */
+export function readFolded(storage) {
+  try {
+    const list = JSON.parse(storage?.getItem(FOLDED_KEY) ?? "[]");
+    return new Set(Array.isArray(list) ? list.filter((w) => typeof w === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Remembers the folded workspaces; a storage that refuses is left alone (the folds last the page). */
+export function writeFolded(storage, folded) {
+  try {
+    if (folded.size) storage?.setItem(FOLDED_KEY, JSON.stringify([...folded].sort()));
+    else storage?.removeItem(FOLDED_KEY);
+  } catch {
+    // Private window or storage off: nothing to keep.
+  }
+}
+
 /** A turn the runner runs (not one arriving from a terminal): the person may stop it. */
 export function canStop(session) {
   return (session?.status === "running" || session?.status === "waiting_approval") && session.terminalTurn !== true;
