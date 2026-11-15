@@ -6,12 +6,13 @@
 // the shell's names: RunnerSettings is the whole Settings (main.ts has its own Settings, the shell's
 // file), ShellPrefs is the shell's part of it.
 
+import { defaultHotkeys, shellOs } from "./os";
 import type { PermissionMode, Settings as RunnerSettings, ShellSettings as ShellPrefs, Theme } from "../../src/shared/protocol";
 
 export type { PermissionMode, RunnerSettings, ShellPrefs, Theme };
 
-/** What the shell uses until the runner has said otherwise, and for anything its file never had. */
-export const SHELL_DEFAULTS: Omit<ShellPrefs, "startOnLogin"> = { hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true };
+/** What the shell uses until the runner has said otherwise, and for anything its file never had: Command+Shift on a Mac, Control+Alt elsewhere. */
+export const SHELL_DEFAULTS: Omit<ShellPrefs, "startOnLogin"> = { ...defaultHotkeys(shellOs()), dock: true };
 
 /**
  * The self-test's hotkeys, unlikely to be anyone's, so it never clashes with a running shell: the two
@@ -147,10 +148,12 @@ export function releaseBoth(active: { hotkey: string | null; snipHotkey: string 
 }
 
 /** The notification for a hotkey that could not be registered: it names it, and says what still works. */
-export function hotkeyNotice(which: "hotkey" | "snip hotkey", failed: string, active: string | null): { title: string; body: string } {
+export function hotkeyNotice(which: "hotkey" | "snip hotkey", failed: string, active: string | null, wayland = false): { title: string; body: string } {
   const still = active ? `${active} still works.` : `No ${which} works until another is chosen.`;
+  // Under Wayland a shortcut can fail although nobody holds it: the tray has both actions.
+  const tray = wayland ? " Under Wayland global shortcuts may not register at all: the tray's New task and Snip do the same." : "";
   return {
     title: `intuition: the ${which} could not be set`,
-    body: `${failed} could not be registered: another program holds it, the shell's other hotkey is the same, or it is not a valid shortcut. ${still} Choose another in Settings.`,
+    body: `${failed} could not be registered: another program holds it, the shell's other hotkey is the same, or it is not a valid shortcut. ${still} Choose another in Settings.${tray}`,
   };
 }

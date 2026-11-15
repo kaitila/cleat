@@ -4,6 +4,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { autostartEntry, autostartFile as shellAutostartFile } from "../../shell/src/login";
+import { type LocalRunner, parseLocalRunner } from "../../shell/src/os";
 import { SETTINGS_FILE } from "../../shell/src/settings";
 import { parseWsl, type WslSettings } from "../../shell/src/wsl";
 import { hasWindows, REPO, settingsFile as windowsSettingsFile, SHELL_SRC, type ShellPaths, shellPaths as windowsShellPaths, toWindows } from "./paths";
@@ -37,27 +39,12 @@ function readProcVersion(): string {
   }
 }
 
-/** Where a native shell starts the runner: this repo with this bun, as a detached child process. */
-export interface LocalRunner {
-  kind: "local";
-  repo: string;
-  bun: string;
-}
+/** Where a native shell starts the runner: this repo with this bun, as a detached child process. The shell reads it (shell/src/os.ts). */
+export type { LocalRunner };
+export { parseLocalRunner };
 
 /** What `shell install` writes into the shell's settings: `wsl` for windows-wsl (as before), `runner` for the native layouts. */
 export type RunnerLocation = { kind: "wsl"; wsl: WslSettings } | LocalRunner;
-
-/** An absolute path without control characters: it starts with a slash, so it is never read as an option. */
-function absolute(value: unknown): value is string {
-  return typeof value === "string" && value.startsWith("/") && value.length < 4096 && !/[\u0000-\u001f]/.test(value);
-}
-
-/** The `runner` object of a native layout's settings, or undefined unless it is whole. */
-export function parseLocalRunner(value: unknown): LocalRunner | undefined {
-  if (typeof value !== "object" || value === null) return undefined;
-  const { kind, repo, bun } = value as Record<string, unknown>;
-  return kind === "local" && absolute(repo) && absolute(bun) ? { kind, repo, bun } : undefined;
-}
 
 /** How start on login is set: through the shell's own Electron login item, or an XDG autostart file the command line writes. */
 export type LoginKind = "electron" | "xdg-autostart";
@@ -192,27 +179,11 @@ export function currentPlatform(env: Env = process.env): Platform {
 
 /** The XDG autostart file the linux layout writes for start on login. */
 export function autostartFile(env: Env = process.env): string {
-  return join(env.XDG_CONFIG_HOME || join(homedir(), ".config"), "autostart", "intuition.desktop");
+  return shellAutostartFile(homedir(), env);
 }
 
-/** One argument of a .desktop file's Exec line: quoted, with ", `, $ and \ escaped, and % doubled. */
-function execArg(arg: string): string {
-  return `"${arg.replace(/[\\"`$]/g, (c) => `\\${c}`).replace(/%/g, "%%")}"`;
-}
-
-/** The autostart entry: the installed Electron on the app folder, as `shell start` runs it. */
-export function autostartEntry(exe: string, args: string[]): string {
-  return [
-    "[Desktop Entry]",
-    "Type=Application",
-    "Name=intuition",
-    "Comment=Fire tasks at Claude Code from a hotkey",
-    `Exec=${[exe, ...args].map(execArg).join(" ")}`,
-    "Terminal=false",
-    "X-GNOME-Autostart-enabled=true",
-    "",
-  ].join("\n");
-}
+/** The autostart entry: the installed Electron on the app folder, as `shell start` runs it. The shell's tray writes the same one. */
+export { autostartEntry };
 
 /** True when the autostart file exists: start on login is on. */
 export function autostartOn(file = autostartFile()): boolean {

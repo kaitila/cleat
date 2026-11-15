@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, isSnipPage, matchSources, SELF_TEST_CROP, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PATH, SNIP_PRELOAD, snipUrl, toPixels } from "../../shell/src/snip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, type DockState, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
 import { centred, iconBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, sessionOf, settingsUrl, windowTarget } from "../../shell/src/origin";
@@ -15,7 +15,9 @@ import { DEFAULT_SETTINGS, dropLegacy, hasLegacy, loadSettings, parseSettings, P
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
 import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
-import { expectedExternal, pngSize, problems, selfTestRun, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
+import { defaultHotkeys, dockArea, opaqueDockBounds, shellOs } from "../../shell/src/os";
+import type { Area } from "../../shell/src/geometry";
+import { captureWithheld, expectedExternal, pngSize, problems, selfTestRun, skipped, type Where, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
@@ -234,8 +236,9 @@ describe("settings from the runner", () => {
 
   test("the migration sends the old file's values, the defaults for the rest, and start on login as Windows has it", () => {
     expect(migratedPrefs({}, false)).toEqual({ ...SHELL_DEFAULTS, startOnLogin: false });
-    expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: "Control+Alt+S", dock: false, startOnLogin: true });
-    expect(SHELL_DEFAULTS).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true });
+    expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: SHELL_DEFAULTS.snipHotkey, dock: false, startOnLogin: true });
+    // Control+Alt on Windows and Linux, Command+Shift on a Mac (shell/src/os.ts).
+    expect(SHELL_DEFAULTS).toEqual({ ...defaultHotkeys(shellOs()), dock: true });
   });
 
   /** A stand-in for globalShortcut: some accelerators are taken by another program, some throw as Electron does for one that is not valid. */
@@ -582,10 +585,13 @@ describe("the dock", () => {
   test("the shell never resizes or moves the dock for a state: setBounds is called in one place, and never setSize", () => {
     const main = readFileSync(join(import.meta.dir, "..", "..", "shell", "src", "main.ts"), "utf8");
     const body = (name: string) => main.match(new RegExp("function " + name + "\\([^)]*\\)[^{]*\\{[\\s\\S]*?\\n\\}"))?.[0] ?? "";
-    expect(body("placeDock")).toContain("dock.setBounds(dockBounds(screen.getPrimaryDisplay().bounds))");
+    expect(body("placeDock")).toContain("dock.setBounds(want)");
+    expect(body("dockWindowBounds")).toContain("DOCK_TRANSPARENT ? dockPlace() : opaqueDockBounds(dockPlace(), islandRect(dockState ?? \"idle\"))");
+    // A state reaches the window's bounds only through fitOpaqueDock, which does nothing for a transparent dock.
+    expect(body("fitOpaqueDock")).toContain("if (!DOCK_TRANSPARENT) placeDock();");
     for (const name of ["setDockState", "onDockState", "watchDockMouse", "setDockMouse", "forgetDockState"]) {
       expect(body(name).length).toBeGreaterThan(40);
-      expect(name + ": " + /setBounds|setSize|setPosition|setContentSize|placeDock/.test(body(name))).toBe(name + ": false");
+      expect(name + ": " + /setBounds|setSize|setPosition|setContentSize|placeDock/.test(body(name).replace("fitOpaqueDock()", ""))).toBe(name + ": false");
     }
     expect(main.match(/dock\.setBounds\(/g)).toHaveLength(1);
     expect(main).not.toMatch(/dock\.(setSize|setContentSize|setPosition)\(/);
@@ -629,15 +635,15 @@ describe("the dock", () => {
   test("main.ts: the window is frameless, clear, on top, out of the taskbar, never activated, and placed from the display's bounds", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     const create = main.slice(main.indexOf("function createDock()"), main.indexOf("async function loadDock()"));
-    for (const option of ["frame: false", "transparent: true", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
+    for (const option of ["frame: false", "transparent: DOCK_TRANSPARENT", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
     expect(create).toContain('win.on("will-resize", (event) => event.preventDefault());');
     const dockCode = main.slice(main.indexOf("// --- Dock ---"), main.indexOf("// --- Self-test ---"));
     // Shown without activating, and never focused by the shell.
     expect(dockCode).toContain("win.showInactive();");
     expect(dockCode).not.toMatch(/\.show\(\)|\.focus\(\)/);
-    // The primary display's bounds, not its work area.
-    expect(dockCode.match(/screen\.getPrimaryDisplay\(\)\.bounds/g)).toHaveLength(2);
-    expect(dockCode).not.toContain("workArea");
+    // From the primary display, through dockArea: its bounds on Windows and Linux, from the work area's top on a Mac.
+    expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea));");
+    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(1);
     for (const event of ["display-metrics-changed", "display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", placeDock);`);
   });
 
@@ -786,7 +792,9 @@ describe("the snip", () => {
 
   test("main.ts: links elsewhere go through externalLink to the browser; the self-test opens none", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
-    expect(main.match(/shell\.openExternal\(/g)).toHaveLength(1);
+    // The other one opens System Settings' Screen Recording pane, a constant, when its notice is clicked.
+    expect(main.match(/shell\.openExternal\(/g)).toHaveLength(2);
+    expect(main).toContain("shell.openExternal(SCREEN_RECORDING_PANE)");
     const open = main.slice(main.indexOf("function openExternal("));
     const body = open.slice(0, open.indexOf("\n}\n"));
     expect(body).toContain("const link = externalLink(url, settings.runnerUrl);");
@@ -806,9 +814,11 @@ describe("no toasts for sessions", () => {
       expect(`${name}: ${/api\/notifications|toastOf|pollOnce|Open last session|lastSession/.test(code)}`).toBe(`${name}: false`);
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
-    // The one Notification left is notify(): the runner is not running or is older than the shell, a hotkey could not be set, a setting or start on login was not changed.
-    expect(main.match(/new Notification\(/g)).toHaveLength(1);
-    expect(main.match(/\bnotify\(/g)).toHaveLength(6);
+    // notify(): the runner is not running or is older than the shell, a hotkey could not be set, a setting or start on login was not changed,
+    // the Linux desktop may hide the tray or the hotkeys. The other Notification: macOS has not given Screen Recording.
+    expect(main.match(/new Notification\(/g)).toHaveLength(2);
+    expect(main).toContain("new Notification({ title: SCREEN_RECORDING_NOTICE.title, body: SCREEN_RECORDING_NOTICE.body })");
+    expect(main.match(/\bnotify\(/g)).toHaveLength(7);
     expect(main).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
     expect(main).toContain("notify(n.title, n.body);");
     for (const title of ["intuition: the runner is not running", "intuition: the setting was not changed", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
@@ -846,6 +856,7 @@ describe("self-test runner", () => {
     settingsWindowUrl: "http://127.0.0.1:5000/assets/settings.html", settingsWindowWidth: 720, settingsWindowHeight: 640, settingsWindowReused: true,
     settingsLinkOpened: "http://127.0.0.1:5000/assets/settings.html",
     externalLinks: expectedExternal("http://127.0.0.1:5000"), errors: [],
+    os: "windows", dockTransparent: true, primaryWorkArea: { ...display, height: 1400 }, screenAccess: "granted",
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
   const base = stubSettings(5000);
@@ -886,14 +897,72 @@ describe("self-test runner", () => {
     expect(check({}).length).toBeGreaterThan(10);
   });
 
+  describe("on macOS and Linux", () => {
+    const macDisplay = { x: 0, y: 0, width: 1512, height: 982 };
+    // A MacBook with a notch: the menu bar is 38 points tall.
+    const macWork = { x: 0, y: 38, width: 1512, height: 944 };
+    const native = "/var/folders/xy/T/intuition";
+    const placeAt = (p: Area) => ({ dockIdleBounds: p, dockPeekBounds: p, dockOpenBounds: p, dockBackBounds: p });
+    const macPlace = dockBounds(dockArea("macos", macDisplay, macWork));
+    const mac: SelfTestResult = {
+      ...good, os: "macos", primaryDisplay: macDisplay, primaryWorkArea: macWork, ...placeAt(macPlace),
+      imagePath: `${native}/clip-20261115-090507-042.png`, snipCropPath: `${native}/snip-20261115-090508-000.png`,
+      snipDisplays: [{ bounds: macDisplay, scaleFactor: 1.5 }], snipOverlayBounds: [macDisplay],
+    };
+    const macPosts = [{ text: "intuition self-test 1" }, { imagePath: mac.imagePath! }];
+    const at = (r: Partial<SelfTestResult>, where: Where) => problems(r, { posts: macPosts, puts: puts() }, "http://127.0.0.1:5000", png, where);
+    const linuxPlace = dockBounds(macDisplay);
+    const linux: SelfTestResult = { ...mac, os: "linux", primaryWorkArea: macDisplay, ...placeAt(linuxPlace) };
+
+    test("a clean Mac result has no problems, and its dock is judged below the menu bar", () => {
+      expect(at(mac, { layout: "macos" })).toEqual([]);
+      expect(at({ ...mac, ...placeAt(dockBounds(macDisplay)) }, { layout: "macos" })).toHaveLength(4);
+    });
+
+    test("the shell must have run on the layout's OS, with the layout's paths", () => {
+      expect(at({ ...mac, os: "windows" }, { layout: "macos" })).toEqual(["the shell ran on windows, not macos"]);
+      expect(at(good, { layout: "macos" }).length).toBeGreaterThan(0);
+      expect(at(linux, { layout: "linux" })).toEqual([]);
+    });
+
+    test("macOS without Screen Recording: the capture, crop and time are skipped and named, not failed", () => {
+      const denied = { ...mac, screenAccess: "denied", snipCaptured: false, snipCropPath: null, snipMs: 3100 };
+      expect(at(denied, { layout: "macos" })).toEqual([]);
+      expect(skipped(denied, { layout: "macos" })).toEqual([expect.stringContaining("macOS has not given Screen Recording (denied)")]);
+      // Granted but empty is a failure, and so is an empty capture on Linux outside WSLg.
+      expect(at({ ...denied, screenAccess: "granted" }, { layout: "macos" }).length).toBeGreaterThan(0);
+      expect(captureWithheld({ ...denied, os: "linux" }, { layout: "linux" })).toBeNull();
+      expect(skipped(mac, { layout: "macos" })).toEqual([]);
+      // Only macOS asks: another OS saying it was withheld is wrong.
+      expect(at({ ...linux, screenAccess: "denied" }, { layout: "linux" })).toHaveLength(1);
+    });
+
+    test("WSLg: an empty capture is skipped and named; an overlay a pixel short is taken on Linux only", () => {
+      const wslg = { ...linux, snipCaptured: false, snipCropPath: null, snipMs: 3013, snipOverlayBounds: [{ ...macDisplay, width: 1511, height: 981 }] };
+      expect(at(wslg, { layout: "linux", wslg: true })).toEqual([]);
+      expect(skipped(wslg, { layout: "linux", wslg: true })).toEqual([expect.stringContaining("WSLg gives Electron no pixels")]);
+      expect(at(wslg, { layout: "linux" }).length).toBeGreaterThan(0);
+      expect(at({ ...wslg, snipOverlayBounds: [{ ...macDisplay, width: 1510 }] }, { layout: "linux", wslg: true })).toHaveLength(1);
+      expect(at({ ...mac, snipOverlayBounds: [{ ...macDisplay, width: 1511 }] }, { layout: "macos" })).toHaveLength(1);
+    });
+
+    test("an opaque dock is judged as the island of each state", () => {
+      const island = (s: DockState) => opaqueDockBounds(linuxPlace, islandRect(s));
+      const opaque = { ...linux, dockTransparent: false, dockIdleBounds: island("idle"), dockPeekBounds: island("peek"), dockOpenBounds: island("open"), dockBackBounds: island("idle") };
+      expect(at(opaque, { layout: "linux" })).toEqual([]);
+      expect(at({ ...opaque, dockTransparent: true }, { layout: "linux" })).toHaveLength(3);
+    });
+  });
+
   test("the dock's bounds are judged against the display the shell reported", () => {
     // The same dock on another display is in the wrong place four times: idle, peek, open, and back.
-    expect(check({ ...good, primaryDisplay: { ...display, width: 1920 } })).toHaveLength(4);
+    const narrow = { ...display, width: 1920 };
+    expect(check({ ...good, primaryDisplay: narrow, primaryWorkArea: narrow })).toHaveLength(4);
     // On the display's top edge, wherever that is.
     const lower = { ...display, y: 300 };
-    expect(check({ ...good, primaryDisplay: lower })).toHaveLength(4);
+    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower })).toHaveLength(4);
     const at = { ...good.dockIdleBounds!, y: 300 };
-    expect(check({ ...good, primaryDisplay: lower, dockIdleBounds: at, dockPeekBounds: at, dockOpenBounds: at, dockBackBounds: at })).toEqual([]);
+    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower, dockIdleBounds: at, dockPeekBounds: at, dockOpenBounds: at, dockBackBounds: at })).toEqual([]);
     for (const bad of [null, {}, { x: 0, y: 0, width: 0, height: 0 }, { x: "0", y: 0, width: 100, height: 100 }]) expect(check({ ...good, primaryDisplay: bad as never }).length).toBeGreaterThanOrEqual(5);
     // The window is the same in every state: one that grew, shrank or moved for a state is a failure.
     expect(check({ ...good, dockOpenBounds: { ...good.dockOpenBounds!, height: 481 } })).toHaveLength(1);
@@ -1115,11 +1184,13 @@ describe("starting the runner from Windows", () => {
   test("main.ts spawns that command without a shell or a window, and waits ten seconds", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     expect(RUNNER_START_MS).toBe(10_000);
-    expect(main).toContain("spawn(file, wslArgs, { stdio: \"ignore\", windowsHide: true, shell: false })");
-    expect(main.match(/\bspawn\(/g)).toHaveLength(1);
+    expect(main).toContain("spawn(how.file, how.args, { stdio: \"ignore\", windowsHide: true, shell: false, detached: how.detached })");
+    // The other spawn asks gnome-extensions what is enabled, also without a shell.
+    expect(main.match(/\bspawn\(/g)).toHaveLength(2);
+    expect(main).toContain('spawn("gnome-extensions", ["list", "--enabled"], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 3000 })');
     expect(main).not.toMatch(/\bexec(Sync|File|FileSync)?\(/);
     // The self-test never starts a runner.
-    expect(main).toContain("if (args.selfTest || !wsl) return false;");
+    expect(main).toContain("if (args.selfTest || !how) return false;");
   });
 });
 
