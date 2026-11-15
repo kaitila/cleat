@@ -353,7 +353,7 @@ describe("setup", () => {
     expect(r.code).toBe(1);
     expect(r.calls).toEqual([]);
     expect(existsSync(f.env.INTUITION_CONFIG)).toBe(false);
-    expect(r.text).toContain("✗ node and npm  node v20.1.0 is older than 22.12");
+    expect(r.text).toContain("✗ node and npm       node v20.1.0 is older than 22.12");
     expect(r.text).toContain("fix: install Node 22.12");
     expect(r.text).toContain("missing: node and npm");
 
@@ -364,7 +364,7 @@ describe("setup", () => {
     const again: Ask = { ...ask, select: async (o) => (o.message === "Once they are fixed" ? ((node = "v22.12.0"), true) : o.initial) as never };
     const fixed = await run({}, again, { probes: p });
     expect(fixed.code).toBe(0);
-    expect(fixed.text).toContain("✓ node and npm  node v22.12.0");
+    expect(fixed.text).toContain("✓ node and npm       node v22.12.0");
 
     const quit = await run({}, { ...ask, select: async (o) => (o.message === "Once they are fixed" ? false : o.initial) as never }, { probes: probes({ "claude --version": null }) });
     expect(quit.code).toBe(1);
@@ -380,11 +380,11 @@ describe("setup", () => {
 
   test("Codex is shown as optional: a dash when it is missing, a tick when it is there", async () => {
     const r = await run({ yes: true }, DEFAULTS, { probes: { ...probes(), codex: () => "/x/codex" }, interactive: false });
-    expect(r.text).toContain("– Codex  not installed (optional)");
+    expect(r.text).toContain("– Codex              not installed (optional)");
     const there = probes({ "/x/codex --version": "codex-cli 0.169.0", "/x/codex login status": "Logged in using ChatGPT" });
     const ok = await run({ yes: true }, DEFAULTS, { probes: { ...there, codex: () => "/x/codex" }, interactive: false });
-    expect(ok.text).toContain("✓ Codex  codex-cli 0.169.0");
-    expect(ok.text).toContain("✓ Codex login");
+    expect(ok.text).toContain("✓ Codex              codex-cli 0.169.0");
+    expect(ok.text).toContain("✓ Codex login        Logged in using ChatGPT");
   });
 
   test("without a display the shell steps are skipped and said so; the runner and the link still happen", async () => {

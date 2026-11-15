@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acceleratorError, keycaps, makeUi, marks, paint, stripAnsi, termOf, type Term } from "../src/cli/ui";
+import { acceleratorError, keycaps, makeUi, marks, paint, stripAnsi, termOf, type Term, wrap } from "../src/cli/ui";
 
 const REPO = join(import.meta.dir, "..");
 const CLI = join(REPO, "src", "cli.ts");
@@ -73,6 +73,16 @@ describe("the ui", () => {
     expect(out).toContain("\x1b[?25l");
     expect(out.endsWith(`\x1b[?25h${paint(true).gray("│")}  ${paint(true).green("✓")} installed\n`)).toBe(true);
     for (const frame of out.split("\r").slice(1, -1)) expect(Bun.stringWidth(stripAnsi(frame).replace("\x1b[2K", ""))).toBeLessThanOrEqual(60);
+  });
+});
+
+describe("wrapping on a terminal", () => {
+  test("at spaces, the continuation under the text after the mark; a word too long is cut; colour is not counted", () => {
+    expect(wrap("✓ short", 40)).toEqual(["✓ short"]);
+    expect(wrap("✓ command linked: the folder is not on the PATH, add it", 24)).toEqual(["✓ command linked: the", "  folder is not on the", "  PATH, add it"]);
+    expect(wrap("x".repeat(50), 20)).toEqual(["x".repeat(20), "x".repeat(20), "x".repeat(10)]);
+    const green = paint(true).green("✓");
+    expect(wrap(`${green} ${"word ".repeat(6).trim()}`, 22).map(stripAnsi)).toEqual(["✓ word word word word", "  word word"]);
   });
 });
 

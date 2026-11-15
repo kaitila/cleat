@@ -12,7 +12,7 @@ import { writeSettings } from "../runner/settings";
 import type { PermissionMode } from "../shared/protocol";
 import type { Platform } from "../shell/platform";
 import { codexChecks, commandsFor, firstLine, layoutLine, prerequisites, stateOf, type Check, type Probes } from "./doctor";
-import { acceleratorError, errorText, keycaps, makeUi, type State, type Ui } from "./ui";
+import { acceleratorError, errorText, keycaps, makeUi, stripAnsi, type State, type Ui } from "./ui";
 
 type Env = Record<string, string | undefined>;
 type Workspace = StoredSettings["workspaces"][number];
@@ -455,7 +455,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
   const unavailable = platform.unavailable(env);
   let shellReady = false;
   if (unavailable) {
-    ui.line(`${ui.mark("skip")} shell not installed  ${c.dim(`(${unavailable}: the chat is a web page meanwhile)`)}`);
+    ui.line(`${ui.mark("skip")} shell not installed  ${c.dim(`(${unavailable})`)}`);
     record("shell installed", "skip");
   } else {
     const done = await ui.task(
@@ -474,7 +474,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
     async (update) => actions.startRunner((l) => (runnerLines.push(...l.split("\n")), update(l))),
     (code) =>
       code === 0
-        ? { state: "ok", text: `runner started  ${c.dim(runnerLines.at(-1) ?? "")}` }
+        ? { state: "ok", text: `runner started  ${c.dim(/https?:\/\/\S+/.exec(runnerLines.join(" "))?.[0]?.replace(/[),]$/, "") ?? "")}` }
         : code === KEPT
           ? { state: "warn", text: "runner kept (it runs older code, and sessions are in the way)", more: [...runnerLines, "retry: intuition restart"] }
           : { state: "fail", text: "runner not started", more: [...runnerLines, "retry: intuition start"] },
@@ -499,8 +499,14 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
       (e) => ({ state: "fail", text: `start at login not changed: ${errorText(e)}`, more: [`retry: ${retry}`] }),
     );
     record("login item set", on === startOnLogin ? "ok" : "fail", retry);
-  } else if (!unavailable) {
-    ui.line(`${ui.mark("skip")} shell not started, login item not set  ${c.dim("(the shell is not installed)")}`);
+  } else {
+    const why = unavailable ? "no shell here" : "the shell is not installed";
+    ui.line(`${ui.mark("skip")} shell not started  ${c.dim(`(${why})`)}`);
+    ui.line(`${ui.mark("skip")} login item not set  ${c.dim(`(${why})`)}`);
+    if (!unavailable) {
+      record("shell started", "fail", "intuition shell start");
+      record("login item set", "fail", `intuition shell login ${startOnLogin ? "on" : "off"}`);
+    }
   }
 
   const url = code === 0 || code === KEPT ? await actions.runnerUrl().catch(() => null) : null;
@@ -508,8 +514,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
   const next = [
     `${c.bold("Done.")} ${exit === 0 ? "intuition is set up." : "Some steps need another try (above)."}`,
     "",
-    `${keycaps(hotkey, c, ui.term.color)}  a new task, from anywhere`,
-    `${keycaps(snipHotkey, c, ui.term.color)}  snip a part of the screen`,
+    ...padded([keycaps(hotkey, c, ui.term.color), keycaps(snipHotkey, c, ui.term.color)]).map((k, i) => `${k}  ${i === 0 ? "a new task, from anywhere" : "snip a part of the screen"}`),
     "",
     unavailable ? `chat: ${url ?? "intuition start, then open the URL it prints"}` : `chat: the tray icon${url ? `, or ${url}` : ""}`,
     `settings: the tray menu${url ? `, or ${url}/settings` : ""}`,
@@ -521,7 +526,8 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
 /** The requirements, each under its own spinner: a tick, a cross with its fix, or a dash for an optional one. */
 async function requirements(ui: Ui, platform: Platform, probes: Pick<Probes, "output" | "codex" | "warm">): Promise<Check[]> {
   const codex = probes.codex();
-  const done = (ch: Check) => ({ state: stateOf(ch), text: `${ch.name}  ${ui.c.dim(ch.needed ? ch.detail : `${ch.detail} (optional)`)}`, more: ch.ok ? [] : [`fix: ${ch.fix}`] });
+  const pad = "Claude Code login".length + 2;
+  const done = (ch: Check) => ({ state: stateOf(ch), text: `${ch.name.padEnd(pad)}${ui.c.dim(ch.needed ? ch.detail : `${ch.detail} (optional)`)}`, more: ch.ok ? [] : [`${" ".repeat(pad)}fix: ${ch.fix}`] });
   const all = () => [...prerequisites(platform, probes), ...codexChecks(probes)];
   for (const name of ["git", "bun", "node and npm", "Claude Code", "Claude Code login", "Codex", "Codex login"]) {
     await probes.warm?.(commandsFor(name, codex));
@@ -569,12 +575,26 @@ async function addFolders(ask: Ask, picked: WorkspaceEntry[], existing: Workspac
   }
 }
 
-/** The checklist of what was done, then the outro. */
+/**
+ * The outro. Each step already ended on its own line with its mark, so the checklist is those lines; here only
+ * the steps that failed are named again, with the command that retries each.
+ */
 function finish(ui: Ui, results: { title: string; state: State; retry?: string }[], exit: number, next?: string[]): number {
-  ui.line();
-  for (const r of results) ui.line(`${ui.mark(r.state)} ${r.title}${r.state === "fail" && r.retry ? ui.c.dim(`  retry: ${r.retry}`) : ""}`);
+  const failed = results.filter((r) => r.state === "fail");
+  if (failed.length > 0) {
+    ui.line();
+    ui.line(`${ui.mark("fail")} ${ui.c.bold(`${failed.length === 1 ? "one step" : `${failed.length} steps`} to try again`)}`);
+    for (const r of failed) ui.line(`  ${r.title.replace(/ (written|linked|installed|started|set)$/, "")}: ${ui.c.cyan(r.retry ?? "intuition setup")}`);
+  }
   ui.outro((next ?? ["Setup stopped: run `intuition setup` again once the step above is fixed."]).join("\n"));
   return exit;
+}
+
+/** Strings padded to the widest one's visible width (colour codes not counted). */
+function padded(list: string[]): string[] {
+  const w = (s: string) => Bun.stringWidth(stripAnsi(s));
+  const max = Math.max(...list.map(w));
+  return list.map((s) => s + " ".repeat(max - w(s)));
 }
 
 /** A path with the home folder written ~. */

@@ -151,6 +151,36 @@ function fit(s: string, max: number): string {
   return `${out}…`;
 }
 
+/**
+ * Splits a line into lines of at most `max` columns, at spaces where it can. A continuation is indented like
+ * the line's text: past its leading spaces and a mark ("✓ "). Colour codes are kept and not counted.
+ */
+export function wrap(text: string, max: number): string[] {
+  if (max < 20 || width(text) <= max) return [text];
+  const lead = /^(\s*(?:\S\s(?=\S))?)/.exec(stripAnsi(text))?.[1] ?? "";
+  const indent = " ".repeat(Math.min(width(lead), 8));
+  const out: string[] = [];
+  let current = "";
+  for (const word of text.split(/(?<= )/)) {
+    if (current !== "" && width(current + word) > max) {
+      out.push(current.trimEnd());
+      current = indent;
+    }
+    let w = word;
+    // A word longer than a line is cut.
+    while (width(current + w) > max && stripAnsi(w).length > 1) {
+      const room = max - width(current);
+      const plain = stripAnsi(w);
+      out.push(current + plain.slice(0, room));
+      current = indent;
+      w = plain.slice(room);
+    }
+    current += w;
+  }
+  if (current.trim() !== "") out.push(current.trimEnd());
+  return out;
+}
+
 let cursorHidden = false;
 function showCursorOnExit(write: (t: string) => void) {
   if (cursorHidden) return;
@@ -166,7 +196,9 @@ export function makeUi(options: UiOptions = {}): Ui {
   const guide = options.guide === true && term.interactive;
   const prefix = guide ? `${c.gray(m.bar)}  ` : "";
   const mark = (state: State) => ({ ok: c.green(m.ok), fail: c.red(m.fail), skip: c.dim(m.skip), warn: c.yellow(m.warn) })[state];
-  const line = (text = "") => write(text === "" ? `${guide ? c.gray(m.bar) : ""}\n` : `${text.split("\n").map((l) => prefix + l).join("\n")}\n`);
+  // On a terminal a long line is wrapped inside the frame, its continuation under the text after the mark.
+  const wrapped = (l: string) => (term.interactive ? wrap(l, term.columns - width(prefix)) : [l]);
+  const line = (text = "") => write(text === "" ? `${guide ? c.gray(m.bar) : ""}\n` : `${text.split("\n").flatMap(wrapped).map((l) => prefix + l).join("\n")}\n`);
   const finish = (state: State, text: string, more: string[] = []) => {
     line(`${mark(state)} ${text}`);
     for (const l of more) line(`  ${c.dim(l)}`);
