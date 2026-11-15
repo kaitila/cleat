@@ -153,7 +153,7 @@
     --shadow: 0 0 0 var(--hairline) rgb(255 255 255 / 0.1), 0 8px 28px rgb(0 0 0 / 0.6);
   }
 }
-/* Dark whatever the scheme: the dock's page (<html class="dark">) is one dark island on any desktop.
+/* Dark whatever the scheme: the dock's page (<body class="dark">) is one dark island on any desktop.
    The same values as the dark scheme above; test/web/dock.test.ts fails when the two differ. */
 .dark {
   color-scheme: dark;

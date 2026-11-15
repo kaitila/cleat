@@ -19,8 +19,7 @@ function block(selector: string): Map<string, string> {
 const colours = (m: Map<string, string>) => new Map([...m].filter(([k, v]) => k.startsWith("--") && /^(?:#|rgb|0 0 0)/.test(v)));
 
 describe("every page that follows the theme loads theme.js first", () => {
-  // chat.html and dock.html follow in T-0042.
-  for (const page of ["prompt.html", "snip.html", "settings.html"]) {
+  for (const page of ["prompt.html", "snip.html", "settings.html", "chat.html", "dock.html"]) {
     test(page, () => {
       const head = read(page).split("</head>")[0]!;
       const first = /<(script|link)\b[^>]*>/.exec(head)![0];

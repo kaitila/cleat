@@ -10,7 +10,7 @@ Date: 2026-11-13. Status: active, except the window: its sizes, "the window resi
 - **Notifications are pushed.** The runner sends each one to the WebSocket clients as `{ type: "notification", notification }` when it is recorded. Nothing is replayed on connect. `GET /api/notifications` stays.
 - **A peek** lasts five seconds; one for an approval stays until its session no longer waits or the dock is opened. At most five wait their turn, and a session's newer one replaces its older one that still waits. Nothing peeks while the dock is open.
 - **Opening** takes the pointer resting on the island for 120 ms; closing, 400 ms after it left, or Esc. The open dock does not close while the pointer is held down or while the reply box has the focus or text in it.
-- **The dock is dark in both colour schemes.** `base.css` has a `.dark` scope that repeats the dark scheme's values; the dock's page is `<html class="dark">`. The island has no shadow.
+- **The dock is dark in both colour schemes.** `base.css` has a `.dark` scope that repeats the dark scheme's values; the dock's page is `<body class="dark">` (it was `<html class="dark">` until T-0042 loaded theme.js there: a forced theme on `<html>` outranks `.dark` on the same element). The island has no shadow.
 - The rules (what the pill says, the peek queue, when the dock may close, which session it opens on) are pure functions in `src/web/dock-state.js`, unit tested; `src/web/dock.js` draws.
 
 ## Why
