@@ -129,3 +129,66 @@ export function move(list, from, to) {
   out.splice(to, 0, item);
   return out;
 }
+
+// ---------- the Setup section ----------
+
+const LAYOUT_NAMES = {
+  "windows-wsl": ["Windows with WSL", "The runner in WSL, the shell on Windows."],
+  macos: ["macOS", "The runner and the shell on this Mac."],
+  linux: ["Linux", "The runner and the shell on this machine."],
+};
+const OS_NAMES = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
+/**
+ * The Setup section's lines from GET /api/platform (null when it can't be had) and whether the runner
+ * answers now. Each line: { key, name, tone: "ok" | "off" | "bad" | "unknown", value, detail, action? }.
+ * `detail` says what it means, and what to do when the line isn't ok. `shell` is Settings.shell, for
+ * the hotkeys' keys. Screen Recording is a line only on macOS; the dock only when it is opaque.
+ */
+export function setupLines(platform, reachable, shell = null) {
+  const layout = platform?.layout ?? null;
+  const where = layout === "windows-wsl" ? "In WSL" : "In a terminal";
+  const lines = [];
+
+  if (!platform) lines.push({ key: "layout", name: "Layout", tone: "unknown", value: "Unknown", detail: "Shown once the runner answers." });
+  else if (layout && LAYOUT_NAMES[layout]) lines.push({ key: "layout", name: "Layout", tone: "ok", value: LAYOUT_NAMES[layout][0], detail: LAYOUT_NAMES[layout][1] });
+  else lines.push({ key: "layout", name: "Layout", tone: "bad", value: "Unknown", detail: "INTUITION_PLATFORM names no layout. Unset it, or set it to windows-wsl, macos or linux, then restart the runner: intuition stop, then intuition start." });
+
+  if (reachable && platform) lines.push({ key: "runner", name: "Runner", tone: "ok", value: "Running", detail: `Version ${platform.runner?.version ?? "unknown"}, on this machine's port.` });
+  else lines.push({ key: "runner", name: "Runner", tone: "bad", value: "Not reachable", detail: `Nothing answers on the runner's port. ${where}: intuition up` });
+
+  const known = reachable && platform !== null;
+  const connected = known && platform.shell?.connected === true;
+  const report = connected ? (platform.shell.report ?? null) : null;
+  if (!known) lines.push({ key: "shell", name: "Shell", tone: "unknown", value: "Unknown", detail: "Shown once the runner answers." });
+  else if (connected) lines.push({ key: "shell", name: "Shell", tone: "ok", value: "Running", detail: report ? `On ${OS_NAMES[report.os] ?? report.os}: the tray, the shortcuts and the dock.` : "It hasn't said how it is yet." });
+  else lines.push({ key: "shell", name: "Shell", tone: "bad", value: "Not running", detail: `The tray, the shortcuts and the dock need it. ${where}: intuition up (or intuition shell start)` });
+
+  const notYet = connected ? "It hasn't said yet." : "Shown while the shell runs.";
+  if (!report) lines.push({ key: "startOnLogin", name: "Start at login", tone: "unknown", value: "Unknown", detail: notYet });
+  else if (report.startOnLogin === true) lines.push({ key: "startOnLogin", name: "Start at login", tone: "ok", value: "On", detail: "The shell starts when you log in, and starts the runner." });
+  else if (report.startOnLogin === false) lines.push({ key: "startOnLogin", name: "Start at login", tone: "off", value: "Off", detail: "After a login nothing runs until you start it. Turn on Start at login below, or: intuition shell login on" });
+  else lines.push({ key: "startOnLogin", name: "Start at login", tone: "bad", value: "Can't be read", detail: `The shell could not read it. ${where}: intuition shell login status says why.` });
+
+  if (report) {
+    const missing = [["hotkey", "New task"], ["snipHotkey", "Snip"]].filter(([k]) => report.hotkeys?.[k] !== true);
+    if (missing.length === 0) lines.push({ key: "hotkeys", name: "Shortcuts", tone: "ok", value: "Registered", detail: "Both work from any program." });
+    else {
+      const names = missing.map(([k, name]) => (shell?.[k] ? `${name} (${keycaps(shell[k]).join("+")})` : name)).join(" and ");
+      const wayland = report.os === "linux" ? ", or the desktop refuses global shortcuts (Wayland: start the shell with DISPLAY set, or use the tray)" : "";
+      lines.push({ key: "hotkeys", name: "Shortcuts", tone: "bad", value: "Not registered", detail: `${names}: another program holds the keys${wayland}. Pick other keys under Shortcuts.` });
+    }
+    if (report.dockTransparent === false) {
+      lines.push({ key: "dock", name: "Dock", tone: "off", value: "Opaque", detail: "No compositor here, so the dock is a small solid window. A desktop that composites (GNOME, KDE, Xfce and others) shows it as an island; INTUITION_DOCK_OPAQUE=0 forces that." });
+    }
+  }
+
+  if (layout === "macos" || report?.os === "macos") {
+    const status = report?.screenRecording;
+    const action = connected && report?.os === "macos" ? "open_screen_recording" : undefined;
+    if (!report || status === undefined) lines.push({ key: "screenRecording", name: "Screen Recording", tone: "unknown", value: "Unknown", detail: `The snip needs it. ${notYet}` });
+    else if (status === "granted") lines.push({ key: "screenRecording", name: "Screen Recording", tone: "ok", value: "Allowed", detail: "The snip can see the screens." });
+    else lines.push({ key: "screenRecording", name: "Screen Recording", tone: "bad", value: "Not allowed", detail: "Until it is, a snip shows only the wallpaper. Open System Settings, allow Electron under Screen Recording, then quit the shell and start it again.", action });
+  }
+  return lines;
+}

@@ -2,7 +2,8 @@
 // with PUT /api/settings (the whole Settings each time), a quiet "Saved", and a 400's error shown
 // at the field it names (docs/protocol.md, "Settings"). Other windows' changes arrive as
 // { type: "settings" } on /ws. The theme is applied by theme.js, at once on a choice here.
-import { fieldKeys, isDraft, keycaps, move, putBody, recordKey } from "./settings-model.js";
+// The Setup section is GET /api/platform, followed by { type: "platform" } on /ws ("Platform").
+import { fieldKeys, isDraft, keycaps, move, putBody, recordKey, setupLines } from "./settings-model.js";
 
 const $ = (id) => document.getElementById(id);
 const main = document.querySelector(".settings");
@@ -20,6 +21,9 @@ let saving = false;
 let again = false;
 /** The shortcut being recorded ("hotkey" or "snipHotkey"), or null. */
 let recording = null;
+/** GET /api/platform's answer, or null before it; and whether the runner answers now (its socket is open). */
+let platform = null;
+let reachable = true;
 
 const UNREACHABLE = "the runner is not reachable";
 
@@ -134,7 +138,52 @@ function render() {
   for (const input of document.querySelectorAll('input[name="permissionMode"]')) input.checked = input.value === state.permissionMode;
   renderWorkspaces();
   renderShell();
+  renderSetup();
   $("port").textContent = String(state.port ?? "");
+}
+
+const setupList = $("setup");
+const setupTemplate = $("setup-row");
+
+function renderSetup() {
+  const lines = setupLines(platform, reachable, state?.shell ?? null);
+  while (setupList.children.length > lines.length) setupList.lastElementChild.remove();
+  while (setupList.children.length < lines.length) setupList.append(setupTemplate.content.firstElementChild.cloneNode(true));
+  lines.forEach((line, i) => {
+    const li = setupList.children[i];
+    li.dataset.setup = line.key;
+    li.dataset.tone = line.tone;
+    li.querySelector(".setup-name").textContent = line.name;
+    li.querySelector(".setup-detail").textContent = line.detail;
+    li.querySelector(".setup-value").textContent = line.value;
+    const button = li.querySelector(".setup-action");
+    button.hidden = !line.action;
+    button.dataset.action = line.action ?? "";
+  });
+}
+
+setupList.addEventListener("click", async (e) => {
+  const button = e.target.closest(".setup-action");
+  if (!button || button.dataset.action !== "open_screen_recording") return;
+  const error = $("setup-error");
+  button.disabled = true;
+  const res = await api("/api/platform/open-screen-recording", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  button.disabled = false;
+  if (res.ok) {
+    error.hidden = true;
+    showStatus("Opened System Settings", "saved");
+  } else {
+    error.textContent = `System Settings wasn't opened: ${res.body?.error ?? `the runner answered ${res.status}`}.`;
+    error.hidden = false;
+  }
+});
+
+async function loadPlatform() {
+  const res = await api("/api/platform");
+  // An older runner has no such route: the section says it can't tell.
+  platform = res.ok && res.body?.runner ? res.body : null;
+  reachable = res.status !== 0;
+  renderSetup();
 }
 
 function renderWorkspaces() {
@@ -343,7 +392,10 @@ function connect() {
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
   ws.addEventListener("open", () => {
     // What changed while the page was away (and the first load, when the GET came too early).
-    if (attempt > 0) void load();
+    if (attempt > 0) {
+      void load();
+      void loadPlatform();
+    }
     attempt = 0;
   });
   ws.addEventListener("message", (e) => {
@@ -353,12 +405,21 @@ function connect() {
     } catch {
       return;
     }
+    if (message?.type === "platform" && message.platform) {
+      platform = message.platform;
+      reachable = true;
+      renderSetup();
+      return;
+    }
     // An echo of a PUT still under way is taken from its answer instead.
     if (message?.type !== "settings" || !message.settings || saving) return;
     adopt(message.settings);
     void loadExists();
   });
   ws.addEventListener("close", () => {
+    // The runner stopped, or restarted: the Setup section says so until the socket is back.
+    reachable = false;
+    renderSetup();
     setTimeout(connect, Math.min(5000, 500 * 2 ** attempt));
     attempt += 1;
   });
@@ -366,4 +427,5 @@ function connect() {
 
 void load();
 void loadVersion();
+void loadPlatform();
 connect();

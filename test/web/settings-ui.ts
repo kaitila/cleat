@@ -108,6 +108,15 @@ function invalid(s: Record<string, unknown>): { error: string; field: string } |
   return null;
 }
 
+/** GET /api/platform as the runner answers it: a Mac whose shell runs without Screen Recording. */
+let platform = {
+  layout: "macos",
+  runner: { running: true, version: "0.1.0" },
+  shell: { connected: true, report: { os: "macos", startOnLogin: false, hotkeys: { hotkey: true, snipHotkey: true }, dockTransparent: true, screenRecording: "denied", reportedAt: new Date().toISOString() } as Record<string, unknown> | null },
+};
+/** How many times the page asked the shell to open Screen Recording's pane. */
+let screenOpens = 0;
+
 const sockets = new Set<ServerWebSocket<unknown>>();
 const broadcast = () => {
   for (const ws of sockets) ws.send(JSON.stringify({ type: "settings", settings: stored }));
@@ -145,6 +154,11 @@ const server = Bun.serve({
       stored = { ...(rest as unknown as Settings), port: stored.port };
       broadcast();
       return json(stored);
+    }
+    if (path === "/api/platform" && req.method === "GET") return json(platform);
+    if (path === "/api/platform/open-screen-recording" && req.method === "POST") {
+      screenOpens++;
+      return json({ sent: true }, 202);
     }
     if (path === "/api/workspaces") return json({ workspaces: stored.workspaces.map((w) => ({ ...w, exists: existsSync(w.path) })), lastUsed: null });
     if (path === "/api/clipboard") return json({});
@@ -393,6 +407,28 @@ try {
     const box = await snip.evaluate(() => getComputedStyle(document.querySelector("#box")!).backgroundColor);
     check(`snip (${scheme}): the box is in the scheme's surface`, box === (scheme === "light" ? WHITE : "rgb(27, 27, 30)"), box);
     await shot(snip, `snip-${scheme}`);
+  }
+
+  // ---------- the Setup section ----------
+  {
+    const p = await open("/assets/settings.html", "light");
+    await loaded(p);
+    const lines = () => p.evaluate(() => [...document.querySelectorAll("#setup [data-setup]")].map((li) => ({ key: (li as HTMLElement).dataset.setup, tone: (li as HTMLElement).dataset.tone, button: !(li.querySelector(".setup-action") as HTMLElement).hidden })));
+    await until("setup: layout, runner, shell, start at login, shortcuts and Screen Recording", async () => (await lines()).map((l) => l.key).join() === "layout,runner,shell,startOnLogin,hotkeys,screenRecording", () => lines());
+    const screen = (await lines()).find((l) => l.key === "screenRecording");
+    check("setup: Screen Recording is not ok and has its button", screen?.tone === "bad" && screen.button === true, JSON.stringify(screen));
+    await shot(p, "settings-setup-light");
+    await p.click('#setup [data-setup="screenRecording"] .setup-action');
+    await until("setup: the button asks the runner to have the shell open System Settings", () => screenOpens === 1, () => screenOpens);
+    // The shell reports again (granted now): the line follows the platform message.
+    platform = { ...platform, shell: { connected: true, report: { ...platform.shell.report!, screenRecording: "granted", startOnLogin: true } } };
+    for (const ws of sockets) ws.send(JSON.stringify({ type: "platform", platform }));
+    await until("setup: a platform message redraws it, all ok", async () => (await lines()).every((l) => l.tone === "ok" && !l.button), () => lines());
+    // The shell quits.
+    platform = { ...platform, shell: { connected: false, report: null } };
+    for (const ws of sockets) ws.send(JSON.stringify({ type: "platform", platform }));
+    await until("setup: without the shell, it says so", async () => (await lines()).find((l) => l.key === "shell")?.tone === "bad", () => lines());
+    await shot(p, "settings-setup-no-shell");
   }
 
   // ---------- screenshots of the settings page ----------

@@ -36,18 +36,23 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 | `GET /api/clipboard/image` | | The latest capture's PNG (`image/png`), for the pop-up's thumbnail. 404 when the latest capture has no image or its file is gone. The request names no file. |
 | `GET /api/settings` | | `Settings`. See "Settings". |
 | `PUT /api/settings` | `SettingsRequest` | 200 the stored `Settings`, after the file is written and the change is in effect. 400 `SettingsErrorResponse` `{ error, field }` naming the first bad field as a dotted path (`"theme"`, `"workspaces.1.path"`, `""` for the body itself); the file is untouched. See "Settings". |
+| `GET /api/platform` | | `PlatformResponse`: the layout, the runner, and the shell as it last reported. See "Platform". |
+| `PUT /api/platform/shell` | `ShellReport` | 200 `PlatformResponse`. Sent by the shell. 400 naming the first bad field. See "Platform". |
+| `POST /api/platform/open-screen-recording` | `{}` | 202 `SentResponse` `{ sent: true }`: the shell is asked to open System Settings at Screen Recording. 409 `NO_MAC_SHELL` when no shell on macOS is connected. See "Platform". |
 | `GET /api/notifications?after=<seq>` | | `NotificationsResponse`: the kept notifications with a higher seq, and the newest seq given out. For a client that polls; the dock gets them on the WebSocket. |
 
 Every `/api/sessions/:id/...` route answers 404 for an unknown session. Rename, stop, archive, pin, fork and delete take a JSON object body (`{}` when there is nothing to say) and pass the port's guard as every route does.
 
 ## WebSocket
-`GET /ws`. The runner sends `ServerMessage`s; clients send nothing.
+`GET /ws`. The runner sends `ServerMessage`s; clients send nothing. The shell connects as `GET /ws?client=shell` (see "Platform").
 - On connect: `hello` with every session.
 - `session` whenever a session's metadata changes (status, title, lastSeq, archived, pinned). `hello` and `session` carry archived sessions too, with `archived: true`: the pages leave them out of their lists themselves.
 - `removed` when a session was deleted: its record and events are gone.
 - `event` for every stored event, for all sessions. A client that reconnects fetches what it missed with `GET /api/sessions/:id/events?after=<seq>`.
 - `delta` for assistant text as it streams. Deltas aren't stored; the complete text follows as an `assistant_text` event, and the client replaces the streamed text with it.
 - `settings` with the whole `Settings` after every change (`PUT /api/settings`). Not sent on connect: a client reads `GET /api/settings` when it loads.
+- `platform` with the whole `PlatformResponse` whenever the shell's side changes: a report, a shell socket opening, the last one closing.
+- `shell_action` (`{ action: "open_screen_recording" }`) only to the shell's sockets, never to the pages' (see "Platform").
 - `notification` for each `Notification`, at the moment it is recorded. None is sent again on connect: a client shows only what arrives while it is connected. It follows the `session` message that carries the status it is about (`waiting_approval`, `idle` or `error`).
 
 ## Sessions and events
@@ -141,6 +146,14 @@ The runner owns the user's settings ([D0022](decisions/D0022-runner-owns-the-set
 - a workspace `path` that isn't absolute (after `~/`) or isn't an existing folder. A path the current settings already have is not checked again, so a folder that went missing doesn't block other changes.
 
 On success it writes the file atomically (a temp file beside it, renamed over it), keeping every key it doesn't know, at the top and on a workspace of the same name, and the file's `port`. The change is in effect at once: `GET /api/workspaces`, new sessions and the next turn of every session use the new workspaces and modes. Then every client gets a `settings` message. A hand edit to the file applies when the runner restarts, as before; a PUT made before then overwrites the keys it knows.
+
+## Platform
+The settings page's Setup section ([D0025](decisions/D0025-setup-section.md)).
+- `GET /api/platform` answers `PlatformResponse = { layout, runner: { running: true, version }, shell: { connected, report } }`. `layout` is `detectLayout`'s (`src/shell/platform.ts`): `windows-wsl`, `macos` or `linux`, `null` only when `INTUITION_PLATFORM` names none. The runner is running, since it answers.
+- **The shell's socket.** The shell's settings socket is `/ws?client=shell`. `shell.connected` is true while at least one such socket is open. `shell.report` is the shell's last report with `reportedAt`, kept while it is connected: `null` before the first report and once the last shell socket closed.
+- **The report.** `PUT /api/platform/shell` with `ShellReport = { os, startOnLogin, hotkeys: { hotkey, snipHotkey }, dockTransparent, screenRecording? }`: the OS the shell runs on (`windows`, `macos`, `linux`); start on login as set now (`null` when it could not be read); whether each hotkey of the settings is registered now; whether the dock is transparent; and on macOS only `systemPreferences.getMediaAccessStatus("screen")` (`granted`, `denied`, `not-determined`, `restricted`, `unknown`), dropped from another OS's report. Unknown keys are a 400. The shell sends it when its socket opens and whenever it changes (a settings change, a Screen Recording check, `--login`, the Settings window getting the focus).
+- **Open System Settings.** The page cannot open `x-apple.systempreferences:` links. `POST /api/platform/open-screen-recording` sends `{ type: "shell_action", action: "open_screen_recording" }` to the shell's sockets, which opens its own `SCREEN_RECORDING_PANE`; no URL is sent. 409 `NO_MAC_SHELL` when no shell is connected or its report is not from macOS.
+- **The page** draws one line each for the layout, the runner, the shell, start at login and the shortcuts (once the shell has reported), the dock when it is opaque, and on macOS Screen Recording with an Open System Settings button while it is not allowed. A line that is not ok says what to do (`setupLines` in `src/web/settings-model.js`). The runner shows as not reachable while the page's socket is closed.
 
 ## Guarding the port
 The runner binds `127.0.0.1` only. A web page in any browser can still send requests to a local port, so every request is checked:

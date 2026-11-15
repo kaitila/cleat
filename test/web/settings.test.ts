@@ -4,7 +4,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fieldKeys, isDraft, keycaps, keyOf, move, putBody, recordKey } from "../../src/web/settings-model.js";
+import { fieldKeys, isDraft, keycaps, keyOf, move, putBody, recordKey, setupLines } from "../../src/web/settings-model.js";
+import type { PlatformResponse, ShellReport } from "../../src/shared/protocol";
 import { testRunner } from "../runner/helpers";
 
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
@@ -87,10 +88,104 @@ describe("saving", () => {
   });
 });
 
+describe("the Setup section", () => {
+  const report = (r: Partial<ShellReport> = {}): PlatformResponse["shell"]["report"] => ({
+    os: "macos", startOnLogin: true, hotkeys: { hotkey: true, snipHotkey: true }, dockTransparent: true, screenRecording: "granted", reportedAt: "2026-11-15T00:00:00.000Z", ...r,
+  });
+  const platform = (layout: PlatformResponse["layout"], shell: PlatformResponse["shell"] = { connected: false, report: null }): PlatformResponse => ({ layout, runner: { running: true, version: "0.1.0" }, shell });
+  const byKey = (lines: ReturnType<typeof setupLines>) => Object.fromEntries(lines.map((l) => [l.key, l]));
+
+  test("all well on a Mac: the layout, runner, shell, start at login, shortcuts and Screen Recording, each ok", () => {
+    const lines = setupLines(platform("macos", { connected: true, report: report() }), true);
+    expect(lines.map((l) => l.key)).toEqual(["layout", "runner", "shell", "startOnLogin", "hotkeys", "screenRecording"]);
+    expect(lines.every((l) => l.tone === "ok")).toBe(true);
+    expect(lines.some((l) => l.action)).toBe(false);
+  });
+
+  test("Screen Recording missing: bad, says what to do, and has the button while the shell runs", () => {
+    const line = byKey(setupLines(platform("macos", { connected: true, report: report({ screenRecording: "denied" }) }), true)).screenRecording!;
+    expect(line.tone).toBe("bad");
+    expect(line.detail).toContain("System Settings");
+    expect(line.detail).toContain("Electron");
+    expect(line.action).toBe("open_screen_recording");
+  });
+
+  test("no shell: it says how to start it, and what it would report is unknown, with no button", () => {
+    const lines = byKey(setupLines(platform("macos"), true));
+    expect(lines.shell!.tone).toBe("bad");
+    expect(lines.shell!.detail).toContain("intuition up");
+    expect(lines.startOnLogin!.tone).toBe("unknown");
+    expect(lines.screenRecording!.tone).toBe("unknown");
+    expect(lines.screenRecording!.action).toBeUndefined();
+    expect(lines.hotkeys).toBeUndefined();
+  });
+
+  test("windows-wsl and linux have no Screen Recording line; WSL's fixes say In WSL", () => {
+    const wsl = byKey(setupLines(platform("windows-wsl"), true));
+    expect(wsl.layout!.value).toBe("Windows with WSL");
+    expect(wsl.shell!.detail).toContain("In WSL");
+    expect(wsl.screenRecording).toBeUndefined();
+    const linux = byKey(setupLines(platform("linux", { connected: true, report: report({ os: "linux", screenRecording: undefined }) }), true));
+    expect(linux.screenRecording).toBeUndefined();
+    expect(linux.shell!.detail).toContain("Linux");
+  });
+
+  test("start at login off, or unreadable: says how to turn it on, or how to find out why", () => {
+    const off = byKey(setupLines(platform("linux", { connected: true, report: report({ os: "linux", startOnLogin: false }) }), true)).startOnLogin!;
+    expect(off.tone).toBe("off");
+    expect(off.detail).toContain("intuition shell login on");
+    const unread = byKey(setupLines(platform("linux", { connected: true, report: report({ os: "linux", startOnLogin: null }) }), true)).startOnLogin!;
+    expect(unread.tone).toBe("bad");
+    expect(unread.detail).toContain("intuition shell login status");
+  });
+
+  test("a hotkey not registered names it with its keys; an opaque dock gets a line", () => {
+    const lines = byKey(setupLines(platform("linux", { connected: true, report: report({ os: "linux", hotkeys: { hotkey: true, snipHotkey: false }, dockTransparent: false }) }), true, { hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S" }));
+    expect(lines.hotkeys!.tone).toBe("bad");
+    expect(lines.hotkeys!.detail).toContain("Snip (Ctrl+Alt+S)");
+    expect(lines.hotkeys!.detail).not.toContain("New task");
+    expect(lines.dock!.tone).toBe("off");
+  });
+
+  test("the runner not reachable, or no platform answer: the runner is bad and the rest unknown", () => {
+    for (const lines of [byKey(setupLines(platform("macos", { connected: true, report: report() }), false)), byKey(setupLines(null, false))]) {
+      expect(lines.runner!.tone).toBe("bad");
+      expect(lines.runner!.detail).toContain("intuition up");
+      expect(lines.shell!.tone).toBe("unknown");
+    }
+  });
+
+  test("a layout the runner can't name says how to fix INTUITION_PLATFORM", () => {
+    const line = byKey(setupLines(platform(null), true)).layout!;
+    expect(line.tone).toBe("bad");
+    expect(line.detail).toContain("INTUITION_PLATFORM");
+  });
+
+  test("every line that isn't ok says what to do", () => {
+    const cases = [
+      setupLines(null, false),
+      setupLines(platform("macos"), true),
+      setupLines(platform("macos", { connected: true, report: report({ startOnLogin: false, hotkeys: { hotkey: false, snipHotkey: false }, screenRecording: "not-determined" }) }), true),
+      setupLines(platform("linux", { connected: true, report: report({ os: "linux", dockTransparent: false, startOnLogin: null }) }), true),
+    ];
+    for (const line of cases.flat()) {
+      expect({ key: line.key, detail: line.detail.length > 10 }).toEqual({ key: line.key, detail: true });
+    }
+  });
+
+  test("the page has the section's list and its row, and draws it through setupLines", () => {
+    expect(html).toContain('id="setup"');
+    expect(html).toContain('id="setup-row"');
+    const js = readFileSync(join(WEB, "settings.js"), "utf8");
+    expect(js).toContain("/api/platform");
+    expect(js).toContain("/api/platform/open-screen-recording");
+  });
+});
+
 describe("the page", () => {
   test("has every section the task names, in order", () => {
     const sections = [...html.matchAll(/<h2 id="h-[a-z]+" class="label">([^<]+)<\/h2>/g)].map((m) => m[1]);
-    expect(sections).toEqual(["Workspaces", "Sessions", "Appearance", "Shortcuts", "Dock", "Startup", "About"]);
+    expect(sections).toEqual(["Setup", "Workspaces", "Sessions", "Appearance", "Shortcuts", "Dock", "Startup", "About"]);
   });
 
   test("has a control for every setting of the contract, each named for the 400's field", () => {

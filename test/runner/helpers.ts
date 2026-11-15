@@ -72,9 +72,9 @@ export interface Socket {
   close(): void;
 }
 
-/** Connects to /ws and resolves once `hello` has arrived. */
-export async function connect(runner: Runner): Promise<Socket> {
-  const ws = new WebSocket(`ws://127.0.0.1:${runner.port}/ws`);
+/** Connects to /ws (with `query`, e.g. "?client=shell" as the shell does) and resolves once `hello` has arrived. */
+export async function connect(runner: Runner, query = ""): Promise<Socket> {
+  const ws = new WebSocket(`ws://127.0.0.1:${runner.port}/ws${query}`);
   const messages: ServerMessage[] = [];
   const waiting = new Set<() => void>();
   ws.onmessage = (e) => {
