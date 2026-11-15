@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="/assets/theme.js"></script>
   <title>intuition settings</title>
-  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/base.css">
   <link rel="stylesheet" href="/assets/settings.css">
   <script type="module" src="/assets/settings.js"></script>
 </head>
-<body>
+<body class="backdrop">
   <main class="settings" aria-busy="true">
     <header class="head">
       <h1 class="title">Settings</h1>
@@ -20,7 +20,7 @@
 
     <section class="section" aria-labelledby="h-setup">
       <h2 id="h-setup" class="label">Setup</h2>
-      <div class="card">
+      <div class="card glass">
         <ul id="setup" class="setup" aria-label="Setup"></ul>
       </div>
       <p id="setup-error" class="field-error small" role="alert" hidden></p>
@@ -28,7 +28,7 @@
 
     <section class="section" aria-labelledby="h-workspaces">
       <h2 id="h-workspaces" class="label">Workspaces</h2>
-      <div class="card" data-field="workspaces">
+      <div class="card glass" data-field="workspaces">
         <ol id="workspaces" class="workspaces" aria-label="Workspaces"></ol>
         <p id="workspaces-empty" class="empty muted small" hidden>No workspaces yet. Add the folder of a project Claude should work in.</p>
         <div class="card-foot">
@@ -41,7 +41,7 @@
 
     <section class="section" aria-labelledby="h-sessions">
       <h2 id="h-sessions" class="label">Sessions</h2>
-      <div class="card">
+      <div class="card glass">
         <div class="setting">
           <div class="setting-text">
             <span class="strong" id="mode-name">Permission mode</span>
@@ -81,7 +81,7 @@
     <!-- Shortcuts, Dock and Startup are the Windows shell's: off until it has sent its values once. -->
     <section class="section" aria-labelledby="h-shortcuts">
       <h2 id="h-shortcuts" class="label">Shortcuts</h2>
-      <div class="card">
+      <div class="card glass">
         <div class="setting">
           <div class="setting-text">
             <span class="strong" id="hotkey-name">New task</span>
@@ -104,7 +104,7 @@
 
     <section class="section" aria-labelledby="h-dock">
       <h2 id="h-dock" class="label">Dock</h2>
-      <div class="card">
+      <div class="card glass">
         <label class="setting">
           <span class="setting-text">
             <span class="strong">Show the dock</span>
@@ -118,7 +118,7 @@
 
     <section class="section" aria-labelledby="h-startup">
       <h2 id="h-startup" class="label">Startup</h2>
-      <div class="card">
+      <div class="card glass">
         <label class="setting">
           <span class="setting-text">
             <span class="strong">Start at login</span>
@@ -134,7 +134,7 @@
 
     <section class="section" aria-labelledby="h-about">
       <h2 id="h-about" class="label">About</h2>
-      <div class="card">
+      <div class="card glass">
         <dl class="about">
           <div class="setting"><dt>Version</dt><dd id="version" class="num muted">…</dd></div>
           <div class="setting"><dt>Port</dt><dd id="port" class="num muted">…</dd></div>

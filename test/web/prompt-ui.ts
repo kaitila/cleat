@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { EventsResponse, SessionsResponse, WorkspacesResponse } from "../../src/shared/protocol";
 import { loadConfig } from "../../src/runner/config";
 import { startServer } from "../../src/runner/server";
-import { frameStrip, pauseAll, type FramePage } from "./motion-frames";
+import { atRest, frameStrip, pauseAll, type FramePage } from "./motion-frames";
 
 // The little of playwright's API this script uses (the package isn't a dependency, so no types).
 interface Page {
@@ -165,7 +165,7 @@ const blank = async () => (await (await browser.newContext({ viewport: { width: 
 const TIMES = [0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 350];
 
 async function shot(page: Page, name: string): Promise<void> {
-  await page.evaluate(() => document.fonts.ready);
+  await atRest(page as unknown as FramePage);
   const path = join(shots, `${name}.png`);
   await page.screenshot({ path });
   console.log(`screenshot: ${path}`);
@@ -182,9 +182,9 @@ try {
   check("the clipboard element is there, empty and hidden", s.clipboardHidden);
   check("no scrollbars at 560x380", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
   await shot(page, "light-empty");
-  const fonts = await page.evaluate(() => document.fonts.check('13px "Inter Variable"'));
-  check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/inter-latin.woff2"), requested.join(" "));
-  const hairline = () => getComputedStyle(document.querySelector("#workspaces")!).borderBottomWidth;
+  const fonts = await page.evaluate(() => document.fonts.check('13px "Geist Variable"'));
+  check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-latin.woff2"), requested.join(" "));
+  const hairline = () => getComputedStyle(document.querySelector("#workspaces .workspace span")!).borderBottomWidth;
   check("a hairline is 1px where a CSS pixel is one device pixel", (await page.evaluate(hairline)) === "1px", await page.evaluate(hairline));
 
   await page.keyboard.press("Enter");
@@ -308,7 +308,7 @@ try {
   await shot(withText, "light-clipboard-text");
   check(
     "the code font is loaded for the clipboard text, from the runner's /assets/fonts",
-    (await withText.evaluate(() => document.fonts.check('12px "JetBrains Mono Variable"'))) && requested.some((u) => new URL(u).pathname === "/assets/fonts/jetbrains-mono-latin.woff2"),
+    (await withText.evaluate(() => document.fonts.check('12px "Geist Mono Variable"'))) && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-mono-latin.woff2"),
   );
   const sent = await send(withText, "Explain this code");
   const sentUser = sent ? await userTexts(sent.id) : [];
@@ -397,7 +397,7 @@ try {
     await twice.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
     await twice.keyboard.type("Rename the config loader and update its tests");
     s = await twice.evaluate(state);
-    const width = await twice.evaluate(() => `${devicePixelRatio} ${getComputedStyle(document.querySelector("#workspaces")!).borderBottomWidth}`);
+    const width = await twice.evaluate(() => `${devicePixelRatio} ${getComputedStyle(document.querySelector("#workspaces .workspace span")!).borderBottomWidth}`);
     check(`at 2x (${scheme}) a hairline is 0.5px and nothing scrolls`, width === "2 0.5px" && !s.overflow && s.gutter === 0, `${width} ${JSON.stringify({ overflow: s.overflow, gutter: s.gutter })}`);
     await shot(twice, `${scheme}-2x`);
     await twice.close();

@@ -1,10 +1,11 @@
 /* The snip overlay: one window over a whole display. The frozen screen, a dim over all of it but
    the selection, the selection's hairline, its size, and the prompt box beside it. Layout only:
-   every colour, size, radius and border is a token or a component of base.css (docs/design.md). */
+   every colour, size, radius and border is a token or a component of base.css (docs/design.md).
+   It is Glass (D0028): a grained dim, a softly glowing edge, and a floating frosted box. */
 html, body { overflow: hidden; }
 body.snip {
   position: relative;
-  background: var(--sunken);
+  background: var(--bg);
   cursor: crosshair;
   user-select: none;
 }
@@ -17,16 +18,18 @@ body.snip {
   pointer-events: none;
 }
 
-/* The dim: the dark scheme's back surface at about half, a little more than a plain dim so the
-   selection stands out. snip.js cuts the selection out of it with a clip-path, so the selection
-   shows the screen as it is. It fades in fast once the capture is up. */
+/* The dim: the dark scheme's ground at about half, with the backdrop's grain in it (a little less,
+   as under a dim), so the selection, which has none, stands out. snip.js cuts the selection out of
+   it with a clip-path, so the selection shows the screen as it is. It fades in fast once the
+   capture is up. */
 .shade {
   position: fixed;
   inset: 0;
-  background: var(--sunken);
+  background: var(--bg);
   opacity: var(--snip-dim);
   pointer-events: none;
 }
+.shade::after { content: ""; position: absolute; inset: 0; background: var(--grain); opacity: var(--grain-dim); mix-blend-mode: overlay; }
 body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backwards; }
 
 /* The selection's edge: a light neutral hairline of one device pixel, just outside it, so every
@@ -59,11 +62,12 @@ body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backward
 /* A selection too small for its marks shows its edge alone. */
 .selection[data-small] .corner { display: none; }
 
-/* Its size in device pixels, small, at its top left corner: the same neutral light on a dark veil. */
+/* Its size in device pixels, small, at its top left corner: the same neutral light on a pill of
+   light glass, in the mono face (.mono in the markup). */
 .size {
   position: fixed;
-  padding: 0 var(--space-1);
-  border-radius: var(--radius-s);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
   background: var(--snip-label);
   color: var(--snip-mark);
   font-size: var(--text-xs);
@@ -84,27 +88,25 @@ body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backward
   gap: var(--space-2);
   padding: var(--space-1) var(--space-3);
   border: var(--hairline) solid var(--line-strong);
-  border-radius: var(--radius);
-  background: var(--sunken);
+  border-radius: var(--radius-pill);
+  background: var(--glass-float);
+  box-shadow: var(--shadow);
   color: var(--text);
   white-space: nowrap;
   pointer-events: none;
 }
 .hint[data-kind="error"] { border-color: var(--danger); }
 
-/* The prompt box: it floats above the screen, so it has the shadow. snip.js places it, centred
-   on the selection, and sets data-in when it appears: it springs up from a little smaller and
-   lower, past its place and back, while the focus is already in its task box. */
+/* The prompt box: floating glass (.glass-float), the frozen screen frosted behind it. snip.js
+   places it, centred on the selection, and sets data-in when it appears: it springs up from a
+   little smaller and lower, past its place and back, while the focus is already in its task box. */
 .box {
   position: fixed;
   display: flex;
   flex-direction: column;
   width: calc(var(--space-6) * 10);
   max-width: calc(100vw - var(--space-2) * 2);
-  border: var(--hairline) solid var(--line-strong);
   border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow);
   cursor: auto;
   user-select: text;
   overflow: hidden;
@@ -117,7 +119,7 @@ body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backward
   width: 100%;
   min-height: calc(var(--text-m) * var(--leading) + var(--space-3) * 2);
   max-height: calc(var(--text-m) * var(--leading) * 5 + var(--space-3) * 2);
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-1);
   border: 0;
   background: transparent;
   resize: none;
@@ -132,21 +134,20 @@ body[data-ready] .shade { animation: dim-in var(--dur-fade) var(--ease) backward
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: calc(var(--control-s) + var(--space-1) * 2 + var(--hairline));
-  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1);
-  border-top: var(--hairline) solid var(--line);
-  background: var(--sunken);
+  min-height: calc(var(--control-s) + var(--space-2) * 2);
+  padding: var(--space-1) var(--space-3) var(--space-2) var(--space-2);
 }
-/* The workspace: one chip. Tab and Alt+1..9 switch it; so does a click. */
+/* The workspace: one inverse pill. Tab and Alt+1..9 switch it; so does a click. */
 button.chip {
   flex: none;
   max-width: 50%;
   gap: var(--space-2);
-  padding: 0 var(--space-1) 0 var(--space-2);
-  background: var(--selected);
-  color: var(--text);
+  padding: 0 var(--space-1) 0 var(--space-3);
+  background: var(--ink);
+  color: var(--ink-text);
 }
-button.chip:hover { background: var(--hover); }
+button.chip:hover { background: var(--ink); color: var(--ink-text); }
+.chip kbd { border-color: var(--ink-text); color: var(--ink-text); }
 .chip span { overflow: hidden; text-overflow: ellipsis; }
 .chip kbd { height: calc(var(--control-s) - var(--space-1)); }
 .status {
@@ -165,7 +166,8 @@ button.chip:hover { background: var(--hover); }
 body[data-closing] :is(.shade, .selection, .size, .hint, .box) { animation: fade-out var(--dur-out) var(--ease) forwards; }
 
 @keyframes dim-in { from { opacity: 0; } }
-@keyframes fade-in { from { opacity: 0; } }
+/* The fade in clears a blur as it goes. */
+@keyframes fade-in { from { opacity: 0; filter: var(--blur-in); } }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes box-pop { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
 /* Each corner mark comes in from a few pixels out along its diagonal. */

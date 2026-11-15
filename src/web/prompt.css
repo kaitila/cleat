@@ -1,14 +1,19 @@
-/* The pop-up prompt: a 560x380 window. A row of workspaces, a hairline, the task box, a
-   hairline, one quiet line. Layout only: every colour, size, radius and border is a token or a
-   component of base.css (docs/design.md). */
+/* The pop-up prompt: a 560x380 window. One floating glass card (D0028): a row of workspace pills,
+   the task box, the clipboard, one quiet line. Layout only: every colour, size, radius and border
+   is a token or a component of base.css (docs/design.md). The page itself is clear: the shell makes
+   the window see-through and the card floats over the desktop. */
+html, body { background: transparent; }
 body { overflow: hidden; }
-/* The window's contents grow into place on the gentle spring as it opens: half the pop, from the
-   middle, so nothing passes the window's edge (a rise would, and the page would scroll). */
+/* The window's contents grow into place on the gentle spring as it opens, coming into focus as they
+   fade in: half the pop, from the middle, so nothing passes the window's edge (a rise would, and
+   the page would scroll; a bouncy overshoot would be cut off by it). */
 .prompt {
   height: 100%;
   display: flex;
   flex-direction: column;
-  animation: page-in var(--dur-gentle) var(--ease-gentle) backwards, fade-in var(--dur-fade) var(--ease) backwards;
+  border-radius: var(--radius-l);
+  overflow: hidden;
+  animation: page-in var(--dur-gentle) var(--ease-gentle) backwards, fade-in calc(var(--dur-fade) * 2) var(--ease) backwards;
 }
 
 /* Workspaces: real radio buttons (Tab and the arrow keys work), drawn as chips with their key. */
@@ -17,21 +22,20 @@ body { overflow: hidden; }
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-1);
-  min-height: calc(var(--control) + var(--space-3) * 2 + var(--hairline));
-  padding: var(--space-3);
-  border-bottom: var(--hairline) solid var(--line);
+  min-height: calc(var(--control) + var(--space-3) * 2);
+  padding: var(--space-3) var(--space-3) var(--space-1);
   position: relative;
 }
 .workspace { position: relative; z-index: 1; display: inline-flex; }
-/* The chosen workspace's background: one mark behind the chips that prompt.js moves to the chip
-   chosen, with a transform only, on the bouncy spring, so the choice slides across. */
+/* The chosen workspace's background: one inverse pill behind the chips that prompt.js moves to the
+   chip chosen, with a transform only, on the bouncy spring, so the choice slides across. */
 .workspace-mark {
   position: absolute;
   top: 0;
   left: 0;
   height: var(--control);
-  border-radius: var(--radius-s);
-  background: var(--selected);
+  border-radius: var(--radius-pill);
+  background: var(--ink);
   transform-origin: 0 0;
   pointer-events: none;
 }
@@ -50,16 +54,17 @@ body { overflow: hidden; }
   height: var(--control);
   padding: 0 var(--space-3) 0 var(--space-1);
   border: var(--hairline) solid transparent;
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
   color: var(--muted);
   font-weight: var(--medium);
   transition: background-color var(--motion) var(--ease), color var(--motion) var(--ease);
 }
-.workspace input:hover:not(:disabled) + span { background: var(--hover); }
-.workspace input:checked + span { color: var(--text); }
+.workspace input:hover:not(:disabled) + span { background: var(--hover); color: var(--text); }
+.workspace input:checked + span, .workspace input:checked:hover + span { background: transparent; color: var(--ink-text); }
 /* Until the mark is placed (or without script) the chip carries the background itself. */
-.workspaces:not([data-mark]) .workspace input:checked + span { background: var(--selected); }
-.workspace input:checked + span kbd { border-color: var(--muted); color: var(--text); }
+.workspaces:not([data-mark]) .workspace input:checked + span { background: var(--ink); }
+.workspace input:checked + span kbd { border-color: var(--ink-text); color: var(--ink-text); }
 .workspace input:focus-visible + span { outline: var(--ring) solid var(--accent); outline-offset: var(--hairline); }
 .workspace input:disabled { cursor: default; }
 .workspace input:disabled + span { opacity: 0.5; text-decoration: line-through; }
@@ -90,8 +95,9 @@ body { overflow: hidden; }
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
-  margin: 0 var(--space-3) var(--space-3);
+  margin: 0 var(--space-3) var(--space-2);
   padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border-radius: var(--radius-m);
 }
 /* It arrives (data-in) with a little spring, up from below. */
 .clipboard[data-in] { transform-origin: 50% 100%; animation: pop-in var(--dur-bouncy) var(--ease-bouncy) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
@@ -120,10 +126,8 @@ body { overflow: hidden; }
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  min-height: calc(var(--control-s) + var(--space-2) * 2 + var(--hairline));
-  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
-  border-top: var(--hairline) solid var(--line);
-  background: var(--sunken);
+  min-height: calc(var(--control-s) + var(--space-2) * 2);
+  padding: var(--space-1) var(--space-4) var(--space-3);
 }
 .status {
   min-width: 0;
@@ -139,7 +143,8 @@ body { overflow: hidden; }
 
 @keyframes page-in { from { transform: scale(calc((1 + var(--pop)) / 2)); } }
 @keyframes pop-in { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
-@keyframes fade-in { from { opacity: 0; } }
+/* The fade in clears a blur as it goes. */
+@keyframes fade-in { from { opacity: 0; filter: var(--blur-in); } }
 
 /* Reduced motion: base.css stops every animation; the fades come back, plain. The mark jumps. */
 @media (prefers-reduced-motion: reduce) {

@@ -7,8 +7,11 @@
    The window never changes size, and neither does any box in it. The island is one element as large
    as the window; what is seen of it is its clip-path, a rectangle hanging from the top centre whose
    size is --island-w by --island-h (set by dock.js). A change of state animates that clip and the
-   opacity and transform of the content, and nothing else: no layout on the way, no shadow, no
-   filter. */
+   opacity, transform and clearing blur of the content, and nothing else: no layout on the way.
+
+   It is Glass (D0028): a dark frosted drop. The frost itself is the OS's: the shell makes the
+   window see-through and blurs the desktop behind it, so the page draws the glass's tint and edge
+   and no backdrop-filter of its own (it would have nothing behind it to blur, and cost a frame). */
 html, body { background: transparent; overflow: hidden; }
 /* In the shell the window is exactly the island's box. In a browser it hangs from the top of the
    page, in the middle. */
@@ -20,87 +23,85 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 @property --island-w { syntax: "<length>"; inherits: false; initial-value: 0; }
 @property --island-h { syntax: "<length>"; inherits: false; initial-value: 0; }
 
-/* The island's own colour is its edge: the surface inside it is clipped one hairline smaller on the
-   three free sides, so a hairline of the island shows around it. The top is the screen's edge: the
-   clip's top inset is always 0, so no spring moves it. */
+/* The island's own colour is its edge, the glass's fine highlight: the surface inside it is clipped
+   one hairline smaller on the three free sides, so a hairline of the island shows around it. The
+   top is the screen's edge: the clip's top inset is always 0, so no spring moves it. Its bottom
+   corners are as round as half its height allows, up to the floating radius: a pill when idle or
+   peeking, a drop when open, and they follow the spring with the shape. */
 .island {
   position: relative;
   flex: none;
-  background: var(--line-strong);
-  clip-path: inset(0 calc((100% - var(--island-w)) / 2) calc(100% - var(--island-h)) calc((100% - var(--island-w)) / 2) round 0 0 var(--radius) var(--radius));
+  background: var(--glass-rim);
+  clip-path: inset(0 calc((100% - var(--island-w)) / 2) calc(100% - var(--island-h)) calc((100% - var(--island-w)) / 2) round 0 0 min(var(--island-h) / 2, var(--radius-l)) min(var(--island-h) / 2, var(--radius-l)));
   cursor: default;
 }
 .surface {
   position: absolute;
   inset: 0;
-  background: var(--sunken);
-  clip-path: inset(0 calc((100% - var(--island-w)) / 2 + var(--hairline)) calc(100% - var(--island-h) + var(--hairline)) calc((100% - var(--island-w)) / 2 + var(--hairline)) round 0 0 calc(var(--radius) - var(--hairline)) calc(var(--radius) - var(--hairline)));
+  background: var(--glass-float);
+  clip-path: inset(0 calc((100% - var(--island-w)) / 2 + var(--hairline)) calc(100% - var(--island-h) + var(--hairline)) calc((100% - var(--island-w)) / 2 + var(--hairline)) round 0 0 calc(min(var(--island-h) / 2, var(--radius-l)) - var(--hairline)) calc(min(var(--island-h) / 2, var(--radius-l)) - var(--hairline)));
 }
 /* Shrinking: it gathers back into the pill on the soft spring, narrowing a moment before it rises. */
 .island, .island > .surface {
-  transition: --island-w var(--dur-gentle) var(--ease-gentle), --island-h var(--dur-gentle) var(--ease-gentle) calc(var(--dur-gentle) / 10), opacity var(--motion) var(--ease);
+  transition: --island-w var(--dur-soft) var(--ease-soft), --island-h var(--dur-soft) var(--ease-soft) calc(var(--lag) * 0.75), opacity var(--motion) var(--ease);
 }
-/* Growing: a quick stretch down, the width a moment behind, both a little past their size and back.
-   The overshoot runs inside the window: open is as wide as the window, so there only the height
-   overshoots, and only when the panel is shorter than the window. */
+/* Growing: like a drop, it stretches down first and widens a moment later, both a little past their
+   size and back. The overshoot runs inside the window: open is as wide as the window, so there only
+   the height overshoots, and only when the panel is shorter than the window. */
 .island:is([data-state="peek"], [data-state="open"]),
 .island:is([data-state="peek"], [data-state="open"]) > .surface {
-  transition: --island-h var(--dur-bouncy) var(--ease-bouncy), --island-w var(--dur-bouncy) var(--ease-bouncy) calc(var(--dur-bouncy) / 10), opacity var(--motion) var(--ease);
+  transition: --island-h var(--dur-bouncy) var(--ease-bouncy), --island-w var(--dur-bouncy) var(--ease-bouncy) var(--lag), opacity var(--motion) var(--ease);
 }
-/* With nothing going on the sliver all but disappears: shorter (dock.js), its edge the quieter
-   hairline, and the whole of it faint. */
-.island[data-state="idle"][data-tone="none"] { background: var(--line); opacity: var(--island-quiet); }
+/* With nothing going on the sliver all but disappears: shorter (dock.js), and the whole of it faint. */
+.island[data-state="idle"][data-tone="none"] { opacity: var(--island-quiet); }
 
 /* Each state's content keeps its own full size and place, top centre, while the clip changes
-   around it, so nothing reflows on the way. It comes in once the shape is most of the way there,
-   and fades out at once. */
+   around it, so nothing reflows on the way. It scales in from a little small on the bouncy spring
+   a moment behind the shape, while its blur clears and it fades in, and fades out at once. */
 .layer {
   position: absolute;
   top: 0;
   left: 50%;
   translate: -50% 0;
 }
-/* Open: the panel drops in a little behind the shape. */
-.panel.layer { animation: layer-drop var(--dur-gentle) var(--ease-gentle) calc(var(--dur-bouncy) * 0.3) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) * 0.3) backwards; }
-/* Peek: the line pops in from the edge with a small bounce, then its words slide in after it. */
-.peek.layer { transform-origin: 50% 0; animation: peek-pop var(--dur-bouncy) var(--ease-bouncy) calc(var(--dur-bouncy) / 5) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) / 5) backwards; }
-.peek.layer > * { animation: slide-in var(--dur-gentle) var(--ease-gentle) calc(var(--dur-bouncy) / 4) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) / 4) backwards; }
-.peek.layer > :nth-child(2) { animation-delay: calc(var(--dur-bouncy) / 4 + var(--dur-snappy) / 6); }
-.peek.layer > :nth-child(3) { animation-delay: calc(var(--dur-bouncy) / 4 + var(--dur-snappy) / 3); }
-.peek.layer > :nth-child(4) { animation-delay: calc(var(--dur-bouncy) / 4 + var(--dur-snappy) / 2); }
+/* Open: the panel scales in from the top, a little behind the shape, as its blur clears. */
+.panel.layer { transform-origin: 50% 0; animation: layer-pop var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 2) backwards, layer-fade calc(var(--dur-fade) * 2) var(--ease) calc(var(--lag) * 3) backwards; }
+/* Peek: the line pops in from the edge with a bounce, then its words slide in after it, one by one. */
+.peek.layer { transform-origin: 50% 0; animation: layer-pop var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 2) backwards, layer-fade calc(var(--dur-fade) * 2) var(--ease) calc(var(--lag) * 3) backwards; }
+.peek.layer > * { animation: slide-in var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 3) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--lag) * 3) backwards; }
+.peek.layer > :nth-child(2) { animation-delay: calc(var(--lag) * 3 + var(--stagger)); }
+.peek.layer > :nth-child(3) { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 2); }
+.peek.layer > :nth-child(4) { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 3); }
 /* "needs you": once the words are in, its dot gives one gentle nudge. */
 .peek.layer[data-kind="needs_approval"] > .dot {
-  animation: slide-in var(--dur-gentle) var(--ease-gentle) calc(var(--dur-bouncy) / 4) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) / 4) backwards, nudge var(--dur-bouncy) var(--ease-gentle) calc(var(--dur-bouncy) / 4 + var(--dur-gentle));
+  animation: slide-in var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 3) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--lag) * 3) backwards, nudge var(--dur-bouncy) var(--ease-gentle) calc(var(--lag) * 3 + var(--dur-gentle));
 }
-/* Idle: the pill fades in once the shape has mostly gathered. */
-.pill.layer { animation: layer-fade var(--dur-fade) var(--ease) calc(var(--dur-gentle) / 2) backwards; }
+/* Idle: the pill fades in as the shape gathers. */
+.pill.layer { animation: layer-fade var(--dur-fade) var(--ease) calc(var(--dur-soft) / 3) backwards; }
 .layer.leaving { animation: layer-out var(--dur-out) var(--ease) forwards; pointer-events: none; }
-/* The pill's running dot breathes, slowly; a new "needs you" on the pill nudges its dot once (dock.js). */
-.pill .dot[data-status="running"] { animation: breathe calc(var(--dur-gentle) * 6) var(--ease-gentle) infinite alternate; }
+/* The pill's running dot breathes (base.css); a new "needs you" on the pill nudges its dot once (dock.js). */
 .pill .dot[data-nudge] { animation: nudge var(--dur-bouncy) var(--ease-gentle); }
 
-/* Open: the sessions and the selected session's newest events rise in, one after the other
-   (data-stagger, set by dock.js on what arrives together). One that arrives on its own rises at once. */
-.sessions > li, .stream > .arrive { animation: rise var(--dur-gentle) var(--ease-gentle) backwards, layer-fade var(--dur-fade) var(--ease) backwards; }
-.sessions > li[data-stagger] { animation-delay: calc(var(--dur-bouncy) * 0.3); }
-.sessions > li[data-stagger="1"], .stream > [data-stagger="1"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) / 6); }
-.sessions > li[data-stagger="2"], .stream > [data-stagger="2"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) / 3); }
-.sessions > li[data-stagger="3"], .stream > [data-stagger="3"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) / 2); }
-.sessions > li[data-stagger="4"], .stream > [data-stagger="4"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) * 2 / 3); }
-.sessions > li[data-stagger="5"], .stream > [data-stagger="5"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) * 5 / 6); }
-.stream > [data-stagger="0"] { animation-delay: calc(var(--dur-bouncy) * 0.3); }
-/* An approval card arrives with a small bounce. */
+/* Open: the sessions and the selected session's newest events arrive one after the other on the
+   bouncy spring (data-stagger, set by dock.js on what arrives together). One that arrives on its
+   own rises at once. */
+.sessions > li, .stream > .arrive { animation: rise var(--dur-bouncy) var(--ease-bouncy) backwards, layer-fade var(--dur-fade) var(--ease) backwards; }
+.sessions > li[data-stagger], .stream > [data-stagger="0"] { animation-delay: calc(var(--lag) * 3); }
+.sessions > li[data-stagger="1"], .stream > [data-stagger="1"] { animation-delay: calc(var(--lag) * 3 + var(--stagger)); }
+.sessions > li[data-stagger="2"], .stream > [data-stagger="2"] { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 2); }
+.sessions > li[data-stagger="3"], .stream > [data-stagger="3"] { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 3); }
+.sessions > li[data-stagger="4"], .stream > [data-stagger="4"] { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 4); }
+.sessions > li[data-stagger="5"], .stream > [data-stagger="5"] { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 5); }
+/* An approval card arrives with a bounce. */
 .stream > .approval.arrive { transform-origin: 50% 100%; animation-name: card-pop, layer-fade; animation-duration: var(--dur-bouncy), var(--dur-fade); animation-timing-function: var(--ease-bouncy), var(--ease); }
 
-@keyframes layer-drop { from { transform: translateY(calc(var(--space-1) * -1)); } }
-@keyframes peek-pop { from { transform: translateY(calc(var(--rise) * -1)) scale(var(--pop)); } }
+@keyframes layer-pop { from { transform: scale(var(--pop)); } }
 @keyframes slide-in { from { transform: translateX(calc(var(--rise) * -1)); } }
-@keyframes rise { from { transform: translateY(var(--rise)); } }
+@keyframes rise { from { transform: translateY(var(--rise)) scale(calc((1 + var(--pop)) / 2)); } }
 @keyframes card-pop { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
-@keyframes layer-fade { from { opacity: 0; } }
+/* The fade in clears a blur as it goes: the content comes into focus. */
+@keyframes layer-fade { from { opacity: 0; filter: var(--blur-in); } }
 @keyframes layer-out { to { opacity: 0; } }
-/* In and out: a breath is the dot drawing in and dimming, then back. */
-@keyframes breathe { to { transform: scale(0.72); opacity: var(--island-quiet); } }
 /* Up a little and back: twice the drawn size at most, for a moment. */
 @keyframes nudge { 35% { transform: scale(1.7); } }
 /* Reduced motion: the shape changes at once and the content fades in, plainly: no stagger, no
@@ -182,8 +183,8 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .msg { min-width: 0; overflow-wrap: anywhere; }
 .msg.user { align-self: flex-end; max-width: 85%; padding: var(--space-1) var(--space-3); white-space: pre-wrap; }
 .msg.user:not(:first-child) { margin-top: var(--space-2); }
-/* The dock is on the sunken surface: inline code sits on the page's. */
-.md :not(pre) > code { background: var(--bg); }
+/* Inline code on the dark glass: a little lighter than it. */
+.md :not(pre) > code { background: var(--surface); }
 .msg.streaming { color: var(--muted); }
 /* A tool call: one line, its name and what it works on. */
 .tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--control-s); }
@@ -210,9 +211,7 @@ body { display: flex; justify-content: center; align-items: flex-start; }
   display: grid;
   min-width: calc(var(--sidebar) / 2);
   padding: var(--space-1);
-  background: var(--surface);
-  border: var(--hairline) solid var(--line-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-m);
   animation: menu-in var(--dur-snappy) var(--ease-snappy);
 }
 @keyframes menu-in { from { opacity: 0; transform: scale(var(--pop)); } }

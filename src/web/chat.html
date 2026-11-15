@@ -5,14 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script src="/assets/theme.js"></script>
   <title>intuition</title>
-  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/assets/base.css">
   <link rel="stylesheet" href="/assets/chat.css">
   <script type="module" src="/assets/chat.js"></script>
 </head>
-<body>
+<body class="backdrop">
   <div class="app">
-    <nav class="sidebar" aria-label="Sessions">
+    <nav class="sidebar glass" aria-label="Sessions">
       <div class="sidebar-head">
         <span class="brand">intuition</span>
         <span class="sidebar-actions">
@@ -35,7 +35,7 @@
       <p id="undo" class="undo small" role="status" hidden></p>
       <p id="connection" class="connection muted small" role="status" hidden></p>
     </nav>
-    <main class="main">
+    <main class="main glass">
       <header id="head" class="head" hidden>
         <h1 id="title" class="title"></h1>
         <p id="meta" class="meta muted small">
@@ -58,7 +58,7 @@
       </form>
     </main>
   </div>
-  <dialog id="confirm" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <dialog id="confirm" class="confirm glass-float" aria-labelledby="confirm-title" aria-describedby="confirm-body">
     <form method="dialog" class="confirm-form">
       <h2 id="confirm-title" class="title"></h2>
       <p id="confirm-body" class="muted"></p>

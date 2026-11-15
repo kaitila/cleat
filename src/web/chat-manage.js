@@ -179,7 +179,7 @@ export async function manage(id, action, body = {}) {
  */
 export function sessionMenu(document, within = document.body) {
   const el = document.createElement("div");
-  el.className = "menu";
+  el.className = "menu glass-float";
   el.setAttribute("role", "menu");
   el.hidden = true;
   within.append(el);

@@ -807,7 +807,7 @@ try {
   const colours = (p: Any) => p.evaluate(() => [getComputedStyle(document.querySelector(".surface")!).backgroundColor, getComputedStyle(document.body).color]) as Promise<string[]>;
   const darkColours = await colours(k.page);
   await k.page.emulateMedia({ colorScheme: "light" });
-  check((await colours(k.page)).join() === darkColours.join() && darkColours[0] === "rgb(15, 15, 17)", `the island is the same dark in both schemes (${darkColours.join(" on ")})`);
+  check((await colours(k.page)).join() === darkColours.join() && darkColours[0] === "rgba(18, 18, 24, 0.86)", `the island is the same dark in both schemes (${darkColours.join(" on ")})`);
   // The dock loads theme.js, which sets data-theme on <html>; .dark is on <body>, so it still wins.
   for (const forced of ["light", "dark", "system"]) {
     await k.page.evaluate((t: string) => (window as Any).intuitionTheme.apply(t), forced);

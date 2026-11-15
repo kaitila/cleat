@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { contrast, grounds, parse, worst } from "./glass";
 
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
 const read = (file: string) => readFileSync(join(WEB, file), "utf8");
@@ -14,7 +15,7 @@ function block(selector: string): Map<string, string> {
   const at = base.indexOf(`${selector} {`);
   if (at < 0) throw new Error(`no ${selector} in base.css`);
   const body = base.slice(base.indexOf("{", at) + 1, base.indexOf("}", at));
-  return new Map([...body.matchAll(/([a-z-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
+  return new Map([...body.matchAll(/([a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
 }
 const colours = (m: Map<string, string>) => new Map([...m].filter(([k, v]) => k.startsWith("--") && /^(?:#|rgb|0 0 0)/.test(v)));
 
@@ -58,26 +59,16 @@ describe("the forced themes", () => {
     }
   });
 
-  /** WCAG contrast of two #rrggbb colours. */
-  function contrast(a: string, b: string): number {
-    const lum = (hex: string) => {
-      const [r, g, bl] = [1, 3, 5].map((i) => {
-        const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-        return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
-    };
-    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
-    return (hi! + 0.05) / (lo! + 0.05);
-  }
+  // The contrasts on the glass, composited over every ground (test/web/glass.ts), as design.test.ts
+  // checks them for the schemes.
   for (const [name, t] of [["light", forcedLight], ["dark", forcedDark]] as const) {
     test(`${name}: text, muted text, the accent and the status colours meet their contrast`, () => {
-      const on = (fg: string, bg: string) => contrast(t.get(`--${fg}`)!, t.get(`--${bg}`)!);
-      for (const s of ["sunken", "bg", "surface"]) {
-        for (const c of ["text", "muted", "accent", "warn", "danger"]) expect({ c, s, ok: on(c, s) >= 4.5 }).toEqual({ c, s, ok: true });
+      const g = grounds(new Map([...block(":root"), ...t]));
+      for (const ground of ["backdrop", "glass", "float", "surface", "sunken"]) {
+        for (const c of ["text", "muted", "accent", "warn", "danger"]) expect({ c, ground, ok: worst(t, g, c, ground) >= 4.5 }).toEqual({ c, ground, ok: true });
       }
-      for (const s of ["hover", "selected"]) expect({ s, ok: on("text", s) >= 4.5 && on("muted", s) >= 3 }).toEqual({ s, ok: true });
-      expect(on("accent-text", "accent")).toBeGreaterThanOrEqual(4.5);
+      for (const ground of ["hover", "selected"]) expect({ ground, ok: worst(t, g, "text", ground) >= 4.5 && worst(t, g, "muted", ground) >= 3 }).toEqual({ ground, ok: true });
+      expect(contrast(parse(t.get("--accent-text")!), parse(t.get("--accent")!))).toBeGreaterThanOrEqual(4.5);
     });
   }
 });

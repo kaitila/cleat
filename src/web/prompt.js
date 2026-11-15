@@ -312,7 +312,7 @@ function start() {
     }
   });
 
-  // Chip widths change when Inter has loaded, or the window does: the mark goes there at once.
+  // Chip widths change when Geist has loaded, or the window does: the mark goes there at once.
   const replaceMark = () => {
     markAt = null;
     placeMark();

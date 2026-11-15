@@ -209,9 +209,10 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path, fullPage: true });
   console.log(`screenshot: ${path}`);
 }
-const theme = (page: Page) => page.evaluate(() => ({ attr: document.documentElement.getAttribute("data-theme"), bg: getComputedStyle(document.body).backgroundColor }));
-const WHITE = "rgb(255, 255, 255)";
-const DARK_BG = "rgb(21, 21, 23)";
+// The scheme a page is in, by its ground (--bg): the pop-up's own page is see-through (D0028), so its colour is the token's.
+const theme = (page: Page) => page.evaluate(() => ({ attr: document.documentElement.getAttribute("data-theme"), bg: getComputedStyle(document.body).getPropertyValue("--bg").trim() }));
+const LIGHT_BG = "#eceef4";
+const DARK_BG = "#101219";
 const visibleError = (page: Page, selector: string) =>
   page.evaluate((s) => {
     const el = document.querySelector<HTMLElement>(s);
@@ -254,7 +255,7 @@ try {
   await page.click('label.theme:has(input[value="system"])');
   await until("Appearance: System is saved", () => stored.theme === "system");
   t = await theme(page);
-  check("System removes data-theme and follows the scheme (light here)", t.attr === null && t.bg === WHITE, JSON.stringify(t));
+  check("System removes data-theme and follows the scheme (light here)", t.attr === null && t.bg === LIGHT_BG, JSON.stringify(t));
 
   await page.click('.segmented label:has(input[value="default"])');
   await until("Sessions: Ask is saved", () => stored.permissionMode === "default");
@@ -354,7 +355,7 @@ try {
   check("pop-up: System follows the scheme (dark here)", t.attr === null && t.bg === DARK_BG, JSON.stringify(t));
   await shot(prompt, "prompt-dark");
   setStored({ theme: "light" });
-  await until("pop-up: Light, set elsewhere, applies live", async () => (await theme(prompt)).bg === WHITE, () => "");
+  await until("pop-up: Light, set elsewhere, applies live", async () => (await theme(prompt)).bg === LIGHT_BG, () => "");
   check("pop-up: data-theme is light", (await theme(prompt)).attr === "light");
   await shot(prompt, "prompt-forced-light");
   setStored({ theme: "dark" });
@@ -368,7 +369,7 @@ try {
   await promptLight.waitForFunction(() => document.querySelectorAll("#workspaces input").length > 0);
   await until("pop-up: Dark wins over a light scheme", async () => (await theme(promptLight)).bg === DARK_BG, () => "");
   setStored({ theme: "system" });
-  await until("pop-up: System on a light desktop is light", async () => (await theme(promptLight)).bg === WHITE, () => "");
+  await until("pop-up: System on a light desktop is light", async () => (await theme(promptLight)).bg === LIGHT_BG, () => "");
   await shot(promptLight, "prompt-light");
 
   // ---------- no flash: the cached theme is there before the runner answers ----------
@@ -405,7 +406,7 @@ try {
     await snip.mouse.up();
     await Bun.sleep(500);
     const box = await snip.evaluate(() => getComputedStyle(document.querySelector("#box")!).backgroundColor);
-    check(`snip (${scheme}): the box is in the scheme's surface`, box === (scheme === "light" ? WHITE : "rgb(27, 27, 30)"), box);
+    check(`snip (${scheme}): the box is in the scheme's floating glass`, box === (scheme === "light" ? "rgba(250, 250, 253, 0.88)" : "rgba(18, 18, 24, 0.86)"), box);
     await shot(snip, `snip-${scheme}`);
   }
 
