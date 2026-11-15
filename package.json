@@ -6,6 +6,7 @@
   "scripts": {
     "start": "bun src/runner/main.ts",
     "dev": "bun --watch src/runner/main.ts",
+    "setup": "bun src/cli.ts setup",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "check": "bun run typecheck && bun run test"

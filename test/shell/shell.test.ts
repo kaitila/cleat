@@ -109,10 +109,14 @@ describe("bundle", () => {
 
   test("`up` stops an outdated shell, waits for its process to end, installs and starts it", () => {
     const cli = readFileSync(join(REPO, "src", "cli.ts"), "utf8");
-    const up = cli.slice(cli.indexOf("  up: async"), cli.indexOf('  "shell install"'));
-    expect(up).toContain("!(await isCurrent(paths))");
-    expect(up.indexOf("await stopAndWait(paths, pidFile());")).toBeLessThan(up.lastIndexOf("await install(paths);"));
-    expect(up.indexOf("await install(paths);")).toBeLessThan(up.indexOf("startShell();"));
+    const up = cli.slice(cli.indexOf("  up: async"), cli.indexOf("  setup: "));
+    // The shell half is src/cli/up.ts, which setup shares.
+    const shellHalf = readFileSync(join(REPO, "src", "cli", "up.ts"), "utf8");
+    expect(shellHalf).toContain("!(await isCurrent(paths))");
+    expect(shellHalf.indexOf("await stopAndWait(paths, pidFile(platform.settingsFile()), undefined, platform);")).toBeGreaterThan(-1);
+    expect(shellHalf.indexOf("await stopAndWait(")).toBeLessThan(shellHalf.lastIndexOf("await install(paths, log, platform);"));
+    expect(up.indexOf("await installCurrentShell(platform);")).toBeGreaterThan(-1);
+    expect(up.indexOf("await installCurrentShell(platform);")).toBeLessThan(up.indexOf("startShell();"));
     // The shell writes its pid beside its settings, and removes it as it quits.
     expect(pidFile(join("/x", SETTINGS_FILE))).toBe(join("/x", PID_FILE));
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
@@ -487,10 +491,11 @@ describe("geometry and arguments", () => {
   });
 
   test("the command line", () => {
-    expect(parseArgs(["electron.exe", "C:\\app"])).toEqual({ selfTest: undefined, runnerUrl: undefined, session: undefined, quit: false });
+    expect(parseArgs(["electron.exe", "C:\\app"])).toEqual({ selfTest: undefined, runnerUrl: undefined, session: undefined, prompt: false, quit: false });
     expect(parseArgs(["electron.exe", "C:\\app", "--self-test", "C:\\r.json", "--runner-url", "http://127.0.0.1:5"])).toMatchObject({ selfTest: "C:\\r.json", runnerUrl: "http://127.0.0.1:5" });
     expect(parseArgs(["e", "app", "--quit"]).quit).toBe(true);
     expect(parseArgs(["e", "app", "--session", "s1"]).session).toBe("s1");
+    expect(parseArgs(["e", "app", "--prompt"]).prompt).toBe(true);
     expect(parseArgs(["e", "app", "--self-test"]).selfTest).toBeUndefined();
     expect(parseArgs(["e", "app", "--self-test", "--quit"]).selfTest).toBeUndefined();
   });

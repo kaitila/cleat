@@ -1,6 +1,6 @@
 // Installing, starting and stopping the shell: the Windows shell from WSL, or the shell on this machine (macOS, Linux).
 // What differs per layout comes from ./platform.
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DOCK_PRELOAD } from "../../shell/src/dock";
@@ -175,6 +175,36 @@ export function electron(paths: ShellPaths, args: string[], detached = false, pl
 /** Starts the shell and leaves it running. A second start only brings up the first one's chat window. */
 export function start(paths?: ShellPaths, platform: Platform = currentPlatform()): void {
   electron(paths ?? platform.shellPaths(), [], true, platform).unref();
+}
+
+/** Opens the pop-up: a shell that runs is handed --prompt, else the shell starts with it and opens the pop-up once the runner answers. */
+export function prompt(paths?: ShellPaths, platform: Platform = currentPlatform()): void {
+  electron(paths ?? platform.shellPaths(), ["--prompt"], true, platform).unref();
+}
+
+/**
+ * Removes what `shell install` and the shell wrote: the app folder (Electron and the bundles), the shell's
+ * own user data folder (its settings and pid file), and the shell's home when nothing else is left in it.
+ * On macOS and Linux the home is also the default data folder, so only an empty one goes. Returns what was removed.
+ */
+export function removeShell(paths?: ShellPaths, platform: Platform = currentPlatform()): string[] {
+  paths ??= platform.shellPaths();
+  const removed: string[] = [];
+  const userData = dirname(platform.settingsFile());
+  for (const dir of [paths.app, userData]) {
+    if (!existsSync(dir)) continue;
+    rmSync(dir, { recursive: true, force: true });
+    removed.push(dir);
+  }
+  try {
+    if (existsSync(paths.home) && readdirSync(paths.home).every((f) => f === "login-result.json")) {
+      rmSync(paths.home, { recursive: true, force: true });
+      removed.push(paths.home);
+    }
+  } catch {
+    // A home that cannot be read is left.
+  }
+  return removed;
 }
 
 /** Asks the running shell to quit: a second copy hands it --quit and exits. Does nothing when none runs. */

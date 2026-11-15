@@ -11,13 +11,25 @@ intuition runs in one of three layouts. `intuition doctor` says which one this m
 The layout is detected: inside WSL (`WSL_DISTRO_NAME` set, or `microsoft` in `/proc/version`) it is `windows-wsl`, otherwise it follows the OS. `INTUITION_PLATFORM=windows-wsl|macos|linux` overrides it, for tests and for trying the linux layout inside WSL (below). Any other value is refused. Why the layouts are split this way: [D0019](decisions/D0019-platform-layouts.md). The code: `src/shell/platform.ts`.
 
 ## Setup, every layout
-From a clone of the repo:
+```sh
+git clone https://github.com/kaitila/intuition && cd intuition && bun install && bun run setup
+```
 
-1. Install git, [bun](https://bun.sh), Node 22.12 or later with npm (Electron's installer needs it: nvm works), and [Claude Code](https://docs.claude.com/en/docs/claude-code/setup), and log in to Claude Code (`claude auth login`).
-2. `bun install`, then `bun src/cli.ts link` once, so `intuition` is on the PATH ([README](../README.md), "Setup").
-3. `intuition doctor`. Every `MISS` line is something needed, with its fix on the line below. Doctor exits 1 while one is there.
-4. `intuition up`: starts the runner, installs the shell with Electron for this OS (about 130 MB the first time), writes where the runner lives into the shell's settings, and starts the shell.
-5. Optional: `intuition shell login on`, so the shell starts when you log in.
+`bun run setup` is `bun src/cli.ts setup` (`src/cli/setup.ts`). It assumes nothing about the machine: the layout, the home folder, and for windows-wsl the WSL distribution (`WSL_DISTRO_NAME`) and the Windows user's folders (asked of `cmd.exe`) are all detected. In order:
+
+1. Checks git, bun, Node 22.12 or later with npm (Electron's installer needs it), Claude Code and its login, each with a one-line fix, as `intuition doctor` does. Missing git, Node or Claude Code stops it; a missing login is offered (`claude auth login`) and otherwise only warned about.
+2. Asks for the workspaces, listing the folders one or two levels under the home folder that hold a `.git` or a `CLAUDE.md` (numbers or paths, separated by commas).
+3. Asks for the two hotkeys, offering the layout's defaults (Control+Alt+Space and Control+Alt+S; Command+Shift+Space and Command+Shift+S on a Mac).
+4. Asks whether to start at login: yes by default.
+5. Writes the config (workspaces, and the shell's hotkeys, dock and start at login), keeping what else is in it.
+6. Starts the runner, installs the shell for the layout (or installs it again when it is older than the repo's), and sets start at login. Without a display (linux) or without the Windows disk (windows-wsl) the shell steps are skipped, and said so.
+7. Links the command (`intuition link`), and starts the shell with `--prompt`, which opens the pop-up.
+
+`setup --yes` takes every default and asks nothing (the workspaces kept from an existing config, or none; start at login on), and starts the shell without the pop-up. `--workspace <folder>` (any number of times) gives the workspaces, and `--link-dir <folder>` puts the link elsewhere than the folder bun is in. Plain `intuition` runs setup when there is no config yet. `bun scripts/setup-check.ts` runs the whole of it from a fresh clone in a temp home and then `intuition doctor`; inside WSL it uses the linux layout under WSLg, so the Windows user's real shell is not touched.
+
+`intuition uninstall` undoes it: start at login off, the shell quit and its folders removed (the app folder and the shell's settings folder), the runner stopped, the link removed. The config and the data folder stay unless `--purge`.
+
+By hand, the same steps are `bun src/cli.ts link`, `intuition doctor` (every `MISS` line is something needed, with its fix on the line below; doctor exits 1 while one is there), `intuition up` (starts the runner, installs the shell with Electron for this OS, about 130 MB the first time, writes where the runner lives into the shell's settings and starts the shell) and `intuition shell login on`.
 
 `intuition doctor` again should show only `ok` lines. The settings page's Setup section shows the same from the running app: the layout, the runner, the shell, start at login, the shortcuts and, on a Mac, Screen Recording, each with what to do when it is not ok. A `--` line is a part that is not up yet (the runner, the shell, start at login, a display), with the one command that brings it up. Those don't change the exit code.
 

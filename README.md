@@ -29,22 +29,22 @@ Per platform:
 The setup command checks each of these and prints a one-line fix for anything missing.
 
 ## Install
-In a terminal (on Windows, a WSL terminal), clone this repository (its GitHub page gives the URL under **Code**), then in the clone run:
+In a terminal (on Windows, a WSL terminal):
 
 ```sh
-bun install && bun src/cli.ts setup
+git clone https://github.com/kaitila/intuition && cd intuition && bun install && bun run setup
 ```
 
 `setup` asks a few questions and takes a fresh clone to a running app:
 1. checks the requirements above;
 2. asks which folders are your workspaces, suggesting the folders in your home that hold a git repository or a `CLAUDE.md`;
-3. asks for the hotkeys, offering the platform's defaults (Ctrl+Alt+Space for a new task and Ctrl+Alt+S for the snip on Windows and Linux);
-4. installs the tray app (the first time, a download of about 130 MB) and starts it;
-5. asks whether to start at login (yes by default);
+3. asks for the hotkeys, offering the platform's defaults (Ctrl+Alt+Space for a new task and Ctrl+Alt+S for the snip on Windows and Linux, Cmd+Shift+Space and Cmd+Shift+S on a Mac);
+4. asks whether to start at login (yes by default);
+5. starts the runner, installs the tray app (the first time, a download of about 130 MB) and starts it;
 6. puts the `intuition` command on your PATH;
 7. opens the pop-up, so you can send a first task.
 
-`bun src/cli.ts setup --yes` takes every default without asking, for scripts. Running `setup` again changes the answers; running plain `intuition` before there is any configuration starts it too.
+`bun run setup --yes` takes every default without asking, for scripts (`--workspace <folder>` gives the workspaces). Running `setup` again changes the answers; running plain `intuition` before there is any configuration starts it too.
 
 Then press the hotkey anywhere.
 

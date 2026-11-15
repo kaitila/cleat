@@ -56,8 +56,8 @@ function gitFix(layout: Layout): string {
   return layout === "macos" ? "install git: `xcode-select --install`, or `brew install git`" : "install git: `sudo apt install git` (or your distribution's package)";
 }
 
-/** Every check, in the order doctor prints them. */
-export async function checks(platform: Platform, probes: Probes, env: Env = process.env): Promise<Check[]> {
+/** The prerequisites: git, bun, Node with npm, Claude Code and its login. Setup checks these before it asks anything. */
+export function prerequisites(platform: Platform, probes: Pick<Probes, "output">): Check[] {
   const out: Check[] = [];
   const add = (c: Check) => out.push(c);
 
@@ -85,6 +85,13 @@ export async function checks(platform: Platform, probes: Probes, env: Env = proc
     const loggedIn = status !== null && /"loggedIn"\s*:\s*true/.test(status);
     add({ name: "Claude Code login", ok: loggedIn, needed: true, detail: loggedIn ? "logged in" : "not logged in", fix: "log in: `claude auth login`" });
   }
+  return out;
+}
+
+/** Every check, in the order doctor prints them. */
+export async function checks(platform: Platform, probes: Probes, env: Env = process.env): Promise<Check[]> {
+  const out: Check[] = prerequisites(platform, probes);
+  const add = (c: Check) => out.push(c);
 
   const config = probes.config();
   add({ name: "config", ok: config.ok, needed: true, detail: config.ok ? config.path : config.error, fix: "correct the config file (README, \"Config\")" });
@@ -123,20 +130,31 @@ export async function checks(platform: Platform, probes: Probes, env: Env = proc
   return out;
 }
 
-/** The report's lines: the layout, then one line per check and, under each that is not ok, its fix. */
-export function report(platform: Platform, list: Check[]): string[] {
-  const lines = [`layout: ${platform.layout} (${LAYOUT_WORDS[platform.layout]})`];
+/** The line naming the layout. */
+export function layoutLine(platform: Platform): string {
+  return `layout: ${platform.layout} (${LAYOUT_WORDS[platform.layout]})`;
+}
+
+/** One line per check and, under each that is not ok, its fix. */
+export function checkLines(list: Check[]): string[] {
+  const lines: string[] = [];
   for (const c of list) {
     const mark = c.ok ? "ok  " : c.needed ? "MISS" : "--  ";
     lines.push(`  ${mark}  ${c.name}: ${c.detail}`);
     if (!c.ok) lines.push(`        fix: ${c.fix}`);
   }
+  return lines;
+}
+
+/** The report's lines: the layout, then one line per check and, under each that is not ok, its fix. */
+export function report(platform: Platform, list: Check[]): string[] {
+  const lines = [layoutLine(platform), ...checkLines(list)];
   const missing = list.filter((c) => c.needed && !c.ok);
   lines.push(missing.length === 0 ? "everything needed is there" : `missing: ${missing.map((c) => c.name).join(", ")}`);
   return lines;
 }
 
-function firstLine(cmd: string[]): string | null {
+export function firstLine(cmd: string[]): string | null {
   const exe = Bun.which(cmd[0]!);
   if (!exe) return null;
   try {
