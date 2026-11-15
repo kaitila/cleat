@@ -17,7 +17,7 @@ import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wa
 import { REPO } from "../../src/shell/paths";
 import { defaultHotkeys, dockArea, opaqueDockBounds, shellOs } from "../../shell/src/os";
 import type { Area } from "../../shell/src/geometry";
-import { captureWithheld, expectedExternal, notes, pngSize, problems, selfTestRun, skipped, type Where, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
+import { captureWithheld, expectedExternal, materials, notes, pngSize, problems, selfTestRun, skipped, type Where, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
 
 const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
@@ -641,7 +641,7 @@ describe("the dock", () => {
   test("main.ts: the window is frameless, clear, on top, out of the taskbar, never activated, and placed from the display's bounds", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     const create = main.slice(main.indexOf("function createDock()"), main.indexOf("async function loadDock()"));
-    for (const option of ["frame: false", "transparent: DOCK_TRANSPARENT", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
+    for (const option of ["frame: false", "...materialOptions(DOCK_MATERIAL, DOCK_TRANSPARENT, OPAQUE_BACKGROUND)", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
     expect(create).toContain('win.on("will-resize", (event) => event.preventDefault());');
     const dockCode = main.slice(main.indexOf("// --- Dock ---"), main.indexOf("// --- Self-test ---"));
     // Shown without activating, and never focused by the shell.
@@ -863,6 +863,7 @@ describe("self-test runner", () => {
     settingsLinkOpened: "http://127.0.0.1:5000/assets/settings.html",
     externalLinks: expectedExternal("http://127.0.0.1:5000"), errors: [],
     os: "windows", dockTransparent: true, primaryWorkArea: { ...display, height: 1400 }, screenAccess: "granted",
+    windowsRelease: "10.0.22631", popupMaterial: "acrylic", dockMaterial: "none", snipMaterial: "none", settingsMaterial: "none",
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
   const base = stubSettings(5000);
@@ -914,11 +915,12 @@ describe("self-test runner", () => {
       ...good, os: "macos", primaryDisplay: macDisplay, primaryWorkArea: macWork, ...placeAt(macPlace),
       imagePath: `${native}/clip-20261115-090507-042.png`, snipCropPath: `${native}/snip-20261115-090508-000.png`,
       snipDisplays: [{ bounds: macDisplay, scaleFactor: 1.5 }], snipOverlayBounds: [macDisplay],
+      windowsRelease: null, popupMaterial: "vibrancy",
     };
     const macPosts = [{ text: "intuition self-test 1" }, { imagePath: mac.imagePath! }];
     const at = (r: Partial<SelfTestResult>, where: Where) => problems(r, { posts: macPosts, puts: puts() }, "http://127.0.0.1:5000", png, where);
     const linuxPlace = dockBounds(macDisplay);
-    const linux: SelfTestResult = { ...mac, os: "linux", primaryWorkArea: macDisplay, ...placeAt(linuxPlace) };
+    const linux: SelfTestResult = { ...mac, os: "linux", primaryWorkArea: macDisplay, ...placeAt(linuxPlace), popupMaterial: "none" };
 
     test("a clean Mac result has no problems, and its dock is judged below the menu bar", () => {
       expect(at(mac, { layout: "macos" })).toEqual([]);
@@ -926,7 +928,8 @@ describe("self-test runner", () => {
     });
 
     test("the shell must have run on the layout's OS, with the layout's paths", () => {
-      expect(at({ ...mac, os: "windows" }, { layout: "macos" })).toEqual(["the shell ran on windows, not macos"]);
+      // Its pop-up's vibrancy is not what Windows would get, so that is named too.
+      expect(at({ ...mac, os: "windows" }, { layout: "macos" })).toEqual(["the shell ran on windows, not macos", expect.stringContaining("the pop-up's material")]);
       expect(at(good, { layout: "macos" }).length).toBeGreaterThan(0);
       expect(at(linux, { layout: "linux" })).toEqual([]);
     });
@@ -958,6 +961,15 @@ describe("self-test runner", () => {
       expect(notes(killed)).toEqual([expect.stringContaining("killed it with SIGKILL")]);
       expect(notes({ ...killed, dockTransparent: false })).toEqual([expect.stringContaining("killed it with SIGKILL"), expect.stringContaining("opaque window")]);
       expect(notes({ ...mac, dockTransparent: true })).toEqual([]);
+    });
+
+    test("each window's material is judged against this OS, and printed", () => {
+      expect(at({ ...mac, popupMaterial: "none" }, { layout: "macos" })).toEqual([expect.stringContaining("the pop-up's material is \"none\", not \"vibrancy\"")]);
+      expect(at({ ...linux, popupMaterial: "acrylic" }, { layout: "linux" })).toHaveLength(1);
+      expect(at({ ...mac, dockMaterial: "vibrancy" }, { layout: "macos" })).toEqual([expect.stringContaining("the dock's material")]);
+      expect(at({ ...mac, windowsRelease: "10.0.22631" }, { layout: "macos" }).length).toBeGreaterThan(0);
+      expect(materials(mac)).toBe("materials: pop-up vibrancy, dock none, snip none, settings none");
+      expect(materials(good)).toBe("materials (Windows 10.0.22631): pop-up acrylic, dock none, snip none, settings none");
     });
 
     test("an opaque dock is judged as the island of each state", () => {

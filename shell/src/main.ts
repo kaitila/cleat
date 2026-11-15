@@ -7,7 +7,7 @@
 // Written against Electron 45's electron.d.ts: the clipboard is clipboard.read / write / readText.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, release } from "node:os";
 import { dirname, join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences, Tray } from "electron";
 import { parseArgs } from "./args";
@@ -21,7 +21,7 @@ import { REPORT_PATH, type ShellReport, shellAction, shellReport, shellSocketUrl
 import type { SelfTestResult } from "./result";
 import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Settings } from "./settings";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
-import { dockArea, dockTransparent, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
+import { dockArea, dockTransparent, materialOptions, windowMaterial, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
 import { RUNNER_START_MS } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
@@ -34,6 +34,9 @@ const DOCK_TRANSPARENT = dockTransparent(OS);
 const DOCK_LOAD_MS = 15_000;
 /** What an opaque dock (and the snip, before its page draws) shows behind the page. */
 const OPAQUE_BACKGROUND = "#0f0f11";
+/** The OS material behind the pop-up's page (acrylic, vibrancy or none); the dock and the snip never get one (os.ts windowMaterial). */
+const POPUP_MATERIAL = windowMaterial("popup", OS, release(), DOCK_TRANSPARENT);
+const DOCK_MATERIAL = windowMaterial("dock", OS, release(), DOCK_TRANSPARENT);
 /** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
 const SELF_TEST_HOTKEY = SELF_TEST_PREFS.hotkey;
 const SELF_TEST_SNIP_HOTKEY = SELF_TEST_PREFS.snipHotkey;
@@ -302,6 +305,7 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
     if (!popup) {
       const win = new BrowserWindow({
         ...POPUP,
+        ...materialOptions(POPUP_MATERIAL, DOCK_TRANSPARENT, OPAQUE_BACKGROUND),
         show: false,
         frame: false,
         maximizable: false,
@@ -880,8 +884,8 @@ function createDock(): BrowserWindow {
     ...dockWindowBounds(),
     show: false,
     frame: false,
-    transparent: DOCK_TRANSPARENT,
-    backgroundColor: DOCK_TRANSPARENT ? "#00000000" : OPAQUE_BACKGROUND,
+    // No material (DOCK_MATERIAL is "none"): it could not follow the island's rounded shape. The page's translucent fill is the glass.
+    ...materialOptions(DOCK_MATERIAL, DOCK_TRANSPARENT, OPAQUE_BACKGROUND),
     hasShadow: false,
     // No thick frame: no shadow, no edges to drag, no square outline around the island.
     thickFrame: false,
@@ -1311,6 +1315,7 @@ async function selfTest(): Promise<SelfTestResult> {
     settingsWindowUrl: null, settingsWindowWidth: 0, settingsWindowHeight: 0, settingsWindowReused: false, settingsLinkOpened: null,
     externalLinks: [], errors: [],
     os: OS, dockTransparent: DOCK_TRANSPARENT, primaryWorkArea: null,
+    windowsRelease: OS === "windows" ? release() : null, popupMaterial: POPUP_MATERIAL, dockMaterial: DOCK_MATERIAL, snipMaterial: "none", settingsMaterial: "none",
     screenAccess: OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted",
   };
   selfTestSoFar = r;

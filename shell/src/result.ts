@@ -1,5 +1,5 @@
 import type { Area } from "./geometry";
-import type { ShellOs } from "./os";
+import type { ShellOs, WindowMaterial } from "./os";
 
 // What the self-test writes. Shared with src/shell/selftest-run.ts, which asserts every field.
 export interface SelfTestResult {
@@ -163,4 +163,11 @@ export interface SelfTestResult {
   primaryWorkArea: Area | null;
   /** macOS's Screen Recording status for the shell ("granted", "denied", "not-determined", ...); "granted" elsewhere. Without it a snip captures no windows. */
   screenAccess: string;
+  /** os.release() on Windows ("10.0.22631"): what the pop-up's acrylic was decided on. Null elsewhere. */
+  windowsRelease: string | null;
+  /** The OS material each window was made with (os.ts windowMaterial): the pop-up's is acrylic on Windows 11, vibrancy on macOS; the others always none. */
+  popupMaterial: WindowMaterial;
+  dockMaterial: WindowMaterial;
+  snipMaterial: WindowMaterial;
+  settingsMaterial: WindowMaterial;
 }
