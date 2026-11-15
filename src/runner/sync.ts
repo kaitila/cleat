@@ -7,7 +7,8 @@
 //     turn (continued in a terminal, say), stores them as events and shows the session running until
 //     a few seconds after its last assistant entry.
 // It only reads transcripts. Nothing here writes under ~/.claude: the runner's own turns go through
-// the SDK's query, as before. The SDK changes often: read its sdk.d.ts before changing this.
+// the SDK's query, and the person's rename, fork and delete through manage.ts, which tells the sync
+// (own, hold, adopt, forget) so none of them is taken for another process's write. The SDK changes often: read its sdk.d.ts before changing this.
 import { join } from "node:path";
 import type { SDKSessionInfo, SessionMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ServerMessage, SessionMeta, Workspace } from "../shared/protocol";
@@ -151,6 +152,8 @@ export class Sync implements TurnWatcher {
   private readonly ending = new Set<string>();
   /** Bumped when a runner turn starts: a read that began before it is dropped. */
   private readonly generation = new Map<string, number>();
+  /** Workspaces (by name) where a fork is being written: a new transcript there is not imported meanwhile. */
+  private readonly held = new Map<string, number>();
   private timer: ReturnType<typeof setInterval> | null = null;
   private polling: Promise<void> | null = null;
   private stopped = false;
@@ -253,7 +256,9 @@ export class Sync implements TurnWatcher {
     this.link();
     const id = this.file.ids[info.sessionId];
     if (id === undefined) {
-      // A session the runner just started may not have reported its Claude Code id yet: wait a round.
+      // A session the runner just started may not have reported its Claude Code id yet, or a fork is
+      // being written: wait a round.
+      if (this.held.has(workspace.name)) return;
       if (this.store.list().some((s) => s.workspace === workspace.name && s.claudeSessionId === null && this.sessions.isRunning(s.id))) return;
       this.import(workspace, info);
       return;
@@ -395,9 +400,80 @@ export class Sync implements TurnWatcher {
       this.log(`sync: reading ${session.claudeSessionId} before a reply failed: ${(e as Error).message}`);
     }
     if (!info) return { openElsewhere: false };
+    // The runner's own turn is still closing (its result is in, the query shuts down) or its end is
+    // being caught up with: the newest writes are its own.
+    if (this.ours(id)) return { openElsewhere: false };
     const ownWrite = this.file.sessions[id]?.ownWrite ?? 0;
     const now = this.options.now();
     return { openElsewhere: now - info.lastModified < OPEN_MS && info.lastModified > ownWrite + OWN_SLACK_MS };
+  }
+
+  /**
+   * The runner writes to a session's transcript itself (a rename): the write counts as its own, so
+   * it neither shows the session running nor makes a reply look open in a terminal.
+   */
+  own<T>(id: string, write: () => Promise<T>): Promise<T> {
+    return this.lock(id, async () => {
+      try {
+        return await write();
+      } finally {
+        const tracked = this.file.sessions[id];
+        const session = this.store.get(id);
+        if (tracked && session?.claudeSessionId) {
+          tracked.ownWrite = this.options.now();
+          this.save();
+        }
+      }
+    });
+  }
+
+  /** While a fork is written in this workspace, no new transcript there is imported. Returns the release. */
+  hold(workspace: string): () => void {
+    this.held.set(workspace, (this.held.get(workspace) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const n = (this.held.get(workspace) ?? 1) - 1;
+      if (n > 0) this.held.set(workspace, n);
+      else this.held.delete(workspace);
+    };
+  }
+
+  /**
+   * A session the runner made from a transcript it wrote (a fork): its id is linked and the cursor
+   * put at the transcript's end, so nothing of it is stored twice, and the write counts as its own.
+   */
+  adopt(id: string): Promise<void> {
+    this.link();
+    return this.lock(id, async () => {
+      const session = this.store.get(id);
+      if (!session?.claudeSessionId) return;
+      const tracked: Tracked = { cursor: null, loaded: true, mtime: 0, ownWrite: this.options.now() };
+      try {
+        const [messages, info] = await Promise.all([
+          this.options.transcripts.messages(session.claudeSessionId, session.cwd),
+          this.options.transcripts.info(session.claudeSessionId, session.cwd),
+        ]);
+        tracked.cursor = messages.at(-1)?.uuid ?? null;
+        tracked.mtime = info?.lastModified ?? 0;
+      } catch (e) {
+        this.log(`sync: reading the fork ${session.claudeSessionId} failed: ${(e as Error).message}`);
+      }
+      tracked.ownWrite = this.options.now();
+      this.file.sessions[id] = tracked;
+      this.save();
+    });
+  }
+
+  /**
+   * A deleted session: what the sync kept of it goes. Its Claude Code ids stay linked to the gone id,
+   * so a transcript left behind is never imported as a new session.
+   */
+  forget(id: string): void {
+    this.live.delete(id);
+    delete this.file.sessions[id];
+    this.save();
   }
 
   turnStarted(id: string): void {

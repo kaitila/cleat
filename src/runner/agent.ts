@@ -30,6 +30,11 @@ export interface TurnInput {
   /** Aborted when the runner stops: the driver ends the turn without more output. */
   signal: AbortSignal;
   /**
+   * Aborted when the person stops the turn (POST .../stop): the driver interrupts it and returns
+   * soon after. What it yields after this is not stored; the runner records a `stopped` event.
+   */
+  interrupt?: AbortSignal;
+  /**
    * Asks the person to allow or deny a tool call, and waits for the answer: it is shown in the chat
    * view and resolves from POST /api/sessions/:id/approvals/:approvalId. Nothing else allows a call.
    * It resolves as "deny" when `signal` (the agent's own, for this call) aborts, when the turn ends

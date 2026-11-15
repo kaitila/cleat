@@ -20,8 +20,18 @@
           <a class="settings-link button quiet" href="/assets/settings.html" aria-label="Settings" title="Settings"><svg class="gear" viewBox="0 0 16 16" stroke="currentColor" aria-hidden="true"><path d="M12.98 6.91L14.64 6.81L14.64 9.19L12.98 9.09L12.3 10.75L13.54 11.86L11.86 13.54L10.75 12.3L9.09 12.98L9.19 14.64L6.81 14.64L6.91 12.98L5.25 12.3L4.14 13.54L2.46 11.86L3.7 10.75L3.02 9.09L1.36 9.19L1.36 6.81L3.02 6.91L3.7 5.25L2.46 4.14L4.14 2.46L5.25 3.7L6.91 3.02L6.81 1.36L9.19 1.36L9.09 3.02L10.75 3.7L11.86 2.46L13.54 4.14L12.3 5.25Z"/><circle cx="8" cy="8" r="2.25"/></svg></a>
         </span>
       </div>
+      <div class="finder">
+        <input id="search" class="input search" type="search" placeholder="Search" aria-label="Search sessions by title or workspace" autocomplete="off">
+        <div class="filters">
+          <select id="workspace-filter" class="filter small" aria-label="Workspace">
+            <option value="">All workspaces</option>
+          </select>
+          <button id="archived-view" class="quiet small" type="button" aria-pressed="false">Archived</button>
+        </div>
+      </div>
       <p id="sessions-empty" class="sessions-empty muted small" hidden>No sessions yet.</p>
       <ul id="sessions" class="sessions"></ul>
+      <p id="undo" class="undo small" role="status" hidden></p>
       <p id="connection" class="connection muted small" role="status" hidden></p>
     </nav>
     <main class="main">
@@ -31,6 +41,7 @@
           <span id="dot" class="dot"></span>
           <span id="workspace"></span>
           <span id="status"></span>
+          <button id="stop" class="stop small" type="button" hidden>Stop</button>
         </p>
       </header>
       <div id="scroller" class="scroller">
@@ -46,5 +57,15 @@
       </form>
     </main>
   </div>
+  <dialog id="confirm" class="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+    <form method="dialog" class="confirm-form">
+      <h2 id="confirm-title" class="title"></h2>
+      <p id="confirm-body" class="muted"></p>
+      <div class="confirm-actions">
+        <button value="cancel" class="quiet">Cancel</button>
+        <button id="confirm-ok" value="ok" class="danger"></button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

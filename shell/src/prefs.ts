@@ -2,35 +2,14 @@
 // 'settings' message on /ws, what it writes with PUT /api/settings, and the decisions it takes on
 // them (re-registering a hotkey, the one-time migration from its own file). No Electron imports here.
 //
-// The types are the settings contract of T-0030 (docs/protocol.md, "Settings"), copied here while
-// that task's src/shared/protocol.ts is not merged: the shell is built against the same shape.
+// The types are the settings contract (docs/protocol.md, "Settings"), from src/shared/protocol.ts, under
+// the shell's names: RunnerSettings is the whole Settings (main.ts has its own Settings, the shell's
+// file), ShellPrefs is the shell's part of it.
 
 import { defaultHotkeys, shellOs } from "./os";
+import type { PermissionMode, Settings as RunnerSettings, ShellSettings as ShellPrefs, Theme } from "../../src/shared/protocol";
 
-export type Theme = "system" | "light" | "dark";
-export type PermissionMode = "auto" | "default";
-
-/** What the shell applies: its two hotkeys, the dock, and start on login. */
-export interface ShellPrefs {
-  /** An Electron accelerator: opens the pop-up with the clipboard attached. */
-  hotkey: string;
-  /** An Electron accelerator: freezes the screens for a snip. */
-  snipHotkey: string;
-  /** Whether the dock is shown at the top of the screen. */
-  dock: boolean;
-  /** Whether the shell starts at login (Electron's login item on Windows, a launch agent on macOS, an XDG autostart file on Linux). */
-  startOnLogin: boolean;
-}
-
-/** GET /api/settings, the body of PUT /api/settings, and the 'settings' message's `settings`. */
-export interface RunnerSettings {
-  theme: Theme;
-  permissionMode: PermissionMode;
-  workspaces: { name: string; path: string; permissionMode?: PermissionMode }[];
-  /** Null until something sets it: the shell then sends its own values once (the migration). */
-  shell: ShellPrefs | null;
-  port: number;
-}
+export type { PermissionMode, RunnerSettings, ShellPrefs, Theme };
 
 /** What the shell uses until the runner has said otherwise, and for anything its file never had: Command+Shift on a Mac, Control+Alt elsewhere. */
 export const SHELL_DEFAULTS: Omit<ShellPrefs, "startOnLogin"> = { ...defaultHotkeys(shellOs()), dock: true };

@@ -161,9 +161,21 @@ try {
     check(c.bg === want.bg && c.sidebar === want.sidebar, `forced ${forced} under a ${scheme} scheme, the chat view follows live (${c.bg}, sidebar ${c.sidebar})`);
     await shot(`chat-forced-${forced}`);
   }
+  // The runner's own answer (GET /api/settings, "system" here) replaces the cache as soon as it
+  // comes, so hold it back to see what the page starts in, then let it through.
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/settings", async (route: Any) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
   await page.reload();
   await page.locator(".msg.assistant").first().waitFor();
   check((await colours()).theme === "dark", "a page opened later starts in the cached theme");
+  release();
+  await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
+  check(true, "and then follows the runner's setting (system)");
+  await page.unroute("**/api/settings");
   await other.evaluate(() => localStorage.setItem("intuition.theme", "system"));
   await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
   await page.emulateMedia({ colorScheme: "light" });
@@ -429,6 +441,173 @@ try {
   check((await text(".session-title"))[0] === later, "a session started afterwards appears at the top of the sidebar");
   check((await page.locator('.session[aria-current="true"] .session-title').textContent()) === HOSTILE, "without taking the selection");
   check(!(await atBottom()), "and the stream stays where the person scrolled to");
+
+  // ---- managing sessions: search, filter, menu, rename, pin, fork, archive with undo, delete, stop ----
+  {
+    const mdir = mkdtempSync(join(tmpdir(), "intuition-chat-manage-"));
+    {
+      // A session in another workspace, for the filter.
+      const store = new Store(join(mdir, "data"));
+      const when = new Date(Date.now() - 60 * 60_000).toISOString();
+      store.create({ id: crypto.randomUUID(), claudeSessionId: "fake-gamma", workspace: "elsewhere", cwd: "/nowhere", title: "gamma notes", status: "idle", createdAt: when, updatedAt: when, lastSeq: 0, source: "intuition" });
+    }
+    const transcripts = new MemoryTranscripts();
+    const m = testRunner({ dir: mdir, driver: fakeDriver(5), sync: { transcripts, pollMs: 50, idleMs: 400 } });
+    try {
+      const work = m.config.workspaces.find((w) => w.name === "work")!.path;
+      transcripts.write("term-m", work, [userEntry("from the terminal"), assistantEntry("hi")], Date.now() - 5 * 60_000);
+      const listed = async () => ((await (await m.get("/api/sessions")).json()) as { sessions: { id: string; title: string }[] }).sessions;
+      const alpha = await m.startSession("alpha task");
+      const beta = await m.startSession("beta task");
+      await page.goto(`${m.url}/?session=${alpha.id}`);
+      const row = (t: string) => page.locator(".session-item", { hasText: t });
+      await row("from the terminal").waitFor();
+      await page.locator(".note", { hasText: "Done" }).waitFor();
+      const titles = () => text(".session-item .session-title");
+
+      // Search and filter.
+      await page.locator("#search").fill("alpha");
+      check((await titles()).join("|") === "alpha task", "the search box narrows the list to titles that match, as you type");
+      await page.locator("#search").fill("elsewhere");
+      check((await titles()).join("|") === "gamma notes", "it matches the workspace too");
+      await page.locator("#search").fill("nothing like this");
+      check((await page.locator("#sessions-empty").textContent()) === "Nothing matches." && (await page.locator("#sessions-empty").isVisible()), "with no match it says so quietly");
+      await page.locator("#search").press("Escape");
+      check((await page.locator(".session-item").count()) === 4, "Esc in the search box clears it");
+      check((await page.locator("#workspace-filter option").allTextContents()).join("|") === "All workspaces|elsewhere|work", "the workspace filter offers every workspace a session is in");
+      await page.locator("#workspace-filter").selectOption("elsewhere");
+      check((await titles()).join("|") === "gamma notes", "and narrows the list to one");
+      await page.locator("#workspace-filter").selectOption("");
+      await shot("chat-manage-list-light");
+
+      // The menu.
+      await row("alpha task").hover();
+      await row("alpha task").locator(".more").click();
+      const items = () => text(".menu:not([hidden]) .menu-item");
+      check((await items()).join(",") === "Rename,Pin,Fork,Archive,Delete", "the … button opens the menu: Rename, Pin, Fork, Archive, Delete");
+      check(await page.evaluate(() => document.activeElement?.classList.contains("menu-item")), "with the focus on its first item");
+      await shot("chat-manage-menu-light");
+      await page.emulateMedia({ colorScheme: "dark" });
+      await shot("chat-manage-menu-dark");
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.keyboard.press("Escape");
+      check(await page.locator(".menu").isHidden(), "Esc closes it");
+      await row("from the terminal").locator("a").click({ button: "right" });
+      check((await items()).join(",") === "Rename,Pin,Fork,Archive", "right-click opens it too; a session from the terminal has no Delete, only Archive");
+      await page.keyboard.press("Escape");
+
+      // Rename: inline from the menu, and F2.
+      await row("alpha task").locator("a").click({ button: "right" });
+      await page.locator(".menu-item", { hasText: "Rename" }).click();
+      const input = page.locator(".session-item input.rename");
+      check((await input.inputValue()) === "alpha task", "Rename edits the title in its row");
+      await input.fill("alpha renamed");
+      await input.press("Enter");
+      await row("alpha renamed").waitFor();
+      check((await listed()).some((x) => x.id === alpha.id && x.title === "alpha renamed"), "Enter saves it in the runner");
+      check((await page.locator("#title").textContent()) === "alpha renamed", "and the head follows");
+      await row("beta task").locator("a").focus();
+      await page.keyboard.press("F2");
+      await input.fill("beta via F2");
+      await input.press("Enter");
+      await row("beta via F2").waitFor();
+      check(true, "F2 renames the focused session");
+      await page.keyboard.press("F2");
+      await input.press("Escape");
+      check((await input.count()) === 0 && (await row("beta via F2").count()) === 1, "Esc leaves the title as it was");
+
+      // Pin.
+      await row("gamma notes").locator("a").click({ button: "right" });
+      await page.locator(".menu-item", { hasText: "Pin" }).click();
+      await page.locator(".session-item:first-child .pin-mark").waitFor();
+      check((await titles())[0] === "gamma notes", "a pinned session goes to the top, marked Pinned");
+      await row("gamma notes").locator("a").click({ button: "right" });
+      check((await items())[1] === "Unpin", "and its menu offers Unpin");
+      await page.keyboard.press("Escape");
+
+      // Fork.
+      await row("alpha renamed").locator("a").click({ button: "right" });
+      await page.locator(".menu-item", { hasText: "Fork" }).click();
+      await page.locator('.session[aria-current="true"]', { hasText: "alpha renamed (fork)" }).waitFor();
+      check(true, "Fork makes '<title> (fork)' and shows it");
+      // The session before it may still be fading out: the stream is the one that stays.
+      await page.locator("#stream .msg.user .user-text", { hasText: "alpha task" }).waitFor();
+      check((await page.locator("#status").textContent()) === "idle", "with the conversation so far, idle until replied to");
+
+      // Archive with the Delete key, and Undo.
+      await row("beta via F2").locator("a").focus();
+      await page.keyboard.press("Delete");
+      await page.locator("#undo", { hasText: "Archived “beta via F2”." }).waitFor();
+      check((await row("beta via F2").count()) === 0, "the Delete key archives the focused session: it leaves the list");
+      check(await page.locator("#undo button", { hasText: "Undo" }).isVisible(), "and a line says so, with Undo");
+      await shot("chat-manage-undo-light");
+      await page.locator("#undo button", { hasText: "Undo" }).click();
+      await row("beta via F2").waitFor();
+      check(!(await listed()).every((x) => x.id !== beta.id), "Undo brings it back");
+      await row("beta via F2").locator("a").focus();
+      await page.keyboard.press("Delete");
+      await page.locator("#undo", { hasText: "Archived" }).waitFor();
+      await page.locator("#undo").waitFor({ state: "hidden", timeout: 8000 });
+      check(true, "the line goes after a few seconds");
+
+      // The Archived view.
+      await page.locator("#archived-view").click();
+      check((await page.locator("#archived-view").getAttribute("aria-pressed")) === "true" && (await titles()).join("|") === "beta via F2", "Archived shows the archived sessions only");
+      await shot("chat-manage-archived-light");
+      await row("beta via F2").locator("a").click({ button: "right" });
+      await page.locator(".menu-item", { hasText: "Unarchive" }).click();
+      await page.locator("#sessions-empty", { hasText: "No archived sessions." }).waitFor();
+      check(true, "Unarchive takes it out of the Archived view");
+      await page.locator("#archived-view").click();
+      await row("beta via F2").waitFor();
+      check(true, "and back in the list");
+
+      // Delete, after a confirmation that says what goes.
+      const fork = (await listed()).find((x) => x.title === "alpha renamed (fork)")!;
+      await row("alpha renamed (fork)").locator("a").click({ button: "right" });
+      await page.locator(".menu-item", { hasText: "Delete" }).click();
+      const dialog = page.locator("#confirm");
+      await dialog.waitFor();
+      check((await page.locator("#confirm-title").textContent()) === "Delete “alpha renamed (fork)”?", "Delete asks first, naming the session");
+      check((await page.locator("#confirm-body").textContent())?.includes("deletes its Claude Code transcript"), "and saying its transcript goes too, for good");
+      check(await page.evaluate(() => document.activeElement?.getAttribute("value") === "cancel"), "with the focus on Cancel");
+      await shot("chat-manage-confirm-light");
+      await page.emulateMedia({ colorScheme: "dark" });
+      await shot("chat-manage-confirm-dark");
+      await page.emulateMedia({ colorScheme: "light" });
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden" });
+      check((await listed()).some((x) => x.id === fork.id), "Esc (or Cancel) deletes nothing");
+      await row("alpha renamed (fork)").locator("a").click({ button: "right" });
+      await page.locator(".menu-item", { hasText: "Delete" }).click();
+      await page.locator("#confirm-ok").click();
+      await row("alpha renamed (fork)").waitFor({ state: "detached" });
+      check(!(await listed()).some((x) => x.id === fork.id), "confirmed, the session is deleted and leaves the list");
+      check((await page.locator(".session[aria-current]").count()) === 1, "and another one is shown");
+
+      // Stop.
+      const slow = await m.startSession("please count slowly");
+      await page.goto(`${m.url}/?session=${slow.id}`);
+      const stop = page.locator("#stop");
+      await stop.waitFor();
+      check((await stop.textContent()) === "Stop", "a running session has Stop in the head");
+      await shot("chat-manage-stop-light");
+      await stop.click();
+      await page.locator(".note", { hasText: "Stopped" }).waitFor();
+      check(true, "Stop ends the turn: the stream says Stopped");
+      await page.locator(".msg.streaming").waitFor({ state: "detached" });
+      check(true, "and what had streamed of the answer goes");
+      await page.locator("#status", { hasText: "idle" }).waitFor();
+      check(await stop.isHidden(), "the session is idle and Stop is gone");
+      check(!(await page.locator("#reply-text").isDisabled()), "and the reply box is on");
+      await page.setViewportSize({ width: 390, height: 720 });
+      check(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "nothing scrolls sideways at 390 wide with the finder");
+      await shot("chat-manage-narrow-light");
+      await page.setViewportSize({ width: 1100, height: 720 });
+    } finally {
+      await m.stop();
+    }
+  }
 
   // ---- the motion: what arrives rises in, an approval card bounces, a tool row springs, a new session cross-fades ----
   {
