@@ -12,14 +12,17 @@ import {
   type ServerMessage,
   type SessionResponse,
   type SessionsResponse,
+  type Settings,
+  type SettingsErrorResponse,
   type WorkspacesResponse,
 } from "../shared/protocol";
 import { driverFor, type AgentDriver } from "./agent";
 import { buildId } from "./build";
 import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
-import { permissionModeFor, type Config } from "./config";
+import { applySettings, permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
+import { settingsOf, validateSettings, writeSettings } from "./settings";
 import { Store } from "./store";
 import { Sync, noTranscripts, type SyncOptions } from "./sync";
 
@@ -50,7 +53,7 @@ export function refusal(req: Request, port: number): string | null {
   if (!host || !allowed.includes(host)) return "host not allowed";
   const origin = req.headers.get("origin");
   if (origin !== null && !allowed.some((h) => origin === `http://${h}`)) return "origin not allowed";
-  if (req.method === "POST" && !(req.headers.get("content-type") ?? "").startsWith("application/json")) {
+  if ((req.method === "POST" || req.method === "PUT") && !(req.headers.get("content-type") ?? "").startsWith("application/json")) {
     return "content-type must be application/json";
   }
   return null;
@@ -72,6 +75,9 @@ interface App {
   build: string;
   /** Where the Windows drives are mounted (/mnt). */
   mounts: string;
+  /** The port the server listens on (config.port may be 0 in tests). */
+  port(): number;
+  send(message: ServerMessage): void;
 }
 
 /** The request's JSON body as an object, or null when it isn't one. */
@@ -145,9 +151,27 @@ function clipboardImage(app: App): Response {
   return new Response(Bun.file(path), { headers: { "content-type": "image/png", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 }
 
+/** PUT /api/settings: the whole Settings, validated, written to the config file, put into effect and sent to every client. */
+async function putSettings(req: Request, app: App): Promise<Response> {
+  let value: unknown;
+  try {
+    value = await req.json();
+  } catch {
+    return json({ error: "the body must be JSON", field: "" } satisfies SettingsErrorResponse, 400);
+  }
+  const settings = validateSettings(value, app.config.settings);
+  if ("field" in settings) return json(settings satisfies SettingsErrorResponse, 400);
+  writeSettings(app.config.configPath, settings);
+  applySettings(app.config, settings);
+  const answer: Settings = settingsOf(settings, app.port());
+  app.send({ type: "settings", settings: answer });
+  return json(answer);
+}
+
 async function handle(req: Request, app: App): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
+  if (req.method === "PUT" && path === "/api/settings") return putSettings(req, app);
   if (req.method === "POST") {
     if (path === "/api/sessions") return startSession(req, app);
     if (path === "/api/clipboard") return postClipboard(req, app);
@@ -163,6 +187,7 @@ async function handle(req: Request, app: App): Promise<Response> {
       const lastUsed = workspaces.some((w) => w.name === last) ? last : null;
       return json({ workspaces, lastUsed } satisfies WorkspacesResponse);
     }
+    if (path === "/api/settings") return json(settingsOf(app.config.settings, app.port()) satisfies Settings);
     if (path === "/api/sessions") return json({ sessions: app.store.list() } satisfies SessionsResponse);
     const events = /^\/api\/sessions\/([^/]+)\/events$/.exec(path);
     if (events) {
@@ -184,6 +209,7 @@ async function handle(req: Request, app: App): Promise<Response> {
     if (path === "/") return page("chat.html");
     if (path === "/prompt") return page("prompt.html");
     if (path === "/dock") return page("dock.html");
+    if (path === "/settings") return page("settings.html");
     if (path.startsWith("/assets/")) {
       const rel = normalize(path.slice("/assets/".length));
       if (rel.startsWith("..") || rel.startsWith("/")) return fail(404, "not found");
@@ -211,7 +237,7 @@ export function startServer(config: Config, driver: AgentDriver = driverFor(conf
     ...sync,
   });
   sessions.watcher = transcriptSync;
-  const app: App = { config, store, sessions, sync: transcriptSync, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts };
+  const app: App = { config, store, sessions, sync: transcriptSync, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, port: () => server.port ?? config.port, send };
   const server = Bun.serve({
     hostname: HOST,
     port: config.port,
