@@ -161,9 +161,21 @@ try {
     check(c.bg === want.bg && c.sidebar === want.sidebar, `forced ${forced} under a ${scheme} scheme, the chat view follows live (${c.bg}, sidebar ${c.sidebar})`);
     await shot(`chat-forced-${forced}`);
   }
+  // The runner's own answer (GET /api/settings, "system" here) replaces the cache as soon as it
+  // comes, so hold it back to see what the page starts in, then let it through.
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/settings", async (route: Any) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
   await page.reload();
   await page.locator(".msg.assistant").first().waitFor();
   check((await colours()).theme === "dark", "a page opened later starts in the cached theme");
+  release();
+  await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
+  check(true, "and then follows the runner's setting (system)");
+  await page.unroute("**/api/settings");
   await other.evaluate(() => localStorage.setItem("intuition.theme", "system"));
   await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
   await page.emulateMedia({ colorScheme: "light" });
