@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import {
   HOST,
+  NO_MAC_SHELL,
   NOT_RUNNING,
   OPEN_IN_TERMINAL,
   type ClipboardCapture,
@@ -11,6 +12,8 @@ import {
   type EventsResponse,
   type HealthResponse,
   type NotificationsResponse,
+  type PlatformResponse,
+  type SentResponse,
   type ServerMessage,
   type SessionMeta,
   type SessionResponse,
@@ -25,6 +28,7 @@ import { Clipboard, defaultImageRule, type ImageRule, NOT_AN_IMAGE, imagePathOf 
 import { DELETING, Manage, fakeOps, sdkOps, type Refused, type TranscriptOps } from "./manage";
 import { applySettings, permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
+import { layoutOrNull, parseReport, ShellState } from "./platform";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
 import { settingsOf, validateSettings, writeSettings } from "./settings";
 import { Store } from "./store";
@@ -80,9 +84,18 @@ interface App {
   build: string;
   /** Which image paths are taken: under the Windows drives' mounts (/mnt), or in the shell's temp folder on macOS and Linux. */
   mounts: ImageRule;
+  /** The shell's side for GET /api/platform: its sockets and its last report. */
+  shell: ShellState;
   /** The port the server listens on (config.port may be 0 in tests). */
   port(): number;
   send(message: ServerMessage): void;
+  /** Sends to the shell's sockets only (/ws?client=shell). */
+  sendShell(message: ServerMessage): void;
+}
+
+/** What a WebSocket carries: whether it connected as the shell. */
+interface SocketData {
+  shell: boolean;
 }
 
 /** The request's JSON body as an object, or null when it isn't one. */
@@ -220,12 +233,37 @@ async function putSettings(req: Request, app: App): Promise<Response> {
   return json(answer);
 }
 
+/** PUT /api/platform/shell: the shell's report, kept and sent to every client as a 'platform' message. */
+async function putShellReport(req: Request, app: App): Promise<Response> {
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  const report = parseReport(b);
+  if ("error" in report) return fail(400, report.error);
+  app.shell.setReport(report);
+  const answer = app.shell.response();
+  app.send({ type: "platform", platform: answer });
+  return json(answer satisfies PlatformResponse);
+}
+
+/**
+ * POST /api/platform/open-screen-recording: the page cannot open System Settings itself, so the
+ * shell on macOS is asked to, on its socket. 409 when none is connected.
+ */
+async function openScreenRecording(req: Request, app: App): Promise<Response> {
+  if (!(await body(req))) return fail(400, "the body must be a JSON object");
+  if (!app.shell.connected || app.shell.os !== "macos") return fail(409, NO_MAC_SHELL);
+  app.sendShell({ type: "shell_action", action: "open_screen_recording" });
+  return json({ sent: true } satisfies SentResponse, 202);
+}
+
 async function handle(req: Request, app: App): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   if (req.method === "PUT" && path === "/api/settings") return putSettings(req, app);
+  if (req.method === "PUT" && path === "/api/platform/shell") return putShellReport(req, app);
   if (req.method === "POST") {
     if (path === "/api/sessions") return startSession(req, app);
+    if (path === "/api/platform/open-screen-recording") return openScreenRecording(req, app);
     if (path === "/api/clipboard") return postClipboard(req, app);
     const messages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path);
     if (messages) return reply(req, app, messages[1]!);
@@ -242,6 +280,7 @@ async function handle(req: Request, app: App): Promise<Response> {
       return json({ workspaces, lastUsed } satisfies WorkspacesResponse);
     }
     if (path === "/api/settings") return json(settingsOf(app.config.settings, app.port()) satisfies Settings);
+    if (path === "/api/platform") return json(app.shell.response() satisfies PlatformResponse);
     if (path === "/api/sessions") return listSessions(app, url);
     const events = /^\/api\/sessions\/([^/]+)\/events$/.exec(path);
     if (events) {
@@ -275,6 +314,8 @@ async function handle(req: Request, app: App): Promise<Response> {
 
 /** Every WebSocket client is subscribed to this one topic. */
 const TOPIC = "all";
+/** And the shell's sockets to this one too, for what only the shell is asked (shell_action). */
+const SHELL_TOPIC = "shell";
 
 /**
  * Starts the runner. `driver` replaces the agent the config asks for, `mounts` the rule for image
@@ -291,6 +332,8 @@ export function startServer(
 ): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
+  const sendShell = (message: ServerMessage) => void server.publish(SHELL_TOPIC, JSON.stringify(message));
+  const shell = new ShellState(layoutOrNull(), VERSION);
   const notifications = new Notifications((notification) => send({ type: "notification", notification }));
   const sessions = new Sessions(store, driver, send, notifications, (workspace) => permissionModeFor(config, workspace));
   const transcriptSync = new Sync(store, sessions, send, config.workspaces, config.dataDir, {
@@ -299,16 +342,19 @@ export function startServer(
   });
   sessions.watcher = transcriptSync;
   const manage = new Manage(store, sessions, transcriptSync, ops, send);
-  const app: App = { config, store, sessions, sync: transcriptSync, manage, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, port: () => server.port ?? config.port, send };
-  const server = Bun.serve({
+  const app: App = { config, store, sessions, sync: transcriptSync, manage, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, shell, port: () => server.port ?? config.port, send, sendShell };
+  const server = Bun.serve<SocketData>({
     hostname: HOST,
     port: config.port,
     async fetch(req, srv) {
       const why = refusal(req, srv.port ?? config.port);
       if (why) return fail(403, why);
       try {
-        if (req.method === "GET" && new URL(req.url).pathname === "/ws") {
-          return srv.upgrade(req, { data: undefined }) ? undefined : fail(400, "expected a WebSocket upgrade");
+        const url = new URL(req.url);
+        if (req.method === "GET" && url.pathname === "/ws") {
+          // The shell connects as ?client=shell: its sockets say whether it runs (GET /api/platform).
+          const data: SocketData = { shell: url.searchParams.get("client") === "shell" };
+          return srv.upgrade(req, { data }) ? undefined : fail(400, "expected a WebSocket upgrade");
         }
         return await handle(req, app);
       } catch (e) {
@@ -320,9 +366,17 @@ export function startServer(
       open(ws) {
         ws.subscribe(TOPIC);
         ws.send(JSON.stringify({ type: "hello", sessions: store.list() } satisfies ServerMessage));
+        if (ws.data.shell) {
+          ws.subscribe(SHELL_TOPIC);
+          shell.connect();
+          send({ type: "platform", platform: shell.response() });
+        }
       },
       // Clients send nothing (docs/protocol.md): whatever arrives is ignored.
       message() {},
+      close(ws) {
+        if (ws.data.shell && shell.disconnect()) send({ type: "platform", platform: shell.response() });
+      },
     },
   });
   const port = server.port ?? config.port;

@@ -153,6 +153,16 @@
 .switch:disabled { opacity: 0.5; cursor: default; }
 label.setting { cursor: pointer; }
 
+/* ---------- setup: one line per part, its state on the right with a dot, and what to do under its name ---------- */
+.setup { margin: 0; padding: 0; list-style: none; }
+.setup-line + .setup-line { border-top: var(--hairline) solid var(--line); }
+.setup-end { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); }
+.setup-value { color: var(--muted); font-weight: var(--medium); }
+.setup-line[data-tone="ok"] .dot { background: var(--running); }
+.setup-line[data-tone="bad"] .dot { background: var(--danger); }
+.setup-line[data-tone="bad"] .setup-value { color: var(--danger); }
+.setup-line[data-tone="off"] .dot { background: var(--warn); }
+
 /* ---------- about ---------- */
 .about { margin: 0; }
 .about dt { font-weight: var(--medium); }

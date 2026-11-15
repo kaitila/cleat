@@ -11,4 +11,6 @@ declare module "*/web/settings-model.js" {
   export function putBody(state: StateLike): { body: { theme: string; permissionMode: string; workspaces: { name: string; path: string; permissionMode?: string }[]; shell: unknown; port: number }; rows: number[] };
   export function fieldKeys(field: unknown, rows?: number[]): string[];
   export function move<T>(list: T[], from: number, to: number): T[];
+  export interface SetupLine { key: string; name: string; tone: "ok" | "off" | "bad" | "unknown"; value: string; detail: string; action?: "open_screen_recording" }
+  export function setupLines(platform: import("../../src/shared/protocol").PlatformResponse | null, reachable: boolean, shell?: { hotkey: string; snipHotkey: string } | null): SetupLine[];
 }

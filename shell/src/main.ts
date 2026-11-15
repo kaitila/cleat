@@ -16,7 +16,8 @@ import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MIS
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
-import { hotkeyNotice, migratedPrefs, releaseBoth, parseRunnerSettings, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PATH, SETTINGS_WINDOW, SHELL_DEFAULTS, type ShellPrefs, settingsMessage, socketUrl, swapHotkey, withShell } from "./prefs";
+import { hotkeyNotice, migratedPrefs, releaseBoth, parseRunnerSettings, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PATH, SETTINGS_WINDOW, SHELL_DEFAULTS, type ShellPrefs, settingsMessage, swapHotkey, withShell } from "./prefs";
+import { REPORT_PATH, type ShellReport, shellAction, shellReport, shellSocketUrl } from "./report";
 import type { SelfTestResult } from "./result";
 import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Settings } from "./settings";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
@@ -411,6 +412,8 @@ async function openSettings(inactive = false): Promise<BrowserWindow | null> {
     win.on("closed", () => {
       if (settingsWindow === win) settingsWindow = null;
     });
+    // Back from System Settings, say: the Setup section shows what is so now.
+    win.on("focus", () => reportShell());
     settingsWindow = win;
     await win.loadURL(settingsUrl(settings.runnerUrl));
     if (win.isDestroyed()) return null;
@@ -625,6 +628,7 @@ function checkScreenAccess(): boolean {
     n.on("click", () => void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e)));
     n.show();
   }
+  reportShell();
   return ok;
 }
 
@@ -1076,6 +1080,7 @@ function applyPrefs(next: ShellPrefs): void {
     }
   }
   tray?.setContextMenu(trayMenu());
+  reportShell();
 }
 
 let migrating = false;
@@ -1154,6 +1159,68 @@ async function changePrefs(change: Partial<ShellPrefs>): Promise<void> {
 
 let syncSocket: Electron.WebSocket | null = null;
 
+// --- The shell's report, for the settings page's Setup section ---
+
+/** The last report the runner took, as JSON: the same one is not sent again. */
+let reportSent: string | null = null;
+let reporting = false;
+let reportAgain = false;
+
+function currentReport(): ShellReport {
+  let login: boolean | null = null;
+  try {
+    login = startsOnLogin();
+  } catch (e) {
+    console.error("reading start on login failed", e);
+  }
+  return shellReport({
+    os: OS,
+    startOnLogin: login,
+    hotkey: { wanted: prefs.hotkey, active: activeHotkey },
+    snipHotkey: { wanted: prefs.snipHotkey, active: activeSnipHotkey },
+    dockTransparent: DOCK_TRANSPARENT,
+    screen: OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted",
+  });
+}
+
+/**
+ * PUT /api/platform/shell with the shell's side, when it differs from the last one the runner took
+ * (or always, with `force`). One at a time; a failure is only logged, and the next change tries again.
+ */
+function reportShell(force = false): void {
+  if (force) reportSent = null;
+  if (reporting) {
+    reportAgain = true;
+    return;
+  }
+  const body = JSON.stringify(currentReport());
+  if (body === reportSent) return;
+  reporting = true;
+  void fetch(new URL(REPORT_PATH, settings.runnerUrl), { method: "PUT", headers: { "content-type": "application/json" }, body, signal: AbortSignal.timeout(3000) })
+    .then((res) => {
+      if (res.ok) reportSent = body;
+      // An older runner (or the self-test's stub) has no such route: nothing to do about it.
+      else if (res.status !== 404) console.error(`the runner refused the shell's report: ${res.status}`);
+    })
+    .catch(() => {
+      // The runner is not up: the socket's next open sends it.
+    })
+    .finally(() => {
+      reporting = false;
+      if (reportAgain) {
+        reportAgain = false;
+        reportShell();
+      }
+    });
+}
+
+/** What the runner asks on the shell's socket, from the settings page. Only the actions shellAction knows get here. */
+function doShellAction(action: "open_screen_recording"): void {
+  if (action === "open_screen_recording" && OS === "macos") {
+    void shell.openExternal(SCREEN_RECORDING_PANE).catch((e) => console.error("opening System Settings failed", e));
+  }
+}
+
 /**
  * One WebSocket to the runner's /ws for as long as the shell runs: on every connect it asks for the
  * settings, and it applies each 'settings' message. When it closes (the runner stopped or restarted)
@@ -1165,7 +1232,7 @@ function syncSettings(): void {
   function connect(): void {
     let ws: Electron.WebSocket;
     try {
-      ws = new net.WebSocket(socketUrl(settings.runnerUrl));
+      ws = new net.WebSocket(shellSocketUrl(settings.runnerUrl));
     } catch (e) {
       console.error("opening the settings socket failed", e);
       return again();
@@ -1173,11 +1240,18 @@ function syncSettings(): void {
     syncSocket = ws;
     ws.addEventListener("open", () => {
       attempt = 0;
-      void fetchSettings().then((s) => s && applySettings(s));
+      // A runner that just started knows nothing of the shell: the report goes again, whatever was sent before.
+      void fetchSettings().then((s) => {
+        if (s) applySettings(s);
+        reportShell(true);
+      });
     });
     ws.addEventListener("message", (event) => {
-      const s = settingsMessage((event as Event & { data?: unknown }).data);
+      const data = (event as Event & { data?: unknown }).data;
+      const s = settingsMessage(data);
       if (s) applySettings(s);
+      const action = shellAction(data);
+      if (action) doShellAction(action);
     });
     // An error is followed by close: that is where it connects again.
     ws.addEventListener("error", () => {});
@@ -1660,7 +1734,10 @@ if (args.login) {
     const second = parseArgs(argv);
     if (second.quit) app.quit();
     // `--login on|off` from the command line: the checkbox is drawn again.
-    else if (second.login) tray?.setContextMenu(trayMenu());
+    else if (second.login) {
+      tray?.setContextMenu(trayMenu());
+      reportShell();
+    }
     else void openChat(second.session);
   });
   void app.whenReady().then(start);
