@@ -472,6 +472,58 @@ try {
   check(grown.height > opened.height - 200 && grown.height <= DOCK_SIZES.open.height, `the island followed its content: ${grown.height}px now`);
   await d.shot("open-replied");
 
+  // ---- managing a session from the open dock: Stop, and a row's menu (Rename, Pin, Archive) ----
+  {
+    const slowTitle = "count slowly in the dock";
+    const slow = await runner.startSession(slowTitle);
+    const slowRow = page.locator(".session-row", { hasText: slowTitle });
+    await slowRow.click();
+    const stop = page.locator(".session-head .stop");
+    await stop.waitFor();
+    check((await stop.textContent()) === "Stop", "a running session has Stop in the open dock's head");
+    await d.settle("open");
+    await d.fits("open");
+    await d.shot("open-stop");
+    await stop.click();
+    await page.locator(".note", { hasText: "Stopped" }).waitFor();
+    await stop.waitFor({ state: "hidden" });
+    check((await page.locator(".msg.streaming").count()) === 0, "Stop ends the turn: the stream says Stopped, and Stop is gone");
+    await slowRow.click({ button: "right" });
+    const items = () => d.text(".menu:not([hidden]) .menu-item");
+    check((await items()).join(",") === "Rename,Pin,Archive", "right-click on a row opens a small menu: Rename, Pin, Archive");
+    await d.fits("open");
+    await d.shot("open-menu");
+    await page.locator(".menu-item", { hasText: "Pin" }).click();
+    await page.locator(".row-title.pinned", { hasText: slowTitle }).waitFor();
+    check((await d.text(".row-title"))[0] === slowTitle, "Pin puts it at the top of the list, marked");
+    await slowRow.click({ button: "right" });
+    await page.locator(".menu-item", { hasText: "Rename" }).click();
+    const input = page.locator(".session-row input.rename");
+    check((await input.inputValue()) === slowTitle, "Rename edits the title in its row");
+    await d.leave();
+    await page.waitForTimeout(900);
+    check((await d.lastCall()).state === "open", "and the dock stays open while it is edited, the pointer away");
+    await d.hover();
+    await input.fill("renamed in the dock");
+    await input.press("Enter");
+    await page.locator(".row-title", { hasText: "renamed in the dock" }).waitFor();
+    const all = async (q = "") => ((await (await runner.get(`/api/sessions${q}`)).json()) as { sessions: { id: string; title: string }[] }).sessions;
+    check((await all()).some((x) => x.id === slow.id && x.title === "renamed in the dock"), "Enter saves it in the runner");
+    await page.locator(".row-title", { hasText: "renamed in the dock" }).click({ button: "right" });
+    await page.locator(".menu-item", { hasText: "Unpin" }).click();
+    await page.locator(".row-title.pinned").waitFor({ state: "detached" });
+    await page.locator(".row-title", { hasText: "renamed in the dock" }).click({ button: "right" });
+    await page.locator(".menu-item", { hasText: "Archive" }).click();
+    await page.locator(".row-title", { hasText: "renamed in the dock" }).waitFor({ state: "detached" });
+    check((await all("?archived=1")).some((x) => x.id === slow.id), "Archive takes it out of the dock's list, archived in the runner");
+    check((await d.lastCall()).state === "open", "and the dock stayed open throughout");
+    await page.locator(".session-row", { hasText: needs }).click();
+    await page.locator('.session-row[aria-current="true"]', { hasText: needs }).waitFor();
+    // Back where the next part starts: the reply box has the focus.
+    await page.locator("#reply-text:not([disabled])").waitFor();
+    await box.click();
+  }
+
   // ---- what keeps it open ----
   await d.leave();
   await page.waitForTimeout(900);
