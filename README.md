@@ -1,5 +1,7 @@
 # intuition
 
+Website: <https://kaitila.github.io/intuition/>
+
 Hand a task to a Claude Code agent from anywhere on your computer, without opening a terminal.
 
 Press a hotkey and a small pop-up appears in the middle of the screen with whatever you just copied already attached: text, or a screenshot. Pick a workspace (a project folder), type what you want done, press Enter, and go back to what you were doing. The agent works in the background. A chat window lists every session and shows the selected one streaming as it works, and when a tool call needs your say it waits there for your Allow or Deny. A small dock at the top of the screen tells you when a session has finished or needs you.
