@@ -29,6 +29,8 @@ const ICON_SIZE = 32;
 const OS = shellOs();
 /** False on a Linux X11 desktop without a compositor: the dock is then an opaque window the island's size. */
 const DOCK_TRANSPARENT = dockTransparent(OS);
+/** A dock page that has not loaded in this long is given up on, and its window replaced at the next check: a stuck page process must not wedge the dock. */
+const DOCK_LOAD_MS = 15_000;
 /** What an opaque dock (and the snip, before its page draws) shows behind the page. */
 const OPAQUE_BACKGROUND = "#0f0f11";
 /** Unlikely to be anyone's shortcut, so the self-test never clashes with a running shell. */
@@ -933,7 +935,16 @@ async function loadDock(): Promise<void> {
     // A page that loads starts over: it has no state until it reports one.
     forgetDockState();
     dockStatus = 0;
-    await win.loadURL(dockUrl(settings.runnerUrl));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), DOCK_LOAD_MS);
+    });
+    const loaded = await Promise.race([win.loadURL(dockUrl(settings.runnerUrl)), late]).finally(() => clearTimeout(timer));
+    if (loaded === "late") {
+      // Its page process is stuck: the window goes, and the next check starts over in a new one.
+      if (dock === win) closeDock();
+      throw new Error(`the dock's page did not load in ${DOCK_LOAD_MS / 1000} s`);
+    }
     if (win.isDestroyed() || dock !== win) return;
     // A runner without the page answers 404 with a body, which loads: that is not the dock.
     if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl)} answered ${dockStatus}`);
@@ -1417,6 +1428,16 @@ async function selfTest(): Promise<SelfTestResult> {
       gone = details.reason;
     });
     win.webContents.forcefullyCrashRenderer();
+    for (let i = 0; i < 20 && !win.webContents.isCrashed(); i++) await sleep(100);
+    // Under Chromium's sandbox on Linux (a CI runner, not root in WSL) the call can leave the process running:
+    // the self-test kills it itself, as a crash would. The shell's part, hiding and replacing the window, is the same.
+    if (!win.webContents.isCrashed()) {
+      try {
+        process.kill(win.webContents.getOSProcessId(), "SIGKILL");
+      } catch (e) {
+        r.errors.push(`dock: the page's process could not be killed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     for (let i = 0; i < 40 && win.isVisible(); i++) await sleep(100);
     r.dockIgnoresMouseAfterCrash = (await cursorAt(middle("open"))) && !win.isVisible();
     if (!r.dockIgnoresMouseAfterCrash) {
