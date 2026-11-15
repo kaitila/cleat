@@ -39,6 +39,7 @@ describe("GET /api/settings", () => {
     expect(s).toEqual({
       theme: "system",
       permissionMode: "auto",
+      agent: "claude",
       workspaces: [
         { name: "work", path: join(r.dir, "work") },
         { name: "gone", path: join(r.dir, "gone") },
@@ -98,7 +99,7 @@ describe("PUT /api/settings", () => {
     // The file reads back as the same settings.
     const reread = loadConfig(r.env);
     const { port: _port, ...rest } = stored;
-    expect(reread.settings).toEqual(rest);
+    expect<unknown>(reread.settings).toEqual(rest);
 
     // In effect at once: the workspaces the pages get, and the mode the next turn asks for.
     const ws = (await (await r.get("/api/workspaces")).json()) as { workspaces: { name: string }[] };

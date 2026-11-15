@@ -1,6 +1,7 @@
 // `intuition doctor`: which layout this is, and whether each prerequisite and part is there, each with a one-line fix.
 // The probes are passed in, so tests check the report without the machine's own git, Node or Claude Code.
 import { existsSync, readFileSync } from "node:fs";
+import { codexBinary } from "../runner/agent-codex";
 import { loadConfig } from "../runner/config";
 import { isInstalled, login, pidFile } from "../shell/install";
 import { autostartFile, autostartOn, currentPlatform, type Layout, type Platform } from "../shell/platform";
@@ -33,6 +34,8 @@ export interface Probes {
   shellPid(): number | null;
   /** Whether the shell starts at login; null when it cannot be told. */
   login(): Promise<boolean | null>;
+  /** The codex binary the runner's Codex agent runs (agent-codex.ts codexBinary), or null when it isn't installed. */
+  codex(): string | null;
 }
 
 /** Electron's installer needs this Node (node_modules/electron's engines). */
@@ -103,6 +106,16 @@ export async function checks(platform: Platform, probes: Probes, env: Env = proc
     add({ name: "display", ok: unavailable === null, needed: false, detail: unavailable ?? (env.WAYLAND_DISPLAY ? `WAYLAND_DISPLAY=${env.WAYLAND_DISPLAY}` : `DISPLAY=${env.DISPLAY}`), fix: "run intuition from a desktop session: the shell needs a display" });
   }
 
+  // Codex is the second agent (docs/agents.md): optional, as sessions run on Claude Code unless the config says codex.
+  const codex = probes.codex();
+  const codexVersion = codex === null ? null : probes.output([codex, "--version"]);
+  add({ name: "Codex", ok: codexVersion !== null, needed: false, detail: codexVersion ?? "not installed", fix: "`bun install` in the repo installs it (@openai/codex-sdk); only needed for sessions on Codex" });
+  if (codexVersion !== null) {
+    const status = probes.output([codex!, "login", "status"]);
+    const loggedIn = status !== null && /^logged in/i.test(status);
+    add({ name: "Codex login", ok: loggedIn, needed: false, detail: loggedIn ? status! : "not logged in", fix: "log in: `codex login` (only needed for sessions on Codex)" });
+  }
+
   const url = config.ok ? await probes.runner() : null;
   add({ name: "runner", ok: url !== null, needed: false, detail: url ? `running at ${url}` : "not running", fix: "`intuition start` (or `intuition up`)" });
 
@@ -158,9 +171,10 @@ export function firstLine(cmd: string[]): string | null {
   const exe = Bun.which(cmd[0]!);
   if (!exe) return null;
   try {
-    const p = Bun.spawnSync([exe, ...cmd.slice(1)], { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 20_000 });
+    const p = Bun.spawnSync([exe, ...cmd.slice(1)], { stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 20_000 });
     if (p.exitCode !== 0) return null;
-    const text = p.stdout.toString().trim();
+    // Some answer on stderr only (`codex login status`).
+    const text = p.stdout.toString().trim() || p.stderr.toString().trim();
     // A JSON answer (claude auth status) is kept whole, on one line.
     return text.startsWith("{") ? text.replace(/\s+/g, " ") : (text.split("\n")[0] ?? "");
   } catch {
@@ -180,6 +194,7 @@ export function machineProbes(platform: Platform, env: Env = process.env): Probe
       }
     },
     runner: () => runnerUrl(env),
+    codex: codexBinary,
     shellInstalled: () => {
       try {
         return isInstalled(platform.shellPaths());

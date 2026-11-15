@@ -3,12 +3,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { DEFAULT_PORT, type PermissionMode, type Settings, type Workspace } from "../shared/protocol";
+import { AGENTS, DEFAULT_PORT, type AgentKind, type PermissionMode, type Settings, type Workspace } from "../shared/protocol";
 
 /** Only these two: every other SDK mode (the ones that allow calls without the classifier or the person) is refused when the config is read. */
 const Mode = z.enum(["auto", "default"]);
 
 export const DEFAULT_PERMISSION_MODE: PermissionMode = "auto";
+
+const Agent = z.enum(AGENTS as [AgentKind, ...AgentKind[]]);
+
+export const DEFAULT_AGENT: AgentKind = "claude";
 
 /**
  * The settings in the config file: what loadConfig reads and PUT /api/settings validates (settings.ts).
@@ -17,7 +21,8 @@ export const DEFAULT_PERMISSION_MODE: PermissionMode = "auto";
 export const SettingsSchema = z.object({
   theme: z.enum(["system", "light", "dark"]).default("system"),
   permissionMode: Mode.default(DEFAULT_PERMISSION_MODE),
-  workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1), permissionMode: Mode.optional() })),
+  agent: Agent.default(DEFAULT_AGENT),
+  workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1), permissionMode: Mode.optional(), agent: Agent.nullish().transform((a) => a ?? undefined) })),
   shell: z
     .object({ hotkey: z.string().min(1), snipHotkey: z.string().min(1), dock: z.boolean(), startOnLogin: z.boolean() })
     .nullable()
@@ -25,7 +30,7 @@ export const SettingsSchema = z.object({
 });
 
 /** The settings without the port, as stored in Config and written by the runner. */
-export type StoredSettings = Omit<Settings, "port">;
+export type StoredSettings = Omit<Settings, "port" | "agent"> & { agent: AgentKind };
 
 const ConfigFile = SettingsSchema.extend({
   port: z.number().int().min(0).max(65535).default(DEFAULT_PORT),
@@ -38,6 +43,10 @@ export interface Config {
   permissionMode: PermissionMode;
   /** Workspaces whose own `permissionMode` overrides the top-level one, by name. */
   workspaceModes: Record<string, PermissionMode>;
+  /** The agent new sessions run on: config `agent`, "claude" when left out. */
+  agent: AgentKind;
+  /** Workspaces whose own `agent` overrides the top-level one, by name. */
+  workspaceAgents: Record<string, AgentKind>;
   /** The settings as the file has them (paths as written). PUT /api/settings replaces them through applySettings. */
   settings: StoredSettings;
   dataDir: string;
@@ -57,6 +66,11 @@ export const DEFAULT_CONFIG = {
 /** The permission mode a session in this workspace asks for: the workspace's own, else the top-level one. */
 export function permissionModeFor(config: Pick<Config, "permissionMode" | "workspaceModes">, workspace: string): PermissionMode {
   return Object.hasOwn(config.workspaceModes, workspace) ? config.workspaceModes[workspace]! : config.permissionMode;
+}
+
+/** The agent a new session in this workspace runs on: the workspace's own, else the top-level one. */
+export function agentFor(config: Pick<Config, "agent" | "workspaceAgents">, workspace: string): AgentKind {
+  return Object.hasOwn(config.workspaceAgents, workspace) ? config.workspaceAgents[workspace]! : config.agent;
 }
 
 export function expandHome(path: string): string {
@@ -82,10 +96,15 @@ export function duplicateWorkspace(workspaces: { name: string }[]): number | nul
  * Puts new settings into a running config. The workspaces array is changed in place, since the
  * transcript sync holds it; the next turn of any session asks for the new permission mode.
  */
-export function applySettings(config: Pick<Config, "workspaces" | "permissionMode" | "workspaceModes" | "settings">, settings: StoredSettings): void {
+export function applySettings(
+  config: Pick<Config, "workspaces" | "permissionMode" | "workspaceModes" | "agent" | "workspaceAgents" | "settings">,
+  settings: StoredSettings,
+): void {
   config.settings = settings;
   config.permissionMode = settings.permissionMode;
   config.workspaceModes = Object.fromEntries(settings.workspaces.flatMap((w) => (w.permissionMode ? [[w.name, w.permissionMode]] : [])));
+  config.agent = settings.agent;
+  config.workspaceAgents = Object.fromEntries(settings.workspaces.flatMap((w) => (w.agent ? [[w.name, w.agent]] : [])));
   config.workspaces.splice(
     0,
     config.workspaces.length,
@@ -121,6 +140,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     workspaces: [],
     permissionMode: settings.permissionMode,
     workspaceModes: {},
+    agent: settings.agent,
+    workspaceAgents: {},
     settings,
     dataDir,
     configPath: path,

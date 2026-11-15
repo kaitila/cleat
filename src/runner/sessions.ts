@@ -1,9 +1,9 @@
 // Starts sessions, continues them with replies, and runs their turns in the background: every
 // output of the agent driver is stored (events) or passed on (deltas), and sent to the WebSocket clients.
-import type { ApprovalDecision, Notification, PermissionMode, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
+import type { AgentKind, ApprovalDecision, Notification, PermissionMode, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
 import type { AgentDriver, ApprovalAsk, NewEvent } from "./agent";
 import { approvalBody, bodyOf, NO_TEXT, type Notifications } from "./notifications";
-import { DEFAULT_PERMISSION_MODE } from "./config";
+import { DEFAULT_AGENT, DEFAULT_PERMISSION_MODE } from "./config";
 import type { Store } from "./store";
 
 export const NO_RESULT = "the turn ended without a result";
@@ -60,8 +60,11 @@ export class Sessions {
     this.notifications?.add({ kind, sessionId: id, title: this.store.get(id)?.title ?? "", body });
   }
 
-  /** Creates the session, stores the prompt as its first event and starts the turn in the background. */
-  start(workspace: Workspace, prompt: string, imagePath?: string): SessionMeta {
+  /**
+   * Creates the session on `agent`, stores the prompt as its first event and starts the turn in the
+   * background. The agent is the session's for good: every reply goes to it.
+   */
+  start(workspace: Workspace, prompt: string, imagePath?: string, agent: AgentKind = DEFAULT_AGENT): SessionMeta {
     const now = new Date().toISOString();
     const session = this.store.create({
       id: crypto.randomUUID(),
@@ -70,6 +73,7 @@ export class Sessions {
       cwd: workspace.path,
       title: titleOf(prompt),
       source: "intuition",
+      agent,
       status: "running",
       createdAt: now,
       updatedAt: now,
@@ -240,7 +244,7 @@ export class Sessions {
       this.record(id, { kind: "stopped" }, "idle");
     };
     try {
-      for await (const out of this.driver.run({ prompt, cwd: session.cwd, resume: session.claudeSessionId, title: session.title, permissionMode, signal, interrupt, approve })) {
+      for await (const out of this.driver.run({ agent: session.agent ?? DEFAULT_AGENT, prompt, cwd: session.cwd, resume: session.claudeSessionId, title: session.title, permissionMode, signal, interrupt, approve })) {
         // A turn cut off by the runner stopping stays "running" on disk, and the next start records it as failed.
         if (signal.aborted) return;
         // Stopped: only the conversation's id is still worth keeping; the rest (an aborted result) is not stored.

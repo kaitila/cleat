@@ -1,8 +1,10 @@
-// The agent driver: what runs one turn of a session. Two implementations: Claude Code through the
-// Agent SDK (agent-claude.ts) and a scripted fake for tests and CI (agent-fake.ts).
-import type { ApprovalDecision, PermissionMode, SessionEvent } from "../shared/protocol";
+// The agent driver: what runs one turn of a session. Three implementations: Claude Code through the
+// Agent SDK (agent-claude.ts), OpenAI Codex through the Codex SDK (agent-codex.ts), and a scripted
+// fake for tests and CI (agent-fake.ts). docs/agents.md says what each supports.
+import type { AgentKind, ApprovalDecision, PermissionMode, SessionEvent } from "../shared/protocol";
 import type { Config } from "./config";
 import { claudeDriver } from "./agent-claude";
+import { codexDriver } from "./agent-codex";
 import { fakeDriver } from "./agent-fake";
 
 /** A SessionEvent before the store gives it its seq and time. */
@@ -18,10 +20,12 @@ export interface ApprovalAsk {
 }
 
 export interface TurnInput {
+  /** The session's agent (SessionMeta.agent): the driver for it runs the turn. */
+  agent: AgentKind;
   prompt: string;
   /** The workspace folder. */
   cwd: string;
-  /** Claude Code's session id to continue, or null for a new conversation. */
+  /** The agent's conversation id to continue (Claude Code's session id, Codex's thread id), or null for a new conversation. */
   resume: string | null;
   /** The session's title, given to a new conversation so the transcript (and `claude --resume`'s picker) shows it. */
   title?: string;
@@ -60,6 +64,12 @@ export interface AgentDriver {
   run(input: TurnInput): AsyncIterable<AgentOutput>;
 }
 
+/** One driver per agent, as one: each turn goes to the driver of its session's agent. */
+export function byAgent(drivers: Record<AgentKind, AgentDriver>): AgentDriver {
+  return { run: (input) => drivers[input.agent].run(input) };
+}
+
+/** The fake agent stands in for both agents (INTUITION_FAKE_AGENT=1). */
 export function driverFor(config: Config): AgentDriver {
-  return config.fakeAgent ? fakeDriver() : claudeDriver();
+  return config.fakeAgent ? fakeDriver() : byAgent({ claude: claudeDriver(), codex: codexDriver() });
 }

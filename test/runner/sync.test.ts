@@ -134,7 +134,7 @@ describe("eventsOf", () => {
 });
 
 describe("claudeOptions for the sync", () => {
-  const input = { prompt: "hi", cwd: "/tmp/work", resume: null, title: "My task", permissionMode: "auto" as const, signal: new AbortController().signal, approve: async () => "deny" as const };
+  const input = { agent: "claude" as const, prompt: "hi", cwd: "/tmp/work", resume: null, title: "My task", permissionMode: "auto" as const, signal: new AbortController().signal, approve: async () => "deny" as const };
 
   test("names the runner as the entrypoint, so Claude Code's resume picker lists its sessions", () => {
     const env = claudeOptions(input, new AbortController(), () => {}).env!;
