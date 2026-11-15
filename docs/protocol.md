@@ -19,29 +19,39 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 |---|---|---|
 | `GET /health` | | `HealthResponse`: `{ ok: true, version, build }`. `build` is a hash of the code the runner process loaded ([D0011](decisions/D0011-stale-runner-and-shell.md)): `start` and `up` restart a runner whose `build` differs from the repo's. |
 | `GET /api/workspaces` | | `WorkspacesResponse`: the config's workspaces and the last one used |
-| `GET /api/sessions` | | `SessionsResponse`, newest first |
+| `GET /api/sessions?archived=1` | | `SessionsResponse`: the sessions that aren't archived, pinned first, then newest first. With `archived=1`, only the archived ones (same order). 400 for an `archived` other than `0` or `1`. |
 | `POST /api/sessions` | `StartSessionRequest` | 201 `SessionResponse`. The turn runs in the background. Remembers the workspace as last used. 400 for an `imagePath` that is refused (see "Clipboard images"). |
 | `GET /api/sessions/:id/events?after=<seq>` | | `EventsResponse`: stored events with a higher seq (all without `after`). The first request for an imported session reads its history from the transcript first. |
 | `POST /api/sessions/:id/messages` | `ReplyRequest` | 202 `SessionResponse`, the session `running`. Stores the reply as a `user` event and runs a turn in the background that resumes the Claude Code session. 404 for an unknown session, 400 for an empty prompt or an `imagePath` that is refused, 409 while a turn runs or an approval is open, and 409 `OPEN_IN_TERMINAL` ("it looks open in a terminal: ...") when another process wrote to the session's transcript in the last two minutes, unless the body has `force: true` (see "Terminal sessions"). 400 for a `force` that isn't a boolean. A session in `error` takes a reply too: it resumes its conversation, or starts a new one in the same workspace when it never got a Claude Code session id. |
 | `POST /api/sessions/:id/approvals/:approvalId` | `ApprovalRequest` | 200 `SessionResponse`. 404 for an unknown or already answered approval. |
+| `POST /api/sessions/:id/rename` | `RenameRequest` | 200 `SessionResponse`. The title is cut as any title (first line, 80 characters); 400 when that leaves nothing. Also the transcript's custom title, so `claude --resume` shows it (see "Managing sessions"). |
+| `POST /api/sessions/:id/stop` | `{}` | 200 `SessionResponse` once the interrupted turn has ended (at most 10 seconds): `idle`, with a `stopped` event. 409 `NOT_RUNNING` when the runner runs no turn of the session (a turn arriving from a terminal isn't the runner's to stop). |
+| `POST /api/sessions/:id/archive` | `ArchiveRequest` | 200 `SessionResponse`. `archived: true` hides it from the default lists, `false` brings it back. Any session, from the terminal too. 400 for a value that isn't a boolean. |
+| `POST /api/sessions/:id/pin` | `PinRequest` | 200 `SessionResponse`. 400 for a value that isn't a boolean. |
+| `POST /api/sessions/:id/fork` | `{}` | 201 `SessionResponse`: a new session of the runner's from the conversation so far, idle, titled `<title> (fork)`. 409 while a turn runs, and when the session has no Claude Code conversation yet. |
+| `POST /api/sessions/:id/delete` | `{}` | 200 `DeletedResponse` `{ deleted: id }`: the session, its events and its transcript are gone. 409 `TERMINAL_NOT_DELETED` for a session from the terminal (archive it instead), 409 while a turn runs; 500 when the transcript can't be deleted and is still there (the session stays). |
 | `GET /api/clipboard` | | The latest `ClipboardCapture`, or `{}` before the first one |
 | `POST /api/clipboard` | `ClipboardPostRequest` | 200 the stored `ClipboardCapture`, which replaces the one before (an empty body stores an empty capture). Sent by the Windows shell on the hotkey. `text` is cut to 20,000 characters. 400 for an `imagePath` that is refused, and the capture before it stays. |
 | `GET /api/clipboard/image` | | The latest capture's PNG (`image/png`), for the pop-up's thumbnail. 404 when the latest capture has no image or its file is gone. The request names no file. |
 | `GET /api/notifications?after=<seq>` | | `NotificationsResponse`: the kept notifications with a higher seq, and the newest seq given out. For a client that polls; the dock gets them on the WebSocket. |
 
+Every `/api/sessions/:id/...` route answers 404 for an unknown session. Rename, stop, archive, pin, fork and delete take a JSON object body (`{}` when there is nothing to say) and pass the port's guard as every route does.
+
 ## WebSocket
 `GET /ws`. The runner sends `ServerMessage`s; clients send nothing.
 - On connect: `hello` with every session.
-- `session` whenever a session's metadata changes (status, title, lastSeq).
+- `session` whenever a session's metadata changes (status, title, lastSeq, archived, pinned). `hello` and `session` carry archived sessions too, with `archived: true`: the pages leave them out of their lists themselves.
+- `removed` when a session was deleted: its record and events are gone.
 - `event` for every stored event, for all sessions. A client that reconnects fetches what it missed with `GET /api/sessions/:id/events?after=<seq>`.
 - `delta` for assistant text as it streams. Deltas aren't stored; the complete text follows as an `assistant_text` event, and the client replaces the streamed text with it.
 - `notification` for each `Notification`, at the moment it is recorded. None is sent again on connect: a client shows only what arrives while it is connected. It follows the `session` message that carries the status it is about (`waiting_approval`, `idle` or `error`).
 
 ## Sessions and events
 - A session is one Claude Code conversation in one workspace. The runner keeps its own id and stores Claude Code's session id once known, to resume with it.
-- Each turn's SDK messages are reduced to `SessionEvent`s: `user`, `assistant_text`, `tool_use`, `tool_result`, `approval_request`, `approval_resolved`, `auto_denied`, `permission_mode`, `result`, `error`.
+- Each turn's SDK messages are reduced to `SessionEvent`s: `user`, `assistant_text`, `tool_use`, `tool_result`, `approval_request`, `approval_resolved`, `auto_denied`, `permission_mode`, `result`, `error`. A turn the person stopped ends with `stopped` instead of `result` or `error`.
 - `SessionMeta.permissionMode` is the permission mode the session runs in, as Claude Code reports it (the `init` system message at the start of each turn, and `status` messages when it changes). It is absent until the first turn reports it, and may be a mode other than the two the config allows (for example `"default"` where auto mode is unavailable).
-- Status: `running` while a turn runs, `waiting_approval` while at least one approval is open, `idle` after a `result`, `error` after a failed turn.
+- Status: `running` while a turn runs, `waiting_approval` while at least one approval is open, `idle` after a `result` or `stopped`, `error` after a failed turn.
+- `SessionMeta.archived` and `SessionMeta.pinned`: `true` when set, absent otherwise. Neither counts as activity (`updatedAt` stays).
 - `SessionMeta.source`: `"intuition"` for a session the runner started, `"terminal"` for one it imported (below). The runner always sends it; a session stored before it existed reads as `"intuition"`.
 - `SessionMeta.terminalTurn`: `true` while the session is `running` only because its transcript grows (a turn arriving from a terminal), absent otherwise. The pages show "in terminal" for it and keep the reply box on ([D0016](decisions/D0016-synced-sessions-in-the-pages.md)). See "Terminal sessions".
 - Stored under the data folder (`~/.local/share/intuition`, or `INTUITION_DATA_DIR`): `sessions.json` for metadata, `events/<id>.jsonl` for events, `state.json` for the last workspace used, `sync.json` for the transcript sync.
@@ -54,6 +64,18 @@ Claude Code keeps every session as a transcript under `~/.claude/projects`, the 
 - **One id each.** A transcript the runner owns (any Claude Code session id its sessions have had) is never imported, and an imported one keeps its runner id across restarts (`sync.json`).
 - **Replies.** A reply to any session resumes it through the SDK, as for the runner's own. It first stores what the transcript gained since the last round. When another process wrote to the transcript in the last two minutes (later than 5 seconds after the runner's own last turn of it), the reply is a 409 `OPEN_IN_TERMINAL` unless the body has `force: true`. A session shown `running` only because its transcript grows takes a reply on the same terms; one whose runner turn runs is busy, force or not.
 - **In the terminal.** The runner's sessions record the entrypoint `intuition`, so Claude Code's resume picker (`claude --resume`, `/resume`) lists them, by the session's title, and `claude --resume <claudeSessionId>` continues them.
+
+## Managing sessions
+The person's operations on a session ([D0020](decisions/D0020-session-management.md)). Rename, fork and delete also act on the Claude Code transcript, through the SDK's `renameSession`, `forkSession` and `deleteSession`; archive and pin are the runner's alone.
+- **Rename**: the runner's title and the transcript's custom title. The write counts as the runner's own: it neither shows the session running nor makes the next reply a 409 `OPEN_IN_TERMINAL`. A transcript that can't be renamed is logged; the runner's title stands. A terminal session keeps the new title, since the sync reads it back from the transcript.
+- **Stop**: open approvals are resolved as `deny`, then the turn is interrupted (the SDK's `interrupt`, and aborted if it hasn't ended 5 seconds later). Nothing the turn says after that is stored; it ends with a `stopped` event and the session `idle`. No notification is recorded.
+- **Archive**: hidden from `GET /api/sessions` (listed with `?archived=1`) and from the dock; kept on disk and still on the WebSocket, with `archived: true`.
+- **Pin**: listed first.
+- **Fork**: the transcript is forked into a new Claude Code session (its custom title `<title> (fork)`), and a new runner session takes it, `source: "intuition"`, `idle`, with a copy of the source's events. Its first reply resumes the fork, not the source. The sync never imports the new transcript as a terminal session.
+- **Delete**: only a session the runner started (`source: "intuition"`), between turns. The transcript goes first; then the runner's record and events, and a `removed` message. Its Claude Code ids stay known to the sync, so a transcript left behind is never imported back. A session from the terminal is only archived.
+- A turn whose result is in but whose query is still closing counts as over: a reply, a fork and a delete go ahead (fork and delete wait, at most 5 seconds, for it to close), and it never counts as another process writing to the transcript.
+
+The pages: the chat view has a search box (title and workspace, every word, as you type), a workspace filter and an Archived view above the list; each row has a "…" button and a right-click menu (Rename in place, Pin, Fork, Archive, Delete); F2 renames and the Delete key archives the focused row or the session shown, with Undo on a line under the list for six seconds; Delete asks first, in the page, naming the session and saying its transcript goes too; the head has Stop while the runner runs a turn. The dock has Stop in its open view and a right-click menu on rows with Rename, Pin and Archive.
 
 ## Permissions
 Each turn asks for the permission mode of its workspace: the workspace's own `permissionMode` in the config file, else the top-level one, else `"auto"` ([D0012](decisions/D0012-auto-mode.md)). Only `"auto"` and `"default"` are accepted; any other value is refused when the config is read. Sessions also load the workspace's own Claude Code settings (user, project and local), so its allow and deny rules apply.
@@ -105,4 +127,4 @@ The runner binds `127.0.0.1` only. A web page in any browser can still send requ
 ## Test hooks
 - `INTUITION_CONFIG`: path of the config file. `INTUITION_DATA_DIR`: the data folder. `INTUITION_PORT`: the port (0 picks a free one).
 - `INTUITION_FAKE_AGENT=1`: sessions run against a scripted fake instead of Claude Code, so tests and CI need no login. The fake is described where it is defined, in `src/runner/`.
-  With the fake agent the runner reads no transcripts; tests give the sync their own (`startServer`'s `sync` argument).
+  With the fake agent the runner reads no transcripts; tests give the sync their own (`startServer`'s `sync` argument). Nor does it rename, fork or delete any: a fork is a new fake conversation that remembers the old one's prompts; tests give their own (`startServer`'s `ops` argument).

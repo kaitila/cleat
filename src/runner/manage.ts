@@ -1,4 +1,4 @@
-// The person's operations on sessions (D0017): rename, archive, pin, fork and delete. Stop is the
+// The person's operations on sessions (D0020): rename, archive, pin, fork and delete. Stop is the
 // Sessions' own (sessions.ts interrupt), as it reaches into a running turn.
 // Rename, fork and delete also act on Claude Code's transcript, through the SDK's session functions
 // (renameSession, forkSession, deleteSession: read sdk.d.ts before changing them). Archive and pin

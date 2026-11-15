@@ -1,4 +1,4 @@
-// The pure rules of managing sessions in the pages (src/web/chat-manage.js, D0017): which sessions
+// The pure rules of managing sessions in the pages (src/web/chat-manage.js, D0020): which sessions
 // a list shows and in what order, what a session's menu offers, and what the delete confirmation says.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";

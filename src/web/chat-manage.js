@@ -1,4 +1,4 @@
-// Managing sessions from the pages (D0017): which sessions a list shows and in what order, what a
+// Managing sessions from the pages (D0020): which sessions a list shows and in what order, what a
 // session's menu offers, what the delete confirmation says, the runner's routes, and two small DOM
 // pieces both pages use: the menu and the inline rename. Shared by chat.js and dock.js.
 // The pure parts have no DOM and no network, so they are unit tested with bun (test/web/).

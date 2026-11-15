@@ -1,4 +1,4 @@
-// The person's operations on sessions (src/runner/manage.ts, Sessions.interrupt, D0017): rename, stop,
+// The person's operations on sessions (src/runner/manage.ts, Sessions.interrupt, D0020): rename, stop,
 // archive, pin, fork and delete, against the fake agent and transcripts kept in memory.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { SessionMessage } from "@anthropic-ai/claude-agent-sdk";
