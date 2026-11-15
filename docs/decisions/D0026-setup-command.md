@@ -1,6 +1,6 @@
 # D0026: `intuition setup` asks, then does; `--yes` takes defaults and opens no pop-up; the shell opens the pop-up with `--prompt`
 
-Date: 2026-11-15. Status: active. Task: T-0033. Builds on [D0019](D0019-platform-layouts.md), [D0022](D0022-runner-owns-the-settings.md) and [D0024](D0024-no-default-workspaces.md).
+Date: 2026-11-15. Status: active; how setup asks, its order and the login are now [D0030](D0030-console-setup.md). Task: T-0033. Builds on [D0019](D0019-platform-layouts.md), [D0022](D0022-runner-owns-the-settings.md) and [D0024](D0024-no-default-workspaces.md).
 
 ## Context
 The owner wants a fresh clone to run with one copy-paste line, on any machine (Windows with WSL, macOS, Linux), with start at login on by default, and a way back out (`intuition uninstall`).

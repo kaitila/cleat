@@ -179,7 +179,7 @@ export interface SetupOptions {
   workspaces?: WorkspaceEntry[];
   /** --link-dir: where the command's link goes (else the folder bun is in). */
   linkDir?: string;
-  /** --login / --no-login: start at login, without asking. */
+  /** --no-login: start at login off, without asking (else it is asked, and on by default). */
   login?: boolean;
   /** --permission-mode: auto, or default (ask for everything). */
   permissionMode?: PermissionMode;
@@ -202,7 +202,6 @@ export function parseSetupArgs(words: string[], cwd = process.cwd()): { ok: true
     const flag = word.startsWith("--") && eq > 0 ? word.slice(0, eq) : word;
     if (flag === "--yes" || flag === "-y") options.yes = true;
     else if (flag === "--no-login") options.login = false;
-    else if (flag === "--login") options.login = true;
     else if (VALUED.includes(flag)) {
       const value = flag !== word ? word.slice(eq + 1) : words[++i];
       if (value === undefined || (flag === word && value.startsWith("--"))) return { ok: false, error: `${flag} needs a value` };
@@ -225,14 +224,13 @@ export function parseSetupArgs(words: string[], cwd = process.cwd()): { ok: true
   return { ok: true, options };
 }
 
-/** The flags that answer a question each: without a terminal, setup needs --yes or all of them. */
+/** The flags that answer a question each: without a terminal, setup needs --yes or all of them. Start at login needs none: it is on unless --no-login. */
 export function unanswered(options: SetupOptions): string[] {
   const missing: string[] = [];
   if (!options.workspaces) missing.push("--workspace");
   if (options.hotkey === undefined) missing.push("--hotkey");
   if (options.snipHotkey === undefined) missing.push("--snip-hotkey");
   if (options.permissionMode === undefined) missing.push("--permission-mode");
-  if (options.login === undefined) missing.push("--no-login (or --login)");
   return missing;
 }
 

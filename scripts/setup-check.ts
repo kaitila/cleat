@@ -117,9 +117,16 @@ try {
   while (Date.now() < end && !existsSync(pidFile)) await Bun.sleep(250);
   check(existsSync(pidFile), "the shell runs (it wrote its pid)");
 
-  const doctor = await run(["intuition", "doctor"], home);
-  const lines = doctor.out.split("\n").filter((l) => /^\s{2}(ok|MISS|--)\s/.test(l));
-  check(doctor.code === 0 && lines.length > 0 && lines.every((l) => l.trimStart().startsWith("ok")), "`intuition doctor`, through the link, reports every check green");
+  // doctor --json, the form for scripts. Codex is the optional second agent: a temp home has no Codex login.
+  const doctor = await run(["intuition", "doctor", "--json"], home);
+  let report: { checks: { name: string; ok: boolean }[] } = { checks: [] };
+  try {
+    report = JSON.parse(doctor.out);
+  } catch {
+    // Not JSON: the check below fails.
+  }
+  const red = report.checks.filter((c) => !c.ok && !c.name.startsWith("Codex"));
+  check(doctor.code === 0 && report.checks.length > 0 && red.length === 0, `\`intuition doctor\`, through the link, reports every check green${red.length ? ` (not: ${red.map((c) => c.name).join(", ")})` : ""}`);
 } catch (e) {
   bad.push(e instanceof Error ? e.message : String(e));
   console.log(`FAIL  ${bad.at(-1)}`);

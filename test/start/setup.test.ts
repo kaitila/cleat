@@ -114,7 +114,7 @@ async function run(options: Partial<SetupOptions>, ask: Ask = DEFAULTS, over: { 
 }
 
 describe("setup's flags", () => {
-  test("--yes, --workspace name=path or path (repeatable), --link-dir, --no-login, --login, --permission-mode, --hotkey, --snip-hotkey", () => {
+  test("--yes, --workspace name=path or path (repeatable), --link-dir, --no-login, --permission-mode, --hotkey, --snip-hotkey", () => {
     const { home } = folders();
     const parsed = parseSetupArgs(["-y", "--workspace", `web=${join(home, "alpha")}`, `--workspace=${join(home, "notes")}`, "--link-dir", "/bin", "--no-login", "--permission-mode", "ask", "--hotkey", "Control+Shift+K", "--snip-hotkey=Alt+F2"]);
     expect(parsed).toEqual({
@@ -130,7 +130,7 @@ describe("setup's flags", () => {
       },
     });
     expect(parseSetupArgs([])).toEqual({ ok: true, options: { yes: false } });
-    expect(parseSetupArgs(["--login", "--permission-mode", "auto"])).toEqual({ ok: true, options: { yes: false, login: true, permissionMode: "auto" } });
+    expect(parseSetupArgs(["--permission-mode", "auto"])).toEqual({ ok: true, options: { yes: false, permissionMode: "auto" } });
   });
 
   test("a wrong word is refused with why: an unknown flag, a missing value, no folder, a bad mode, a hotkey Electron would refuse", () => {
@@ -154,8 +154,8 @@ describe("setup's flags", () => {
   });
 
   test("the flags that answer every question; without a terminal, setup needs them or --yes", () => {
-    expect(unanswered({ yes: false })).toEqual(["--workspace", "--hotkey", "--snip-hotkey", "--permission-mode", "--no-login (or --login)"]);
-    expect(unanswered({ yes: false, workspaces: [], hotkey: "Alt+A", snipHotkey: "Alt+B", permissionMode: "auto", login: false })).toEqual([]);
+    expect(unanswered({ yes: false })).toEqual(["--workspace", "--hotkey", "--snip-hotkey", "--permission-mode"]);
+    expect(unanswered({ yes: false, workspaces: [], hotkey: "Alt+A", snipHotkey: "Alt+B", permissionMode: "auto" })).toEqual([]);
   });
 
   test("the command line refuses other words with why, the help and exit code 2", async () => {

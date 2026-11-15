@@ -70,7 +70,7 @@ ${rows([
   ["--hotkey <keys>", "new task hotkey, such as Control+Alt+Space"],
   ["--snip-hotkey <keys>", "the snip hotkey"],
   ["--permission-mode auto|default", "default asks for everything"],
-  ["--no-login, --login", "start at login off, or on"],
+  ["--no-login", "start at login off (else on)"],
   ["--link-dir <folder>", "where the command's link goes"],
 ])}
 
@@ -154,6 +154,7 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
       ui.line(`${ui.mark("skip")} ${unavailable}: only the runner was started`);
       return code;
     }
+    // installCurrentShell(platform, under a spinner): stops an outdated shell first.
     if ((await shellInstall(platform)) !== 0) return 1;
     startShell();
     return code;
