@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>intuition: a hotkey away from your Claude Code agents</title>
+  <meta name="description" content="Fire a task at Claude Code from anywhere, with your clipboard or a screen snip attached, and follow every session from a dock at the top of the screen.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="preload" href="fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="site.css">
+  <script type="module" src="site.js"></script>
+</head>
+<body class="backdrop">
+  <header class="top">
+    <a class="wordmark" href="./" aria-label="intuition, home"><span class="dot" data-status="running"></span>intuition</a>
+    <a class="button quiet" href="https://github.com/kaitila/intuition">GitHub</a>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="name">
+      <h1 id="name" class="hero-name arrive">intuition</h1>
+      <p class="hero-line arrive">A hotkey away from your Claude Code agents. Fire a task from anywhere with your clipboard or a screen snip attached, and follow every session from a dock at the top of the screen.</p>
+
+      <div class="install glass arrive">
+        <code id="install-line" class="install-line">git clone https://github.com/kaitila/intuition &amp;&amp; cd intuition &amp;&amp; bun install &amp;&amp; bun run setup</code>
+        <button id="copy" class="primary copy" type="button" aria-describedby="install-line">Copy</button>
+      </div>
+      <p class="hero-links arrive small muted">
+        In a terminal; on Windows, a WSL one. Then press the hotkey anywhere.
+        <a href="https://github.com/kaitila/intuition">Read the code on GitHub</a>
+      </p>
+
+      <!-- The dock, live: the app's own idle, peek and open, on sample sessions (site.js cycles it). -->
+      <figure class="stage glass arrive" role="img" aria-label="The dock at the top of the screen: a quiet pill while a session runs, a one-line peek when it needs you, and the open dock with the sessions and an Allow or Deny for the waiting tool call.">
+        <div class="screen-edge" aria-hidden="true"></div>
+        <div id="island" class="island dark" data-state="idle" aria-hidden="true">
+          <div class="surface"></div>
+          <div class="pill layer small" data-layer="idle">
+            <span class="dot" data-status="running"></span>
+            <span class="muted">1 running</span>
+          </div>
+          <div class="peek layer" data-layer="peek" hidden>
+            <span class="dot" data-status="waiting_approval"></span>
+            <span class="peek-title strong">Add a changelog entry for the invoice date fix</span>
+            <span class="peek-body muted small">Edit: CHANGELOG.md</span>
+            <span class="peek-label small">needs you</span>
+          </div>
+          <div class="panel layer" data-layer="open" hidden>
+            <div class="panel-head">
+              <span class="small muted">All workspaces</span>
+              <span class="small muted">New task</span>
+            </div>
+            <ul class="sessions">
+              <li class="row" aria-current="true"><span class="dot" data-status="waiting_approval"></span><span class="row-title strong">Add a changelog entry for the invoice date fix</span><span class="small muted row-meta">billing-api</span><time class="small muted">now</time></li>
+              <li class="row"><span class="dot"></span><span class="row-title">Fix the flaky date test in invoices</span><span class="small muted row-meta">billing-api</span><time class="small muted">12m</time></li>
+              <li class="row"><span class="dot"></span><span class="row-title">Tighten the hero copy on the pricing page</span><span class="small muted row-meta">website</span><time class="small muted">1h</time></li>
+            </ul>
+            <div class="approval" data-state="open">
+              <div class="approval-head"><span class="approval-tool">Edit</span><span class="approval-state" data-open="Needs your approval" data-allow="Allowed">Needs your approval</span></div>
+              <code class="approval-path">CHANGELOG.md</code>
+              <div class="approval-actions"><span class="button primary small" data-press>Allow</span><span class="button small">Deny</span></div>
+            </div>
+          </div>
+        </div>
+      </figure>
+      <p class="caption small muted arrive">The dock, peeking and opening. Sample sessions.</p>
+    </section>
+
+    <section class="features" aria-label="What it does">
+      <article class="feature reveal">
+        <div class="feature-text">
+          <p class="label">Hotkey</p>
+          <h2 class="feature-title">Press a key, type the task</h2>
+          <p class="muted">A small pop-up opens in the middle of the screen with whatever you just copied already attached: text, or a screenshot. Pick a workspace, type what you want done, press Enter, and go back to what you were doing. The agent works in the background.</p>
+          <p class="keys small muted"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>Space</kbd> on Windows and Linux, <kbd>Cmd</kbd><kbd>Shift</kbd><kbd>Space</kbd> on a Mac</p>
+        </div>
+        <picture class="shot shot-float">
+          <source srcset="shots/popup-dark.png" media="(prefers-color-scheme: dark)">
+          <img src="shots/popup-light.png" width="560" height="380" alt="The pop-up: three workspaces as pills with billing-api chosen, a task typed, and a TypeError from the clipboard attached under it." loading="lazy" decoding="async">
+        </picture>
+      </article>
+
+      <article class="feature reveal">
+        <div class="feature-text">
+          <p class="label">Snip</p>
+          <h2 class="feature-title">Snip an area, ask about it</h2>
+          <p class="muted">Press the snip key and the screen freezes. Drag a box around something and type the task right beside it: the snip goes to the agent with your words.</p>
+          <p class="keys small muted"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd> on Windows and Linux, <kbd>Cmd</kbd><kbd>Shift</kbd><kbd>S</kbd> on a Mac</p>
+        </div>
+        <picture class="shot shot-screen">
+          <source srcset="shots/snip-dark.png" media="(prefers-color-scheme: dark)">
+          <img src="shots/snip-light.png" width="1200" height="760" alt="The snip over a frozen screen: a box drawn around a code block, its size beside it, and a small prompt below it with a task typed." loading="lazy" decoding="async">
+        </picture>
+      </article>
+
+      <article class="feature reveal">
+        <div class="feature-text">
+          <p class="label">Dock</p>
+          <h2 class="feature-title">Follow every session from the dock</h2>
+          <p class="muted">A small dock hangs from the top of the screen. It peeks when a session finishes or needs you; rest the pointer on it and it opens: every session, the newest of what each did, a reply box, and Allow or Deny for a tool call that waits on you. The chat window has the whole conversation.</p>
+        </div>
+        <div class="shot shot-dock">
+          <img class="dock-peek" src="shots/dock-peek.png" width="460" height="48" alt="The dock peeking: a session needs you, to edit CHANGELOG.md." loading="lazy" decoding="async">
+          <img src="shots/dock-open.png" width="460" height="480" alt="The dock open: four sessions, the selected one waiting with an Edit to CHANGELOG.md, and Allow and Deny." loading="lazy" decoding="async">
+        </div>
+      </article>
+    </section>
+
+    <section class="how glass reveal" aria-labelledby="how">
+      <h2 id="how" class="feature-title">How it works</h2>
+      <dl class="parts">
+        <div><dt class="strong">A local runner</dt><dd class="muted">A small server on 127.0.0.1 drives Claude Code through the Claude Agent SDK, in your own workspaces with your own settings and permissions. Auto mode by default: routine tool calls run, the rest ask you.</dd></div>
+        <div><dt class="strong">Local pages</dt><dd class="muted">The pop-up, the dock and the chat view are plain pages the runner serves. It is not a hosted service: nothing leaves your machine except what Claude Code itself sends.</dd></div>
+        <div><dt class="strong">A tray app</dt><dd class="muted">A small Electron shell holds the hotkeys, the clipboard, the snip and the dock, and starts at login.</dd></div>
+      </dl>
+      <p class="platforms small muted"><span class="label">Runs on</span> Windows with WSL 2 · macOS · Linux. Needs git, bun, Node with npm (once, to fetch the tray app) and Claude Code, logged in.</p>
+    </section>
+  </main>
+
+  <footer class="foot small muted">
+    <span>intuition</span>
+    <a href="https://github.com/kaitila/intuition">GitHub</a>
+    <a href="https://github.com/kaitila/intuition/blob/main/LICENSE">MIT licence</a>
+    <a href="https://github.com/kaitila/intuition/blob/main/SECURITY.md">Security</a>
+  </footer>
+</body>
+</html>
