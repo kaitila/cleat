@@ -189,7 +189,12 @@ async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, r
   const page = await context.newPage();
   page.on("pageerror", (e: Error) => pageErrors.push(e.message));
   page.on("console", (m: Any) => {
-    if (m.type() === "error") pageErrors.push(m.text());
+    if (m.type() !== "error") return;
+    // theme.js asks GET /api/settings, which the runner has once T-0030 lands; until then a 404
+    // there is expected, and theme.js keeps the cached theme. Only that one URL is excused.
+    const at = m.location?.()?.url ?? "";
+    if (/404/.test(m.text()) && at && new URL(at).pathname === "/api/settings") return;
+    pageErrors.push(m.text());
   });
   await page.addInitScript(instruments, bridge);
   const calls = () => page.evaluate(() => (window as Any).__calls) as Promise<Call[]>;
@@ -654,6 +659,12 @@ try {
   const darkColours = await colours(k.page);
   await k.page.emulateMedia({ colorScheme: "light" });
   check((await colours(k.page)).join() === darkColours.join() && darkColours[0] === "rgb(15, 15, 17)", `the island is the same dark in both schemes (${darkColours.join(" on ")})`);
+  // The dock loads theme.js, which sets data-theme on <html>; .dark is on <body>, so it still wins.
+  for (const forced of ["light", "dark", "system"]) {
+    await k.page.evaluate((t: string) => (window as Any).intuitionTheme.apply(t), forced);
+    const now = await colours(k.page);
+    check(now.join() === darkColours.join(), `and with the theme forced to ${forced} (${now.join(" on ")})`);
+  }
   await k.leave();
   await k.page.locator("#pill").waitFor();
   await k.settle("idle");
