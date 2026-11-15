@@ -40,6 +40,7 @@ const els = {
   text: $("reply-text"),
   hint: $("reply-hint"),
   meta: $("meta"),
+<<<<<<< HEAD
   search: $("search"),
   workspaceFilter: $("workspace-filter"),
   archivedView: $("archived-view"),
@@ -49,6 +50,9 @@ const els = {
   confirmTitle: $("confirm-title"),
   confirmBody: $("confirm-body"),
   confirmOk: $("confirm-ok"),
+=======
+  main: document.querySelector(".main"),
+>>>>>>> origin/main
 };
 const resume = resumeControl(document);
 els.meta.append(resume.el);
@@ -109,8 +113,18 @@ els.scroller.addEventListener("scroll", () => {
   stick = els.scroller.scrollHeight - els.scroller.scrollTop - els.scroller.clientHeight < 48;
 });
 
-/** Adds to the end of the stream, above the text that is still streaming. */
-function add(el) {
+/**
+ * True while an event that just happened is drawn, not one loaded with the rest of a session: what
+ * it adds rises in (chat.css, .arrive).
+ */
+let live = false;
+
+/**
+ * Adds to the end of the stream, above the text that is still streaming. `still`: text that takes
+ * the place of the same text streamed, which doesn't rise in again.
+ */
+function add(el, still = false) {
+  if (live && !still) el.classList.add("arrive");
   els.stream.insertBefore(el, streamedEl?.parentNode === els.stream ? streamedEl : null);
   follow();
   return el;
@@ -123,12 +137,17 @@ function renderText(el, text, streaming = false) {
 let streamQueued = false;
 
 /** Deltas come faster than frames: the streaming text is drawn again at most once a frame. */
-function streamSoon() {
+function streamSoon(rising = false) {
   if (streamQueued) return;
   streamQueued = true;
   requestAnimationFrame(() => {
     streamQueued = false;
-    renderStreamed();
+    live = rising && selected !== null;
+    try {
+      renderStreamed();
+    } finally {
+      live = false;
+    }
   });
 }
 
@@ -140,7 +159,7 @@ function renderStreamed() {
     streamedEl = null;
     return;
   }
-  if (!streamedEl) streamedEl = h("div", "msg assistant md streaming");
+  if (!streamedEl) streamedEl = h("div", `msg assistant md streaming${live ? " arrive" : ""}`);
   renderText(streamedEl, text, true);
   if (streamedEl.parentNode !== els.stream) els.stream.append(streamedEl);
   follow();
@@ -156,6 +175,10 @@ function toolCard(toolUseId, name, input) {
   const result = h("pre", "tool-result well muted", "Waiting for the result.");
   body.append(h("div", "label", "Input"), h("pre", "tool-input well", inputText(input, 2)), h("div", "label", "Result"), result);
   details.append(summary, body);
+  summary.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleTool(details, body);
+  });
   const tool = { details, body, result, mark, done: false };
   tools.set(toolUseId, tool);
   add(details);
@@ -186,6 +209,89 @@ function endOpenTools() {
     if (!tool.done) tool.result.textContent = "No result.";
     tool.done = true;
   }
+}
+
+// ---------- motion ----------
+
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+
+/** A spring of base.css as an animation's timing: its curve and the duration that goes with it. */
+function spring(name) {
+  const style = getComputedStyle(document.documentElement);
+  return { easing: style.getPropertyValue(`--ease-${name}`).trim(), duration: parseFloat(style.getPropertyValue(`--dur-${name}`)) };
+}
+
+/**
+ * Changes the stream's layout with `change` and lets what comes after `el` glide to its new place
+ * on a spring (a FLIP: drawn where it was with a transform, which then goes). Only what is in view
+ * moves; with reduced motion, nothing does.
+ */
+function flipAfter(el, change, name) {
+  if (reducedMotion.matches) return change();
+  const view = els.scroller.getBoundingClientRect();
+  const before = new Map();
+  for (let next = el.nextElementSibling; next; next = next.nextElementSibling) {
+    const box = next.getBoundingClientRect();
+    if (box.top > view.bottom) break;
+    before.set(next, box.top);
+  }
+  change();
+  const timing = spring(name);
+  for (const [next, top] of before) {
+    const dy = top - next.getBoundingClientRect().top;
+    if (Math.abs(dy) > 0.5) next.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], timing);
+  }
+}
+
+/**
+ * Opens or closes a tool row. Opening, its body springs in (chat.css, .tool[open] > .tool-body)
+ * while the rows below it glide down; closing, the body fades out first, then the rows below
+ * gather up on the softer spring.
+ */
+function toggleTool(details, body) {
+  if (details.dataset.closing !== undefined) return;
+  if (!details.open) {
+    flipAfter(details, () => (details.open = true), "bouncy");
+    return;
+  }
+  details.dataset.closing = "";
+  const done = () => {
+    delete details.dataset.closing;
+    flipAfter(details, () => (details.open = false), "gentle");
+  };
+  if (reducedMotion.matches) return done();
+  const end = (e) => {
+    if (e.target !== body || e.animationName !== "fade-out") return;
+    body.removeEventListener("animationend", end);
+    done();
+  };
+  body.addEventListener("animationend", end);
+}
+
+/**
+ * Selecting another session: a copy of the stream as it was, over the new one, fades away, while
+ * the new one and its head fade in (chat.css, .stream-leaving and .entering).
+ */
+function crossFade() {
+  els.main.querySelector(".stream-leaving")?.remove();
+  for (const el of [els.stream, els.head]) {
+    el.classList.remove("entering");
+    void el.offsetWidth;
+    el.classList.add("entering");
+  }
+  if (els.stream.childElementCount === 0) return;
+  const copy = els.stream.cloneNode(true);
+  for (const el of [copy, ...copy.querySelectorAll("[id]")]) el.removeAttribute("id");
+  for (const el of copy.querySelectorAll(".arrive")) el.classList.remove("arrive");
+  copy.style.translate = `0 ${-els.scroller.scrollTop}px`;
+  const ghost = h("div", "stream-leaving");
+  ghost.inert = true;
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.style.top = `${els.scroller.offsetTop}px`;
+  ghost.style.height = `${els.scroller.clientHeight}px`;
+  ghost.append(copy);
+  ghost.addEventListener("animationend", () => ghost.remove(), { once: true });
+  els.main.append(ghost);
 }
 
 /** A cut text with a "show all" button after it, as a tool result has. */
@@ -280,7 +386,7 @@ function apply(event) {
       break;
     }
     case "assistant_text":
-      renderText(add(h("div", "msg assistant md")), event.text);
+      renderText(add(h("div", "msg assistant md"), streamedEl?.parentNode === els.stream), event.text);
       break;
     case "tool_use":
       toolCard(event.toolUseId, event.name, event.input);
@@ -732,6 +838,7 @@ function select(id, push = false) {
     if (els.text.value) typed.set(selected, els.text.value);
     else typed.delete(selected);
   }
+  if (selected) crossFade();
   selected = id;
   generation += 1;
   lastSeq = 0;
@@ -812,15 +919,20 @@ function onMessage(message) {
         // Still loading, or one was missed: take it from the stored events, in order.
         void catchUp();
       } else {
-        apply(event);
-        renderStreamed();
+        live = true;
+        try {
+          apply(event);
+          renderStreamed();
+        } finally {
+          live = false;
+        }
       }
       break;
     }
     case "delta":
       if (typeof message.text !== "string") break;
       streamed.set(message.sessionId, (streamed.get(message.sessionId) ?? "") + message.text);
-      if (message.sessionId === selected) streamSoon();
+      if (message.sessionId === selected) streamSoon(!loading);
       break;
   }
 }

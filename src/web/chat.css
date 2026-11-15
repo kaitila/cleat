@@ -160,6 +160,33 @@
 .send-anyway { margin-left: var(--space-1); }
 .reply-hint { margin-top: var(--space-1); min-height: calc(var(--text-s) * var(--leading)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Motion (docs/design.md, "Motion"): springs and fades from base.css's tokens only.
+   What just happened rises in softly; loaded history doesn't (chat.js marks the new with .arrive). */
+.stream > .arrive { animation: rise var(--dur-gentle) var(--ease-gentle) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
+/* An approval card arrives with a small bounce, from a little below and a little small. It is wide,
+   so it rises twice the usual travel: from --rise alone its overshoot didn't show. */
+.stream > .approval.arrive { transform-origin: 50% 100%; animation: card-pop var(--dur-bouncy) var(--ease-bouncy) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
+/* A tool row: its body springs open from under the row (the rows below glide down with it, chat.js)
+   and fades out before it closes; its chevron turns on the same spring. */
+.tool > summary::before { transition: transform var(--dur-bouncy) var(--ease-bouncy); }
+.tool[open] > .tool-body { transform-origin: 50% 0; animation: drop var(--dur-bouncy) var(--ease-bouncy), fade-in var(--dur-fade) var(--ease); }
+.tool[data-closing] > .tool-body { animation: fade-out var(--dur-out) var(--ease) forwards; }
+.tool[data-closing] > summary::before { transform: none; }
+/* Selecting a session: the old stream, copied over the new one, fades away as the new one fades in. */
+.main { position: relative; }
+.stream-leaving { position: absolute; inset-inline: 0; overflow: hidden; background: var(--bg); pointer-events: none; animation: fade-out var(--dur-out) var(--ease) forwards; }
+.entering { animation: fade-in var(--dur-gentle) var(--ease); }
+@keyframes rise { from { transform: translateY(var(--rise)); } }
+@keyframes card-pop { from { transform: translateY(calc(var(--rise) * 2)) scale(var(--pop)); } }
+@keyframes drop { from { transform: translateY(calc(var(--rise) * -1)) scaleY(var(--pop)); } }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+/* Reduced motion: no rise, no bounce, nothing glides; only short plain fades. */
+@media (prefers-reduced-motion: reduce) {
+  .stream > .arrive, .stream > .approval.arrive, .tool[open] > .tool-body, .entering { animation: fade-in var(--dur-fade) var(--ease) !important; }
+  .stream-leaving { animation: fade-out var(--dur-out) var(--ease) forwards !important; }
+}
+
 /* A slim window: the sessions go above the stream. */
 @media (max-width: 700px) {
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }

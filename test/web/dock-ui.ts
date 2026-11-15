@@ -59,8 +59,11 @@ function check(ok: unknown, what: string): void {
 interface Call { state: DockState; at: number }
 /** The island as drawn: its clip, measured by hit-testing, relative to the island's box (the window). */
 interface Shape { left: number; top: number; width: number; height: number }
-/** One frame of a recording: how long after the frame before, and how tall and wide the island was drawn. */
-interface Frame { ms: number; height: number; width: number }
+/**
+ * One frame of a recording: how long after the frame before, how tall and wide the island was drawn,
+ * and whether its top edge was on the screen's edge (its first row of pixels drawn), or nothing was drawn.
+ */
+interface Frame { ms: number; height: number; width: number; hung: boolean }
 
 /** An older session full of text that must stay text. */
 function seed(dataDir: string): string {
@@ -129,14 +132,18 @@ function instruments(bridge: boolean): void {
 
   /** Records every frame from now until __stop(): its length, and the island's size in it. */
   w.__record = () => {
-    const frames: { ms: number; height: number; width: number }[] = [];
+    const frames: { ms: number; height: number; width: number; hung: boolean }[] = [];
+    const island = document.getElementById("island")!;
     let last = 0;
     let on = true;
     const tick = (now: number) => {
       if (!on) return;
       if (last) {
         const shape = w.__shape();
-        frames.push({ ms: now - last, height: shape.height, width: shape.width });
+        // The top edge: the island's first row of pixels, in its middle, is the island.
+        const box = island.getBoundingClientRect();
+        const top = document.elementFromPoint(box.left + box.width / 2, box.top + 0.25);
+        frames.push({ ms: now - last, height: shape.height, width: shape.width, hung: shape.height === 0 || (top !== null && island.contains(top)) });
       }
       last = now;
       requestAnimationFrame(tick);
@@ -590,22 +597,34 @@ try {
   console.log(`  worst frame: ${Math.max(worst(opening), worst(closing)).toFixed(1)} ms (open ${worst(opening).toFixed(1)}, close ${worst(closing).toFixed(1)})`);
   const between = heights.filter((h) => h > DOCK_SIZES.idle.height + 1 && h < final - 1).length;
   check(between >= 5, `the island grows through ${between} frames between the pill and its full height: one shape, not a jump`);
-  check(heights.every((h, i) => i === 0 || h >= heights[i - 1]! - 0.5) && Math.max(...heights) <= DOCK_SIZES.open.height, "it only grows on the way, and never past its size: no bounce");
+  // A spring: past its size a little and back, never more than the bouncy spring's 11% (and never out of the window).
+  check(Math.max(...heights) <= Math.min(final * 1.12, DOCK_WINDOW.height) + 0.5 && Math.abs(final - DOCK_SIZES.open.height) <= 1, `opening, it springs to its size (${final}px) and at most a little past it (the most ${Math.max(...heights)}px), within the window`);
+  check(opening.every((f) => f.hung) && closing.every((f) => f.hung), `the top edge stays on the screen's edge in all ${opening.length + closing.length} frames of the open and the close`);
   const closingHeights = closing.map((f) => f.height);
-  check(closingHeights.every((h, i) => i === 0 || h <= closingHeights[i - 1]! + 0.5) && closingHeights.at(-1)! <= DOCK_SIZES.idle.height, "closing, it only shrinks, back to the pill");
-  const span = (frames: Frame[], from: number, to: number) => {
-    const lo = Math.min(from, to) + 1;
-    const hi = Math.max(from, to) - 1;
-    return frames.filter((f) => f.height > lo && f.height < hi).reduce((sum, f) => sum + f.ms, 0);
+  check(closingHeights.every((h, i) => i === 0 || h <= closingHeights[i - 1]! + 0.5) && closingHeights.at(-1)! <= DOCK_SIZES.idle.height, "closing, it gathers back on the soft spring: it only shrinks, back to the pill");
+  /** How long until the shape first reaches `to` from `from`: the stretch, before any settle. */
+  const reach = (frames: Frame[], from: number, to: number) => {
+    const moving = frames.findIndex((f) => Math.abs(f.height - from) > 1);
+    const there = frames.findIndex((f, i) => i >= moving && Math.abs(f.height - to) <= 1);
+    return frames.slice(moving, there + 1).reduce((sum, f) => sum + f.ms, 0);
   };
-  const [openMs, closeMs] = [span(opening, DOCK_SIZES.idle.height, final), span(closing, final, DOCK_SIZES.idle.height)];
-  check(openMs >= 150 && openMs <= 350 && closeMs < openMs, `the shape is on its way for ${Math.round(openMs)} ms opening (a 320 ms curve with a long settle) and ${Math.round(closeMs)} ms closing: closing is quicker`);
+  const [openMs, closeMs] = [reach(opening, DOCK_SIZES.idle.height, final), reach(closing, final, closingHeights.at(-1)!)];
+  check(openMs >= 50 && openMs <= 400 && closeMs >= 100 && closeMs <= 400, `the shape reaches its height in ${Math.round(openMs)} ms opening (the bouncy spring, and the panel's content as it loads) and ${Math.round(closeMs)} ms closing (the softer one): neither slow`);
   check(await page.evaluate(([w, h]: number[]) => window.innerWidth === w && window.innerHeight === h, [DOCK_WINDOW.width, DOCK_WINDOW.height]), `through all of it the window stayed ${DOCK_WINDOW.width}x${DOCK_WINDOW.height}`);
 
   // ---- a failed session ----
-  const failing = await runner.startSession("please fail");
-  await page.locator("#peek-title", { hasText: "please fail" }).waitFor();
-  await d.settle("peek");
+  let failing: unknown;
+  const peeking = await recorded(d, "peek", async () => {
+    failing = await runner.startSession("please fail");
+    await page.locator("#peek-title", { hasText: "please fail" }).waitFor();
+  });
+  {
+    // The peek pops in: wider than its line for a moment and back, hanging from the edge all the while.
+    const widths = peeking.map((f) => f.width);
+    const most = Math.max(...widths);
+    check(worst(peeking) < FRAME_LIMIT_MS && peeking.every((f) => f.hung), `peeking: the worst of ${peeking.length} frames ${worst(peeking).toFixed(1)} ms, the top edge on the screen's edge in every one`);
+    check(most > DOCK_SIZES.peek.width + 2 && most <= DOCK_SIZES.peek.width * 1.12 && Math.abs(widths.at(-1)! - DOCK_SIZES.peek.width) <= 1, `the peek pops in a little past its width (the most ${most}px for ${DOCK_SIZES.peek.width}px) and settles`);
+  }
   check((await page.locator("#peek-label").textContent()) === "failed" && (await page.locator("#peek-body").textContent()) === "the fake agent failed", "a failed session peeks with the error's message");
   await d.shot("peek-error", false);
   await page.locator("#pill").waitFor({ timeout: 8000 });
@@ -703,8 +722,15 @@ try {
   const closeStrip = await strip(f, "close", "idle", async () => {
     await f.leave();
     await f.page.waitForTimeout(450);
-  }, [0, 20, 40, 60, 80, 110, 140, 170, 200, 240]);
-  check(readFileSync(openStrip).length > 10_000 && readFileSync(closeStrip).length > 10_000, "a strip of ten frames through the open and through the close is saved, to be looked at");
+  }, [0, 30, 60, 90, 120, 160, 200, 240, 290, 340]);
+  const peekPrompt = "A peek, frame by frame";
+  const peekStrip = await strip(f, "peek", "peek", async () => {
+    await runner.startSession(peekPrompt);
+    await f.page.locator("#peek-title", { hasText: peekPrompt }).waitFor();
+  }, [0, 30, 60, 90, 120, 160, 200, 250, 300, 400]);
+  check([openStrip, closeStrip, peekStrip].every((path) => readFileSync(path).length > 10_000), "a strip of ten frames through the open, the close and a peek is saved, to be looked at");
+  await f.page.locator("#pill").waitFor({ timeout: 8000 });
+  await f.settle("idle");
   await f.context.close();
 
   // ================= reduced motion: a plain fade =================

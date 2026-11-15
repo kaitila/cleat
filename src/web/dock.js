@@ -47,6 +47,7 @@ import {
 const $ = (id) => document.getElementById(id);
 const els = {
   island: $("island"),
+  surface: document.querySelector("#island > .surface"),
   pill: $("pill"),
   pillDot: $("pill-dot"),
   pillText: $("pill-text"),
@@ -148,9 +149,30 @@ function resize() {
   const size = islandSize(state, { pill: els.pill.offsetWidth, panel: els.panel.offsetHeight, quiet: els.pill.dataset.tone === "none" });
   if (size.width === drawn.width && size.height === drawn.height) return;
   drawn = size;
-  els.island.style.setProperty("--island-w", `${size.width}px`);
-  els.island.style.setProperty("--island-h", `${size.height}px`);
+  // Both the island and its surface: the size is not inherited, so each springs to it (dock.css).
+  for (const el of [els.island, els.surface]) {
+    el.style.setProperty("--island-w", `${size.width}px`);
+    el.style.setProperty("--island-h", `${size.height}px`);
+  }
 }
+
+/** Plays an element's animations again from their start: a peek that follows another pops in anew. */
+function replay(el) {
+  for (const a of el.getAnimations({ subtree: true })) {
+    a.cancel();
+    a.play();
+  }
+}
+
+/** One gentle nudge of a dot (dock.css, [data-nudge]); it is taken off when the nudge is over. */
+function nudge(el) {
+  delete el.dataset.nudge;
+  void el.offsetWidth;
+  el.dataset.nudge = "";
+}
+els.pillDot.addEventListener("animationend", (e) => {
+  if (e.animationName === "nudge") delete els.pillDot.dataset.nudge;
+});
 
 /** Changes the state: the content swaps and the island's shape follows. */
 function go(next) {
@@ -169,8 +191,18 @@ sized.observe(els.panel);
 
 // ---------- idle: the pill ----------
 
+<<<<<<< HEAD
 function renderPill() {
   const pill = pillOf(shown());
+=======
+/**
+ * Draws the pill. `quiet`: what the runner said on connecting, not news: a "needs you" in it doesn't
+ * nudge.
+ */
+function renderPill(quiet = false) {
+  const pill = pillOf(sessions.values());
+  const news = !quiet && pill.tone === "needs" && els.pill.dataset.tone !== "needs" && state === "idle";
+>>>>>>> origin/main
   els.pill.dataset.tone = pill.tone;
   els.island.dataset.tone = pill.tone;
   els.pillText.textContent = pill.text;
@@ -181,6 +213,7 @@ function renderPill() {
   else delete els.pillDot.dataset.status;
   // Beside "2 running" or "needs you": the newest one that finished failed.
   els.pillFailed.hidden = !pill.failed || pill.tone === "failed";
+  if (news) nudge(els.pillDot);
   // With nothing going on the sliver is shorter still.
   els.pill.style.height = `${islandSize("idle", { quiet: pill.tone === "none" }).height}px`;
   resize();
@@ -214,6 +247,8 @@ function showPeek() {
   els.peekTitle.textContent = peeking.title;
   els.peekLabel.textContent = peekLabel(peeking.kind);
   els.peekBody.textContent = peeking.body;
+  // One peek after another: the island is already its size, the new line pops in all the same.
+  if (state === "peek") replay(els.peek);
   go("peek");
   // One that waits for an approval stays until its session no longer waits (checkPeek).
   if (peeking.kind !== "needs_approval") peekTimer = setTimeout(showPeek, PEEK_MS);
@@ -274,8 +309,21 @@ els.scroller.addEventListener("scroll", () => {
   stick = els.scroller.scrollHeight - els.scroller.scrollTop - els.scroller.clientHeight < 32;
 });
 
-/** Adds to the end of the stream, above the text that is still streaming. Only the last few stay. */
-function add(el) {
+/**
+ * What arrives together (a session's events as it is opened): null when events arrive one by one.
+ * Its last few rise in one after the other (dock.css, data-stagger).
+ */
+let batch = null;
+/** How many of a batch's last events rise one after the other: about what the stream shows. */
+const STAGGERED = 6;
+
+/**
+ * Adds to the end of the stream, above the text that is still streaming. Only the last few stay.
+ * It rises in (dock.css, .arrive), except `still`: text that takes the place of the same text streamed.
+ */
+function add(el, still = false) {
+  if (!still) el.classList.add("arrive");
+  if (batch && !still) batch.push(el);
   els.stream.insertBefore(el, streamedEl?.parentNode === els.stream ? streamedEl : null);
   while (els.stream.childElementCount > RECENT_EVENTS + 10) els.stream.firstElementChild.remove();
   follow();
@@ -306,7 +354,7 @@ function renderStreamed() {
     streamedEl = null;
     return;
   }
-  if (!streamedEl) streamedEl = h("div", "msg assistant md streaming");
+  if (!streamedEl) streamedEl = h("div", "msg assistant md streaming arrive");
   renderText(streamedEl, text, true);
   if (streamedEl.parentNode !== els.stream) els.stream.append(streamedEl);
   follow();
@@ -391,6 +439,7 @@ function approvalCard(event) {
   actions.append(allow, deny, error);
   el.append(actions);
   approvals.set(event.approvalId, { el, actions, state: stateEl });
+  // It arrives with a small bounce (dock.css, .approval.arrive).
   add(el);
 }
 
@@ -419,7 +468,8 @@ function apply(event) {
       add(h("div", "msg user card", event.text));
       break;
     case "assistant_text":
-      renderText(add(h("div", "msg assistant md")), event.text);
+      // The streamed text is on the page already: the complete text takes its place without rising again.
+      renderText(add(h("div", "msg assistant md"), streamedEl?.parentNode === els.stream), event.text);
       break;
     case "tool_use":
       toolRow(event);
@@ -476,7 +526,13 @@ async function catchUp() {
     const events = recentEvents(Array.isArray(body.events) ? body.events : []);
     // The older ones are the chat view's: here they count as drawn.
     if (lastSeq === 0 && typeof events[0]?.seq === "number") lastSeq = events[0].seq - 1;
-    for (const event of events) apply(event);
+    batch = [];
+    try {
+      for (const event of events) apply(event);
+    } finally {
+      arrived(batch);
+      batch = null;
+    }
     renderStreamed();
   } catch (e) {
     if (mine !== generation) return;
@@ -489,6 +545,15 @@ async function catchUp() {
       void catchUp();
     }
   }
+}
+
+/** The end of a batch: its last few rise one after the other. */
+function arrived(added) {
+  const shown = added.filter((el) => el.isConnected);
+  shown.forEach((el, i) => {
+    const at = i - (shown.length - STAGGERED);
+    if (at >= 0) el.dataset.stagger = String(at);
+  });
 }
 
 // ---------- open: the list, the head, the reply box ----------
@@ -792,6 +857,10 @@ function open() {
   lastPeeked = null;
   go("open");
   renderList();
+  // The rows rise in one after the other as the panel comes in; one added later rises on its own.
+  [...els.sessions.children].forEach((item, i) => {
+    item.dataset.stagger = String(Math.min(i, STAGGERED - 1));
+  });
   select(pick);
   renderHead();
   renderReply();
@@ -858,7 +927,7 @@ function onMessage(message) {
       els.connection.hidden = true;
       sessions.clear();
       for (const session of message.sessions ?? []) sessions.set(session.id, session);
-      renderPill();
+      renderPill(true);
       checkPeek();
       if (state !== "open") break;
       renderList();
