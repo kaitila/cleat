@@ -13,6 +13,7 @@ import {
   OPEN_IN_TERMINAL_HINT,
   relativeTime,
   replyState,
+  resumeCommand,
   resultLine,
   sessionStatus,
   startedInTerminal,
@@ -21,7 +22,6 @@ import {
   unknownNote,
 } from "./chat-format.js";
 import { canStop, manage, menuItems, renameInline, sessionMenu, visible } from "./chat-manage.js";
-import { resumeControl } from "./chat-resume.js";
 import { renderMarkdown } from "./markdown.js";
 import {
   CLOSE_MS,
@@ -31,7 +31,9 @@ import {
   PEEK_MS,
   RECENT_EVENTS,
   asPeek,
+  dockWorkspaces,
   enqueue,
+  inWorkspace,
   islandSize,
   mayClose,
   nextPeek,
@@ -42,6 +44,8 @@ import {
   pillOf,
   preselect,
   recentEvents,
+  savedWorkspace,
+  saveWorkspace,
 } from "./dock-state.js";
 
 const $ = (id) => document.getElementById(id);
@@ -59,11 +63,12 @@ const els = {
   peekBody: $("peek-body"),
   panel: $("panel"),
   connection: $("connection"),
+  workspace: $("workspace"),
   sessions: $("sessions"),
   sessionsEmpty: $("sessions-empty"),
   session: $("session"),
   title: $("title"),
-  openChat: $("open-chat"),
+  more: $("more"),
   scroller: $("scroller"),
   stream: $("stream"),
   reply: $("reply"),
@@ -72,13 +77,15 @@ const els = {
 };
 /** Beside the title: "in terminal" while a turn arrives from a terminal, else nothing. */
 const headStatus = h("span", "session-status muted small");
-const resume = resumeControl(document);
 /** While the runner runs a turn of the session shown: it stops it. */
-const stopButton = h("button", "stop small", "Stop");
+const stopButton = h("button", "stop quiet small", "Stop");
 stopButton.type = "button";
 stopButton.hidden = true;
-els.openChat.before(headStatus, stopButton, resume.el);
-/** The list rows' right-click menu: Rename, Pin, Archive. It lives in the panel, inside the island. */
+els.more.before(headStatus, stopButton);
+/**
+ * The list rows' right-click menu (Rename, Pin, Archive) and the head's "…" (Open in chat, Continue
+ * in terminal, then the same three). It lives in the panel, inside the island.
+ */
 const menu = sessionMenu(document, els.panel);
 /** True while a row's title is being edited: like a reply being typed, it holds the dock open. */
 let renaming = false;
@@ -96,8 +103,21 @@ function h(tag, className, text) {
 
 /** id -> SessionMeta, as last told by the runner. */
 const sessions = new Map();
-/** The sessions the dock counts and lists: archived ones are out of the way here too. */
+/** The sessions the dock counts: archived ones are out of the way here too. */
 const shown = () => [...sessions.values()].filter((s) => s.archived !== true);
+/** The workspace the open dock lists ("" for all), remembered for the next time (dock-state.js). */
+let workspace = savedWorkspace(storage());
+/** The sessions the open dock lists and opens on: those of the workspace chosen. The pill counts them all. */
+const listed = () => inWorkspace(shown(), workspace);
+
+/** localStorage, or null where the page may not have it. */
+function storage() {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 // ---------- the three states ----------
 
@@ -557,10 +577,10 @@ function arrived(added) {
 const rows = new Map();
 
 function renderList() {
-  const ordered = visible(sessions.values());
-  const listed = new Set(ordered.map((s) => s.id));
+  const ordered = visible(sessions.values(), { workspace });
+  const ids = new Set(ordered.map((s) => s.id));
   for (const id of [...rows.keys()]) {
-    if (!listed.has(id)) {
+    if (!ids.has(id)) {
       rows.get(id).item.remove();
       rows.delete(id);
     }
@@ -607,6 +627,8 @@ function renderList() {
     row.title.classList.toggle("pinned", session.pinned === true);
     row.mark.hidden = !startedInTerminal(session);
     row.workspace.textContent = session.workspace;
+    // One workspace chosen: every row is in it, so none says so.
+    row.workspace.hidden = workspace !== "";
     row.time.dateTime = session.updatedAt;
     row.time.textContent = relativeTime(session.updatedAt, now);
     if (session.id === selected) row.link.setAttribute("aria-current", "true");
@@ -614,12 +636,39 @@ function renderList() {
     // Moved only when the order changed, so a focused row keeps its focus.
     if (els.sessions.children[i] !== row.item) els.sessions.insertBefore(row.item, els.sessions.children[i] ?? null);
   });
+  els.sessionsEmpty.textContent = workspace && shown().length > 0 ? `No sessions in ${workspace}.` : "No sessions yet. Start one with New task.";
   els.sessionsEmpty.hidden = ordered.length > 0;
   els.sessions.hidden = ordered.length === 0;
+  renderWorkspaces();
 }
 
-/** A refusal said in the head, for a few seconds. */
-function sayError(text) {
+/** The workspace switch: "All workspaces", then each workspace that has a session, and the one chosen. */
+function renderWorkspaces() {
+  const names = dockWorkspaces(sessions.values(), workspace);
+  const have = [...els.workspace.options].slice(1).map((o) => o.value);
+  if (have.join("\n") !== names.join("\n")) {
+    // Keep the first option ("All workspaces") and the select's <button> (base.css, .select).
+    while (els.workspace.options.length > 1) els.workspace.options[1].remove();
+    for (const name of names) {
+      const o = h("option", "", name);
+      o.value = name;
+      els.workspace.append(o);
+    }
+  }
+  els.workspace.value = workspace;
+}
+
+els.workspace.addEventListener("change", () => {
+  workspace = els.workspace.value;
+  saveWorkspace(storage(), workspace);
+  renderList();
+  // The session shown stays when it is in the workspace; else the dock opens on one that is.
+  const current = selected ? sessions.get(selected) : undefined;
+  if (!current || (workspace && current.workspace !== workspace)) select(preselect(listed(), null, null));
+});
+
+/** A refusal (or "Copied") said in the head, for a few seconds. */
+function sayInHead(text) {
   clearTimeout(manageErrorTimer);
   manageError = text;
   renderHead();
@@ -633,7 +682,7 @@ async function run(verb, id, action, body) {
   try {
     return await manage(id, action, body);
   } catch (e) {
-    sayError(`Couldn't ${verb}: ${e.message}`);
+    sayInHead(`Couldn't ${verb}: ${e.message}`);
     return null;
   }
 }
@@ -642,7 +691,9 @@ async function run(verb, id, action, body) {
 async function act(id, action) {
   const session = sessions.get(id);
   if (!session) return;
-  if (action === "pin") await run(session.pinned ? "unpin" : "pin", id, "pin", { pinned: !session.pinned });
+  if (action === "chat") window.open(`/?session=${encodeURIComponent(id)}`, "_blank", "noopener");
+  else if (action === "resume") await copyResume(session);
+  else if (action === "pin") await run(session.pinned ? "unpin" : "pin", id, "pin", { pinned: !session.pinned });
   else if (action === "archive") await run(session.archived ? "unarchive" : "archive", id, "archive", { archived: !session.archived });
   else if (action === "rename") {
     const row = rows.get(id);
@@ -653,6 +704,45 @@ async function act(id, action) {
     scheduleClose();
   }
 }
+
+/** Copies the command that continues the session in a terminal, and says so in the head for a moment. */
+async function copyResume(session) {
+  const command = resumeCommand(session);
+  if (!command) return;
+  try {
+    await navigator.clipboard.writeText(command);
+    sayInHead("Copied");
+  } catch {
+    sayInHead("Couldn't copy");
+  }
+}
+
+/**
+ * True when the press that makes this click landed on "…" while its menu was open: the menu closed on
+ * the press (chat-manage.js), and the click must not open it again. Seen first, in the capture phase.
+ */
+let moreWasOpen = false;
+window.addEventListener("pointerdown", (e) => {
+  moreWasOpen = menu.isOpen && e.target instanceof Node && els.more.contains(e.target);
+}, true);
+
+/** The head's "…": what the person may do with the session shown. A second press puts it away. */
+els.more.addEventListener("click", () => {
+  const session = selected ? sessions.get(selected) : undefined;
+  if (moreWasOpen || menu.isOpen) {
+    moreWasOpen = false;
+    menu.close();
+    return;
+  }
+  if (!session) return;
+  const items = [{ action: "chat", label: "Open in chat" }];
+  if (resumeCommand(session)) items.push({ action: "resume", label: "Continue in terminal" });
+  els.more.setAttribute("aria-expanded", "true");
+  menu.open([...items, ...menuItems(session, false)], els.more, (action) => void act(session.id, action));
+});
+new MutationObserver(() => {
+  if (!menu.isOpen) els.more.setAttribute("aria-expanded", "false");
+}).observe(menu.el, { attributes: true, attributeFilter: ["hidden"] });
 
 let stopping = null;
 stopButton.addEventListener("click", async () => {
@@ -670,13 +760,13 @@ function renderHead() {
   els.session.hidden = !session;
   if (!session) return;
   els.title.textContent = session.title || "Untitled";
-  els.openChat.href = `/?session=${encodeURIComponent(session.id)}`;
+  els.title.title = session.title || "";
   const status = sessionStatus(session);
   headStatus.textContent = manageError || (status === "in terminal" ? status : "");
+  headStatus.hidden = !headStatus.textContent;
   stopButton.hidden = !canStop(session);
   stopButton.disabled = stopping === session.id;
   stopButton.textContent = stopping === session.id ? "Stopping" : "Stop";
-  resume.show(session);
 }
 
 function grow() {
@@ -691,14 +781,18 @@ function renderReply() {
   // Switched off under the person's caret (their reply was sent): the focus comes back with the box.
   if (!enabled && document.activeElement === els.text) wantFocus = true;
   els.text.disabled = !enabled;
+  // What the box is for now is its placeholder; the line under it is only for what went wrong.
+  els.text.placeholder = replying.hint || "Reply";
   if (!sending && openElsewhere === selected && selected) {
     // Refused as open in a terminal: say so, and offer to send it all the same.
     const anyway = h("button", "send-anyway quiet small", "Send anyway");
     anyway.type = "button";
     anyway.addEventListener("click", () => void send(true));
     els.hint.replaceChildren(`${OPEN_IN_TERMINAL_HINT} `, anyway);
+    els.hint.hidden = false;
   } else {
-    els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : sending ? "Sending." : replying.hint;
+    els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : "";
+    els.hint.hidden = !replyError;
   }
   // Back to the box after the turn, unless the person has moved on or the dock has closed.
   if (enabled && wantFocus) {
@@ -791,6 +885,8 @@ function select(id) {
   wantFocus = false;
   els.text.value = (id && typed.get(id)) || "";
   renderList();
+  // The list shows about four rows: the one shown is one of them.
+  if (id) rows.get(id)?.item.scrollIntoView({ block: "nearest" });
   renderHead();
   renderReply();
   grow();
@@ -832,12 +928,22 @@ function point(on) {
   if (state !== "open") openTimer = setTimeout(() => inside && open(), OPEN_MS);
 }
 
+/** True while the workspace switch's list is open: it may hang past the island's edge. */
+function picking() {
+  try {
+    return els.workspace.matches(":open");
+  } catch {
+    // No :open in this browser: its list is the system's own, and the pointer can't leave for it.
+    return false;
+  }
+}
+
 function holds() {
   return {
     pointerInside: inside,
     pointerDown: down,
     // A row's menu or its title being edited holds it open as a focused reply box does.
-    replyFocused: (document.hasFocus() && document.activeElement === els.text) || menu.isOpen || renaming,
+    replyFocused: (document.hasFocus() && document.activeElement === els.text) || menu.isOpen || renaming || picking(),
     replyText: els.text.value,
   };
 }
@@ -845,7 +951,12 @@ function holds() {
 function open() {
   if (state === "open") return;
   clearTimeout(peekTimer);
-  const pick = preselect(shown(), peeking?.sessionId ?? null, lastPeeked);
+  // Each opening starts on the workspace the person chose. A session that peeked from another one is
+  // shown all the same: this time the list shows them all, and the choice stays for the next.
+  workspace = savedWorkspace(storage());
+  const peeked = peeking?.sessionId ?? null;
+  if (workspace && peeked && sessions.has(peeked) && sessions.get(peeked).workspace !== workspace) workspace = "";
+  const pick = preselect(listed(), peeked, lastPeeked);
   // Opened, the peeks are answered by the list.
   peeking = null;
   queue = [];
@@ -888,7 +999,8 @@ function scheduleClose() {
 window.addEventListener("pointermove", (e) => point(over(e.clientX, e.clientY)));
 document.documentElement.addEventListener("pointerleave", () => point(false));
 window.addEventListener("pointerdown", (e) => {
-  const on = over(e.clientX, e.clientY);
+  // The workspace switch's list may hang past the island: a press on it is a press on the dock.
+  const on = over(e.clientX, e.clientY) || (e.target instanceof Element && els.workspace.contains(e.target));
   point(on);
   // A press beside the open dock puts it away at once, whatever is typed in it: the draft is kept.
   if (state === "open" && !on) close();
@@ -906,7 +1018,8 @@ window.addEventListener("blur", () => {
   scheduleClose();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || e.isComposing || state !== "open") return;
+  // Esc in the workspace switch's open list closes the list, not the dock.
+  if (e.key !== "Escape" || e.isComposing || state !== "open" || picking()) return;
   e.preventDefault();
   close();
 });
@@ -928,7 +1041,7 @@ function onMessage(message) {
       renderList();
       // Connected again: fetch what was missed while away, or pick one if the selected is gone.
       if (selected && sessions.has(selected)) select(selected);
-      else select(preselect(shown(), null, null));
+      else select(preselect(listed(), null, null));
       renderHead();
       renderReply();
       break;
@@ -940,7 +1053,7 @@ function onMessage(message) {
       renderPill();
       checkPeek();
       if (state !== "open") break;
-      if (!selected) select(session.id);
+      if (!selected && (!workspace || session.workspace === workspace)) select(session.id);
       renderList();
       if (session.id === selected) {
         renderHead();
@@ -956,7 +1069,7 @@ function onMessage(message) {
       renderPill();
       checkPeek();
       if (state !== "open") break;
-      if (id === selected) select(preselect(shown(), null, null));
+      if (id === selected) select(preselect(listed(), null, null));
       renderList();
       break;
     }
