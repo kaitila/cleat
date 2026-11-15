@@ -1,18 +1,5 @@
 {
-  "$comment": "Paths whose changes need a person's approval even after a verifier passes them. Everything else merges on a passing verdict.",
+  "$comment": "Paths whose changes need a person's approval even after a verifier passes them. Empty by the owner's decision on 2026-11-15: every task merges on a passing verdict. Add paths back here to require a person's sign-off again.",
   "foreman": ">=0.1.0",
-  "protectedPaths": [
-    ".claude/**",
-    "**/.claude/**",
-    ".github/**",
-    ".foreman-kit/**",
-    ".mcp.json",
-    "foreman.json",
-    "package.json",
-    "**/package.json",
-    "bun.lock",
-    "**/tsconfig*.json",
-    "AGENTS.md",
-    "CLAUDE.md"
-  ]
+  "protectedPaths": []
 }
