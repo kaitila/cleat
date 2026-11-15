@@ -176,6 +176,9 @@ describe("the shell's file", () => {
     const wsl = { distro: "Ubuntu", repo: "/r", bun: "/b" };
     expect(JSON.parse(withoutLegacy(JSON.stringify({ runnerUrl: "http://127.0.0.1:5000", hotkey: "Alt+F9", snipHotkey: "Alt+S", dock: false, wsl, mine: 1 })))).toEqual({ runnerUrl: "http://127.0.0.1:5000", wsl });
     expect(JSON.parse(withoutLegacy(JSON.stringify({ hotkey: "Alt+F9" })))).toEqual({});
+    // A shell on the same machine keeps where its local runner lives (D0019).
+    const runner = { kind: "local", repo: "/r", bun: "/b" };
+    expect(JSON.parse(withoutLegacy(JSON.stringify({ hotkey: "Alt+F9", runner })))).toEqual({ runner });
     expect(JSON.parse(withoutLegacy("not json"))).toEqual(DEFAULT_SETTINGS);
     const file = join(dir, "migrate", "settings.json");
     mkdirSync(dirname(file), { recursive: true });

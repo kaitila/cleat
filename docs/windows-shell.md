@@ -55,7 +55,7 @@ What the shell applies, from the runner's settings:
 
 A value that is missing or malformed falls back to its default. A `wsl` with any part missing or malformed counts as absent, and the shell then starts no runner.
 
-**The migration from an older shell.** A file from before the runner kept the settings may also have `hotkey`, `snipHotkey` and `dock`. The first time the shell finds that the runner has no shell settings yet (`shell` is null), it sends those values, the defaults for any it lacks, and start on login as Windows has it now. Once the runner has stored them, it rewrites the file with `runnerUrl` and `wsl` alone. This happens once: after that, the runner's values are the ones applied. If the runner refuses the old values (a hotkey it does not accept), the shell sends the defaults instead.
+**The migration from an older shell.** A file from before the runner kept the settings may also have `hotkey`, `snipHotkey` and `dock`. The first time the shell finds that the runner has no shell settings yet (`shell` is null), it sends those values, the defaults for any it lacks, and start on login as Windows has it now. Once the runner has stored them, it rewrites the file with `runnerUrl` and `wsl` alone (and `runner`, the same-machine layout's key from [platforms](platforms.md), when the file has it). This happens once: after that, the runner's values are the ones applied. If the runner refuses the old values (a hotkey it does not accept), the shell sends the defaults instead.
 
 ## What it does
 - **Tray**: an icon with a menu: New task, Snip, Open chat, Settings…, a "Show dock" checkbox, a "Start on login" checkbox, Quit. Both checkboxes write to the runner (see "Settings"). A double-click opens the chat. There is no window at start.

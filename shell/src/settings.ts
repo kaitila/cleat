@@ -18,8 +18,8 @@ export interface Settings {
   legacy: LegacyPrefs;
 }
 
-/** The file's two keys. */
-export const FILE_KEYS = ["runnerUrl", "wsl"] as const;
+/** The keys the file keeps: runnerUrl, and where the runner lives (wsl for the Windows shell, runner for a shell on the same machine, D0019). */
+export const FILE_KEYS = ["runnerUrl", "wsl", "runner"] as const;
 export const DEFAULT_SETTINGS = { runnerUrl: "http://127.0.0.1:4777" };
 export const SETTINGS_FILE = "settings.json";
 /** The running shell's Windows pid, beside the settings: `up` waits for that process to end before it installs over it. */
@@ -68,7 +68,7 @@ export function withWsl(text: string | null, wsl: WslSettings): string {
   return JSON.stringify({ ...(object(text) ?? DEFAULT_SETTINGS), wsl }, null, 2) + "\n";
 }
 
-/** The file's text after the migration: runnerUrl and wsl, as they were, and nothing else. */
+/** The file's text after the migration: runnerUrl, wsl and runner, as they were, and nothing else. */
 export function withoutLegacy(text: string | null): string {
   const o = object(text) ?? DEFAULT_SETTINGS;
   const kept: Record<string, unknown> = {};
@@ -76,7 +76,7 @@ export function withoutLegacy(text: string | null): string {
   return JSON.stringify(kept, null, 2) + "\n";
 }
 
-/** Rewrites the file to its two keys once the runner has taken the rest. */
+/** Rewrites the file to its kept keys once the runner has taken the rest. */
 export function dropLegacy(file: string): void {
   if (!existsSync(file)) return;
   writeFileSync(file, withoutLegacy(readFileSync(file, "utf8")));
