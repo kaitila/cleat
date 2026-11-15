@@ -20,7 +20,7 @@ Small, clean and calm: a tool that lives in the tray. Everything is in `src/web/
 | `--ease-gentle`, `--ease-bouncy`, `--ease-snappy` with `--dur-gentle`, `--dur-bouncy`, `--dur-snappy` | The springs, below ("Motion") |
 | `--dur-fade`, `--dur-out`, `--rise`, `--pop` | 120ms for a fade in, 110ms for the way out; how far a thing that springs in travels (6px) and the scale it grows from (0.96) |
 | `--device-px`, `--snip-line`, `--snip-mark`, `--snip-mark-w`, `--snip-label`, `--snip-dim`, `--snip-edge` | The snip overlay, the same in both schemes (below) |
-| `--island-open`, `--island-close`, `--settle`, `--island-quiet` | The dock's island: 320ms to grow, on a curve that leaves fast and settles long without passing its size; 220ms to shrink; how much of it shows (0.55) while nothing is going on |
+| `--island-quiet` | How much of the dock's island shows (0.55) while nothing is going on |
 | `--sidebar`, `--measure` | Chat view: the sidebar's width; the widest the stream gets |
 
 Light and dark each have their own values: in both the page is the middle surface, the sidebar sits behind it and cards in front.
