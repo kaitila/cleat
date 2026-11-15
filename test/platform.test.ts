@@ -224,8 +224,11 @@ describe("intuition doctor", () => {
   });
 
   test("windows-wsl checks the Windows disk, and needs it; macOS has no display check", async () => {
-    const win = await checks(platformFor("windows-wsl"), all({ shellInstalled: () => false }));
-    expect(win.find((c) => c.name === "Windows")?.needed).toBe(true);
+    // Without Windows (CI), asking for the shell's folder throws: doctor still reports.
+    const noWindows = { ...platformFor("windows-wsl"), unavailable: () => "no /mnt/c", shellPaths: () => { throw new Error("cmd.exe failed"); } };
+    const win = await checks(noWindows, all({ shellInstalled: () => false }));
+    expect(win.find((c) => c.name === "Windows")).toMatchObject({ ok: false, needed: true, detail: "no /mnt/c" });
+    expect(win.find((c) => c.name === "shell installed")?.detail).toContain("Windows could not be asked");
     expect(win.some((c) => c.name === "display")).toBe(false);
     const mac = await checks(platformFor("macos"), all({ shellInstalled: () => false }));
     expect(mac.some((c) => c.name === "Windows" || c.name === "display")).toBe(false);

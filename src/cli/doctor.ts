@@ -100,7 +100,14 @@ export async function checks(platform: Platform, probes: Probes, env: Env = proc
   add({ name: "runner", ok: url !== null, needed: false, detail: url ? `running at ${url}` : "not running", fix: "`intuition start` (or `intuition up`)" });
 
   const installed = probes.shellInstalled();
-  add({ name: "shell installed", ok: installed, needed: false, detail: installed ? platform.shellPaths().app : `not in ${platform.shellPaths().app}`, fix: "`intuition shell install` (or `intuition up`)" });
+  // windows-wsl asks Windows for the folder: without Windows there is none to name.
+  let folder: string;
+  try {
+    folder = platform.shellPaths().app;
+  } catch {
+    folder = "the shell's folder (Windows could not be asked)";
+  }
+  add({ name: "shell installed", ok: installed, needed: false, detail: installed ? folder : `not in ${folder}`, fix: "`intuition shell install` (or `intuition up`)" });
 
   const pid = installed ? probes.shellPid() : null;
   add({ name: "shell running", ok: pid !== null, needed: false, detail: pid !== null ? `pid ${pid}` : "not running", fix: "`intuition shell start` (or `intuition up`)" });
@@ -155,7 +162,13 @@ export function machineProbes(platform: Platform, env: Env = process.env): Probe
       }
     },
     runner: () => runnerUrl(env),
-    shellInstalled: () => isInstalled(platform.shellPaths()),
+    shellInstalled: () => {
+      try {
+        return isInstalled(platform.shellPaths());
+      } catch {
+        return false;
+      }
+    },
     shellPid: () => {
       try {
         const file = pidFile(platform.settingsFile());
