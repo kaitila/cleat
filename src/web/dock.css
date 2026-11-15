@@ -1,7 +1,8 @@
 /* The dock's layout: one dark island hanging from the top edge (docs/protocol.md, "Dock"). Every
    colour, size, radius, border and duration is a token or a component of base.css (docs/design.md);
    nothing here is a raw value. The sizes are the contract's, and dock.js sets them. The page is
-   dark in both schemes: <html class="dark">.
+   dark in both schemes and themes: <body class="dark"> (on <body>, since a forced theme on <html>
+   would outrank .dark there).
 
    The window never changes size, and neither does any box in it. The island is one element as large
    as the window; what is seen of it is its clip-path, a rectangle hanging from the top centre whose

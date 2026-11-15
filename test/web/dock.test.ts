@@ -328,7 +328,10 @@ describe("the sources", () => {
   });
 
   test("the page is dark in both schemes: .dark in base.css has the dark scheme's own values", () => {
-    expect(source("dock.html")).toMatch(/<html lang="en" class="dark">/);
+    // On <body>, not <html>: theme.js puts data-theme on <html>, and :root[data-theme="light"]
+    // outranks .dark on the same element. On <body> the dark tokens win whatever the theme.
+    expect(source("dock.html")).toMatch(/<body class="dark">/);
+    expect(source("dock.html")).not.toMatch(/<html[^>]*class=/);
     const base = noComments(source("base.css"));
     const tokens = (block: string) => Object.fromEntries([...block.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((m) => [m[1]!, m[2]!.trim()]));
     const scheme = /@media \(prefers-color-scheme: dark\) \{\s*:root \{([^}]*)\}/.exec(base);

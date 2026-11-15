@@ -106,11 +106,6 @@
   --shadow: 0 0 0 var(--hairline) rgb(0 0 0 / 0.08), 0 8px 28px rgb(0 0 0 / 0.14);
   --motion: 150ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  /* The dock's island: how long it takes to grow and to shrink, and the curve it grows on, fast out
-     of the pill and a long settle, never past its size. */
-  --island-open: 320ms;
-  --island-close: 220ms;
-  --settle: cubic-bezier(0.22, 1, 0.36, 1);
   /* Springs (docs/design.md, "Motion"): src/web/motion.js makes these from a stiffness and a
      damping (`bun src/web/motion.js`), and test/web/motion.test.ts fails when they differ. Each
      curve goes with its duration. Gentle: near critical, for things that appear or slide. Bouncy:
@@ -153,9 +148,53 @@
     --shadow: 0 0 0 var(--hairline) rgb(255 255 255 / 0.1), 0 8px 28px rgb(0 0 0 / 0.6);
   }
 }
-/* Dark whatever the scheme: the dock's page (<html class="dark">) is one dark island on any desktop.
+/* Dark whatever the scheme: the dock's page (<body class="dark">) is one dark island on any desktop.
    The same values as the dark scheme above; test/web/dock.test.ts fails when the two differ. */
 .dark {
+  color-scheme: dark;
+  --sunken: #0f0f11;
+  --bg: #151517;
+  --surface: #1b1b1e;
+  --hover: #1f1f23;
+  --selected: #27272c;
+  --line: #2a2a2f;
+  --line-strong: #3c3c43;
+  --text: #ececef;
+  --muted: #9c9ca6;
+  --accent: #8da2fb;
+  --accent-text: #0d1230;
+  --accent-soft: rgb(141 162 251 / 0.32);
+  --running: #46c483;
+  --warn: #e3a73a;
+  --danger: #f17a6e;
+  --shadow: 0 0 0 var(--hairline) rgb(255 255 255 / 0.1), 0 8px 28px rgb(0 0 0 / 0.6);
+}
+/* The theme the person chose (Settings, Appearance). theme.js sets data-theme on <html> to light
+   or dark, and removes it for "system", which leaves the choice to prefers-color-scheme above.
+   An attribute on :root outranks the plain :root in the media rule, whatever the order. Each set
+   repeats its scheme's values: test/web/theme.test.ts fails when they differ, so the contrasts
+   design.test.ts checks hold here too. .light, like .dark, gives one part of a page the light
+   values whatever the theme (the settings page's previews). */
+:root[data-theme="light"], .light {
+  color-scheme: light;
+  --sunken: #f6f6f7;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --hover: #eeeef0;
+  --selected: #e7e7ea;
+  --line: #e2e2e6;
+  --line-strong: #cfcfd5;
+  --text: #17171a;
+  --muted: #66666e;
+  --accent: #3451d1;
+  --accent-text: #ffffff;
+  --accent-soft: rgb(52 81 209 / 0.24);
+  --running: #1a8f4c;
+  --warn: #9a5a00;
+  --danger: #c4372c;
+  --shadow: 0 0 0 var(--hairline) rgb(0 0 0 / 0.08), 0 8px 28px rgb(0 0 0 / 0.14);
+}
+:root[data-theme="dark"] {
   color-scheme: dark;
   --sunken: #0f0f11;
   --bg: #151517;

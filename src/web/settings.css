@@ -1,0 +1,177 @@
+/* The settings page: one calm column of sections, each a caption over a card of rows, a name and a
+   line on the left, its control on the right. Layout only: every colour, size, radius and border
+   is a token or a component of base.css (docs/design.md). */
+.settings {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-5) var(--space-6);
+  display: grid;
+  gap: var(--space-5);
+  animation: rise-in var(--dur-gentle) var(--ease-gentle) backwards, fade-in var(--dur-fade) var(--ease) backwards;
+}
+.settings[aria-busy="true"] .section { opacity: 0.5; pointer-events: none; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+
+/* "Saved" is quiet and goes; an error stays, in red. */
+.status { color: var(--muted); transition: opacity var(--motion) var(--ease); }
+.status[data-tone="error"] { color: var(--danger); }
+.status.gone { opacity: 0; }
+.load-error, .field-error { color: var(--danger); }
+
+.section { display: grid; gap: var(--space-2); transition: opacity var(--motion) var(--ease); }
+.section > .label { padding-inline: var(--space-1); }
+.note { padding-inline: var(--space-1); }
+
+/* A setting: its name and one line on the left, the control on the right. Rows are hairlines apart. */
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-height: calc(var(--control) + var(--space-3) * 2);
+  padding: var(--space-3) var(--space-4);
+}
+.card > * + .setting, .card > .field-error + .setting { border-top: var(--hairline) solid var(--line); }
+.setting-text { display: grid; gap: var(--space-1); min-width: 0; }
+.card > .field-error { margin: calc(var(--space-2) * -1) var(--space-4) 0; padding-bottom: var(--space-3); }
+.card-note { padding: var(--space-3) var(--space-4); border-top: var(--hairline) solid var(--line); }
+.card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-top: var(--hairline) solid var(--line);
+}
+.empty { padding: var(--space-3) var(--space-4); }
+
+/* ---------- workspaces: one row each, its fields and its actions ---------- */
+.workspaces { margin: 0; padding: 0; list-style: none; }
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+}
+.workspace + .workspace { border-top: var(--hairline) solid var(--line); }
+.workspace-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 5fr) auto; gap: var(--space-2); min-width: 0; }
+.workspace .mode { width: auto; padding-block: 0; height: var(--control); }
+.workspace-actions { display: flex; align-items: center; gap: var(--space-1); }
+.workspace .field-error { grid-column: 1 / -1; margin: 0; }
+.exists { min-width: calc(var(--space-6) + var(--space-4)); text-align: right; color: var(--muted); }
+.exists[data-exists="false"] { color: var(--danger); }
+.input[aria-invalid="true"] { border-color: var(--danger); }
+
+/* ---------- two or three choices drawn as one control ---------- */
+.segmented {
+  flex: none;
+  display: inline-flex;
+  padding: calc(var(--space-1) / 2);
+  gap: calc(var(--space-1) / 2);
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--sunken);
+}
+.segmented label { position: relative; display: inline-flex; }
+.segmented input, .theme input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.segmented span {
+  display: inline-flex;
+  align-items: center;
+  height: calc(var(--control) - var(--space-1));
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-s);
+  color: var(--muted);
+  font-weight: var(--medium);
+  transition: background-color var(--motion) var(--ease), color var(--motion) var(--ease);
+}
+.segmented label:hover span { color: var(--text); }
+.segmented input:checked + span { background: var(--surface); color: var(--text); border: var(--hairline) solid var(--line-strong); }
+.segmented input:focus-visible + span, .theme input:focus-visible ~ .preview, .shortcut:focus-visible { outline: var(--ring) solid var(--accent); outline-offset: var(--hairline); }
+[data-field][aria-invalid="true"] .segmented, .segmented[aria-invalid="true"], .themes[aria-invalid="true"] .preview { border-color: var(--danger); }
+
+/* ---------- appearance: three choices, each a small picture of a window in its theme ---------- */
+.themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.theme { position: relative; display: grid; gap: var(--space-2); cursor: pointer; }
+.preview {
+  display: flex;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  transition: border-color var(--motion) var(--ease);
+}
+.theme:hover .preview { border-color: var(--muted); }
+.theme input:checked ~ .preview { border-color: var(--accent); outline: var(--ring) solid var(--accent-soft); outline-offset: 0; }
+.theme-name { padding-inline: var(--space-1); font-weight: var(--medium); color: var(--muted); }
+.theme input:checked ~ .theme-name { color: var(--text); }
+.half { flex: 1; display: flex; overflow: hidden; background: var(--bg); }
+.half .mini { flex: none; width: 200%; }
+.half.dark .mini { margin-left: -100%; }
+.mini { flex: 1; display: flex; background: var(--bg); color: var(--text); }
+.mini-side { width: 28%; background: var(--sunken); border-right: var(--hairline) solid var(--line); }
+.mini-main { flex: 1; display: grid; align-content: start; gap: var(--space-2); padding: var(--space-3); }
+.mini-line { height: var(--space-2); border-radius: var(--radius-s); background: var(--line-strong); }
+.mini-line.short { width: 60%; background: var(--line); }
+.mini-button { width: 36%; height: var(--space-3); margin-top: var(--space-1); border-radius: var(--radius-s); background: var(--accent); }
+
+/* ---------- shortcuts: keycaps on a quiet button; recording shows a hint in their place ---------- */
+.shortcut { flex: none; height: auto; min-height: var(--control); padding: var(--space-1) var(--space-2); border-color: var(--line-strong); }
+.shortcut[data-recording="true"] { border-color: var(--accent); background: var(--surface); outline: var(--ring) solid var(--accent-soft); outline-offset: 0; }
+.shortcut[aria-invalid="true"] { border-color: var(--danger); }
+.keycaps { display: inline-flex; align-items: center; gap: var(--space-1); }
+.keycaps kbd { color: var(--text); background: var(--surface); }
+
+/* ---------- a switch: a checkbox drawn as a track and a knob ---------- */
+.switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: calc(var(--control-s) * 1.8);
+  height: var(--control-s);
+  margin: 0;
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--selected);
+  cursor: pointer;
+  transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease);
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--space-1) / 2);
+  left: calc(var(--space-1) / 2);
+  width: calc(var(--control-s) - var(--space-1) - var(--hairline) * 2);
+  height: calc(var(--control-s) - var(--space-1) - var(--hairline) * 2);
+  border-radius: var(--radius-s);
+  background: var(--surface);
+  border: var(--hairline) solid var(--line-strong);
+  transition: transform var(--dur-snappy) var(--ease-snappy);
+}
+.switch:checked { background: var(--accent); border-color: var(--accent); }
+.switch:checked::after { transform: translateX(calc(var(--control-s) * 0.8)); border-color: var(--accent); background: var(--accent-text); }
+.switch:disabled { opacity: 0.5; cursor: default; }
+label.setting { cursor: pointer; }
+
+/* ---------- about ---------- */
+.about { margin: 0; }
+.about dt { font-weight: var(--medium); }
+.about dd { margin: 0; }
+.about .setting { min-height: var(--control); padding-block: var(--space-2); }
+.about .setting + .setting { border-top: var(--hairline) solid var(--line); }
+
+@keyframes rise-in { from { transform: translateY(var(--rise)); } }
+@keyframes fade-in { from { opacity: 0; } }
+
+@media (max-width: 560px) {
+  .settings { padding: var(--space-4) var(--space-3) var(--space-5); }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .workspace-fields { grid-template-columns: minmax(0, 1fr); }
+  .workspace-actions { justify-content: flex-end; }
+  .themes { gap: var(--space-2); }
+  .setting { align-items: flex-start; flex-direction: column; gap: var(--space-2); }
+  label.setting, .about .setting { flex-direction: row; align-items: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings { animation: fade-in var(--dur-fade) var(--ease) backwards !important; }
+}

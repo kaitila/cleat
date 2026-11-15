@@ -3,17 +3,32 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { DEFAULT_PORT, type PermissionMode, type Workspace } from "../shared/protocol";
+import { DEFAULT_PORT, type PermissionMode, type Settings, type Workspace } from "../shared/protocol";
 
 /** Only these two: every other SDK mode (the ones that allow calls without the classifier or the person) is refused when the config is read. */
 const Mode = z.enum(["auto", "default"]);
 
 export const DEFAULT_PERMISSION_MODE: PermissionMode = "auto";
 
-const ConfigFile = z.object({
-  port: z.number().int().min(0).max(65535).default(DEFAULT_PORT),
+/**
+ * The settings in the config file: what loadConfig reads and PUT /api/settings validates (settings.ts).
+ * Keys it doesn't know are dropped by the parse but kept in the file when the runner writes it.
+ */
+export const SettingsSchema = z.object({
+  theme: z.enum(["system", "light", "dark"]).default("system"),
   permissionMode: Mode.default(DEFAULT_PERMISSION_MODE),
   workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1), permissionMode: Mode.optional() })).min(1),
+  shell: z
+    .object({ hotkey: z.string().min(1), snipHotkey: z.string().min(1), dock: z.boolean(), startOnLogin: z.boolean() })
+    .nullable()
+    .default(null),
+});
+
+/** The settings without the port, as stored in Config and written by the runner. */
+export type StoredSettings = Omit<Settings, "port">;
+
+const ConfigFile = SettingsSchema.extend({
+  port: z.number().int().min(0).max(65535).default(DEFAULT_PORT),
 });
 
 export interface Config {
@@ -23,6 +38,8 @@ export interface Config {
   permissionMode: PermissionMode;
   /** Workspaces whose own `permissionMode` overrides the top-level one, by name. */
   workspaceModes: Record<string, PermissionMode>;
+  /** The settings as the file has them (paths as written). PUT /api/settings replaces them through applySettings. */
+  settings: StoredSettings;
   dataDir: string;
   configPath: string;
   /** INTUITION_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
@@ -53,6 +70,34 @@ export function configPath(env: Record<string, string | undefined> = process.env
   return resolve(expandHome(env.INTUITION_CONFIG ?? "~/.config/intuition/config.json"));
 }
 
+/** The index of the first workspace whose name an earlier one has, or null. */
+export function duplicateWorkspace(workspaces: { name: string }[]): number | null {
+  const names = new Set<string>();
+  for (const [i, w] of workspaces.entries()) {
+    if (names.has(w.name)) return i;
+    names.add(w.name);
+  }
+  return null;
+}
+
+/**
+ * Puts new settings into a running config. The workspaces array is changed in place, since the
+ * transcript sync holds it; the next turn of any session asks for the new permission mode.
+ */
+export function applySettings(config: Pick<Config, "workspaces" | "permissionMode" | "workspaceModes" | "settings">, settings: StoredSettings): void {
+  config.settings = settings;
+  config.permissionMode = settings.permissionMode;
+  config.workspaceModes = Object.fromEntries(settings.workspaces.flatMap((w) => (w.permissionMode ? [[w.name, w.permissionMode]] : [])));
+  config.workspaces.splice(
+    0,
+    config.workspaces.length,
+    ...settings.workspaces.map((w) => {
+      const p = resolve(expandHome(w.path));
+      return { name: w.name, path: p, exists: existsSync(p) };
+    }),
+  );
+}
+
 /** Reads the config file, writing the default one first if there is none. */
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const path = configPath(env);
@@ -68,24 +113,22 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   const parsed = ConfigFile.safeParse(raw);
   if (!parsed.success) throw new Error(`${path}: ${z.prettifyError(parsed.error)}`);
-  const names = new Set<string>();
-  for (const w of parsed.data.workspaces) {
-    if (names.has(w.name)) throw new Error(`${path}: workspace "${w.name}" is listed twice`);
-    names.add(w.name);
-  }
+  const twice = duplicateWorkspace(parsed.data.workspaces);
+  if (twice !== null) throw new Error(`${path}: workspace "${parsed.data.workspaces[twice]!.name}" is listed twice`);
   const dataDir = resolve(expandHome(env.INTUITION_DATA_DIR ?? "~/.local/share/intuition"));
   mkdirSync(dataDir, { recursive: true });
-  return {
-    port: env.INTUITION_PORT !== undefined ? Number(env.INTUITION_PORT) : parsed.data.port,
-    workspaces: parsed.data.workspaces.map((w) => {
-      const p = resolve(expandHome(w.path));
-      return { name: w.name, path: p, exists: existsSync(p) };
-    }),
-    permissionMode: parsed.data.permissionMode,
-    workspaceModes: Object.fromEntries(parsed.data.workspaces.flatMap((w) => (w.permissionMode ? [[w.name, w.permissionMode]] : []))),
+  const { port, ...settings } = parsed.data;
+  const config: Config = {
+    port: env.INTUITION_PORT !== undefined ? Number(env.INTUITION_PORT) : port,
+    workspaces: [],
+    permissionMode: settings.permissionMode,
+    workspaceModes: {},
+    settings,
     dataDir,
     configPath: path,
     fakeAgent: env.INTUITION_FAKE_AGENT === "1",
     buildId: env.INTUITION_BUILD_ID || null,
   };
+  applySettings(config, settings);
+  return config;
 }

@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="/assets/theme.js"></script>
+  <title>intuition settings</title>
+  <link rel="preload" href="/assets/fonts/inter-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/assets/base.css">
+  <link rel="stylesheet" href="/assets/settings.css">
+  <script type="module" src="/assets/settings.js"></script>
+</head>
+<body>
+  <main class="settings" aria-busy="true">
+    <header class="head">
+      <h1 class="title">Settings</h1>
+      <span id="status" class="status small" role="status" aria-live="polite"></span>
+    </header>
+    <p id="load-error" class="load-error small" role="alert" hidden></p>
+
+    <section class="section" aria-labelledby="h-workspaces">
+      <h2 id="h-workspaces" class="label">Workspaces</h2>
+      <div class="card" data-field="workspaces">
+        <ol id="workspaces" class="workspaces" aria-label="Workspaces"></ol>
+        <p id="workspaces-empty" class="empty muted small" hidden>No workspaces yet. Add the folder of a project Claude should work in.</p>
+        <div class="card-foot">
+          <button id="add-workspace" class="small" type="button">Add workspace</button>
+          <span class="muted small">The first one that exists is the pop-up's default.</span>
+        </div>
+      </div>
+      <p class="field-error small" data-error-for="workspaces" hidden></p>
+    </section>
+
+    <section class="section" aria-labelledby="h-sessions">
+      <h2 id="h-sessions" class="label">Sessions</h2>
+      <div class="card">
+        <div class="setting">
+          <div class="setting-text">
+            <span class="strong" id="mode-name">Permission mode</span>
+            <span class="muted small" id="mode-help">Auto lets Claude Code's classifier allow safe tool calls and refuse risky ones on its own. A call it can't decide still comes to you to Allow or Deny. Ask brings you every call that would prompt in a terminal.</span>
+          </div>
+          <div class="segmented" role="radiogroup" aria-labelledby="mode-name" aria-describedby="mode-help" data-field="permissionMode">
+            <label><input type="radio" name="permissionMode" value="auto"><span>Auto</span></label>
+            <label><input type="radio" name="permissionMode" value="default"><span>Ask</span></label>
+          </div>
+        </div>
+        <p class="field-error small" data-error-for="permissionMode" hidden></p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-appearance">
+      <h2 id="h-appearance" class="label">Appearance</h2>
+      <div class="themes" role="radiogroup" aria-labelledby="h-appearance" data-field="theme">
+        <label class="theme">
+          <input type="radio" name="theme" value="system">
+          <span class="preview" aria-hidden="true"><span class="half light"><span class="mini"><span class="mini-side"></span><span class="mini-main"><span class="mini-line"></span><span class="mini-line short"></span><span class="mini-button"></span></span></span></span><span class="half dark"><span class="mini"><span class="mini-side"></span><span class="mini-main"><span class="mini-line"></span><span class="mini-line short"></span><span class="mini-button"></span></span></span></span></span>
+          <span class="theme-name">System</span>
+        </label>
+        <label class="theme">
+          <input type="radio" name="theme" value="light">
+          <span class="preview light" aria-hidden="true"><span class="mini"><span class="mini-side"></span><span class="mini-main"><span class="mini-line"></span><span class="mini-line short"></span><span class="mini-button"></span></span></span></span>
+          <span class="theme-name">Light</span>
+        </label>
+        <label class="theme">
+          <input type="radio" name="theme" value="dark">
+          <span class="preview dark" aria-hidden="true"><span class="mini"><span class="mini-side"></span><span class="mini-main"><span class="mini-line"></span><span class="mini-line short"></span><span class="mini-button"></span></span></span></span>
+          <span class="theme-name">Dark</span>
+        </label>
+      </div>
+      <p class="field-error small" data-error-for="theme" hidden></p>
+    </section>
+
+    <!-- Shortcuts, Dock and Startup are the Windows shell's: off until it has sent its values once. -->
+    <section class="section" aria-labelledby="h-shortcuts">
+      <h2 id="h-shortcuts" class="label">Shortcuts</h2>
+      <div class="card">
+        <div class="setting">
+          <div class="setting-text">
+            <span class="strong" id="hotkey-name">New task</span>
+            <span class="muted small">Opens the pop-up with the clipboard attached.</span>
+          </div>
+          <button class="shortcut quiet" type="button" data-shortcut="hotkey" data-field="shell.hotkey" aria-labelledby="hotkey-name hotkey-keys" aria-describedby="shortcut-help"><span class="keycaps" id="hotkey-keys"></span></button>
+        </div>
+        <p class="field-error small" data-error-for="shell.hotkey" hidden></p>
+        <div class="setting">
+          <div class="setting-text">
+            <span class="strong" id="snip-name">Snip</span>
+            <span class="muted small">Freezes the screen to pick an area for a task.</span>
+          </div>
+          <button class="shortcut quiet" type="button" data-shortcut="snipHotkey" data-field="shell.snipHotkey" aria-labelledby="snip-name snip-keys" aria-describedby="shortcut-help"><span class="keycaps" id="snip-keys"></span></button>
+        </div>
+        <p class="field-error small" data-error-for="shell.snipHotkey" hidden></p>
+        <p id="shortcut-help" class="card-note muted small">Click one and press the new keys; Esc keeps the old ones. The Windows shell applies them as soon as they're saved.</p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-dock">
+      <h2 id="h-dock" class="label">Dock</h2>
+      <div class="card">
+        <label class="setting">
+          <span class="setting-text">
+            <span class="strong">Show the dock</span>
+            <span class="muted small">A small island at the top of the screen with the sessions that are running.</span>
+          </span>
+          <input class="switch" type="checkbox" role="switch" data-switch="dock" data-field="shell.dock">
+        </label>
+        <p class="field-error small" data-error-for="shell.dock" hidden></p>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="h-startup">
+      <h2 id="h-startup" class="label">Startup</h2>
+      <div class="card">
+        <label class="setting">
+          <span class="setting-text">
+            <span class="strong">Start at login</span>
+            <span class="muted small">The tray icon and the shortcuts are there when Windows starts.</span>
+          </span>
+          <input class="switch" type="checkbox" role="switch" data-switch="startOnLogin" data-field="shell.startOnLogin">
+        </label>
+        <p class="field-error small" data-error-for="shell.startOnLogin" hidden></p>
+      </div>
+      <p class="field-error small" data-error-for="shell" hidden></p>
+      <p id="shell-missing" class="note muted small" hidden>The Windows shell hasn't connected yet. Start it once and its shortcuts, dock and startup settings appear here.</p>
+    </section>
+
+    <section class="section" aria-labelledby="h-about">
+      <h2 id="h-about" class="label">About</h2>
+      <div class="card">
+        <dl class="about">
+          <div class="setting"><dt>Version</dt><dd id="version" class="num muted">…</dd></div>
+          <div class="setting"><dt>Port</dt><dd id="port" class="num muted">…</dd></div>
+        </dl>
+      </div>
+    </section>
+  </main>
+
+  <template id="workspace-row">
+    <li class="workspace">
+      <div class="workspace-fields">
+        <input class="input name" type="text" placeholder="Name" aria-label="Name" spellcheck="false" autocomplete="off">
+        <input class="input path mono" type="text" placeholder="/home/you/project" aria-label="Folder" spellcheck="false" autocomplete="off">
+        <select class="input mode" aria-label="Permission mode">
+          <option value="">As above</option>
+          <option value="auto">Auto</option>
+          <option value="default">Ask</option>
+        </select>
+      </div>
+      <div class="workspace-actions">
+        <span class="exists small"></span>
+        <button class="quiet small up" type="button" aria-label="Move up">↑</button>
+        <button class="quiet small down" type="button" aria-label="Move down">↓</button>
+        <button class="quiet small remove" type="button">Remove</button>
+      </div>
+      <p class="field-error small" hidden></p>
+    </li>
+  </template>
+</body>
+</html>

@@ -245,7 +245,7 @@ describe("edges", () => {
       expect(out).toContain("usage: intuition <command>");
       expect(out).toContain("intuition up");
       expect(out).not.toContain("bun src/cli.ts");
-      for (const name of ["up", "start", "restart", "stop", "status", "logs", "shell install", "shell login on|off|status", "link [dir]", "unlink [dir]", "help"]) expect(out).toContain(`  ${name}`);
+      for (const name of ["up", "start", "restart", "stop", "status", "logs", "shell install", "shell login on|off|status", "doctor", "link [dir]", "unlink [dir]", "help"]) expect(out).toContain(`  ${name}`);
     }
   });
 });
