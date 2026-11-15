@@ -4,7 +4,7 @@ import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ApprovalAsk } from "../../src/runner/agent";
 import { DENIED, MAX_DENIED_INPUT, MAX_TOOL_RESULT, claudeOptions, reduce } from "../../src/runner/agent-claude";
 
-const input = { prompt: "hi", cwd: "/tmp/work", resume: null, permissionMode: "auto" as const, signal: new AbortController().signal, approve: async () => "deny" as const };
+const input = { agent: "claude" as const, prompt: "hi", cwd: "/tmp/work", resume: null, permissionMode: "auto" as const, signal: new AbortController().signal, approve: async () => "deny" as const };
 /** Only the fields reduce() reads: the SDK's message types carry many more. */
 const msg = (m: Record<string, unknown>) => ({ parent_tool_use_id: null, session_id: "s1", ...m }) as unknown as SDKMessage;
 

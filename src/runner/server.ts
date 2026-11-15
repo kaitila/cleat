@@ -2,10 +2,12 @@
 import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import {
+  AGENTS,
   HOST,
   NO_MAC_SHELL,
   NOT_RUNNING,
   OPEN_IN_TERMINAL,
+  type AgentKind,
   type ClipboardCapture,
   type DeletedResponse,
   type ErrorResponse,
@@ -26,7 +28,7 @@ import { driverFor, type AgentDriver } from "./agent";
 import { buildId } from "./build";
 import { Clipboard, defaultImageRule, type ImageRule, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
 import { DELETING, Manage, fakeOps, sdkOps, type Refused, type TranscriptOps } from "./manage";
-import { applySettings, permissionModeFor, type Config } from "./config";
+import { agentFor, applySettings, permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
 import { layoutOrNull, parseReport, ShellState } from "./platform";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
@@ -121,9 +123,11 @@ async function startSession(req: Request, app: App): Promise<Response> {
   const workspace = app.config.workspaces.find((w) => w.name === b.workspace);
   if (!workspace) return fail(400, `unknown workspace "${b.workspace}"`);
   if (!existsSync(workspace.path)) return fail(400, `the folder of workspace "${workspace.name}" is missing: ${workspace.path}`);
+  if (b.agent !== undefined && !AGENTS.includes(b.agent as AgentKind)) return fail(400, `agent must be one of ${AGENTS.join(", ")}`);
   const imagePath = imageOf(b, app);
   if (imagePath === null) return fail(400, NOT_AN_IMAGE);
-  return json({ session: app.sessions.start(workspace, b.prompt, imagePath) } satisfies SessionResponse, 201);
+  const agent = (b.agent as AgentKind | undefined) ?? agentFor(app.config, workspace.name);
+  return json({ session: app.sessions.start(workspace, b.prompt, imagePath, agent) } satisfies SessionResponse, 201);
 }
 
 async function reply(req: Request, app: App, id: string): Promise<Response> {

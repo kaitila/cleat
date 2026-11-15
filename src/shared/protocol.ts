@@ -11,6 +11,13 @@ export type SessionStatus = "running" | "waiting_approval" | "idle" | "error";
 /** The permission mode a session asks for (config `permissionMode`). Nothing else is ever passed to the SDK. */
 export type PermissionMode = "auto" | "default";
 
+/**
+ * Which agent runs a session: Claude Code through the Claude Agent SDK, or OpenAI Codex through the
+ * Codex SDK (docs/agents.md). Config `agent`, per workspace too, and StartSessionRequest.agent.
+ */
+export type AgentKind = "claude" | "codex";
+export const AGENTS: readonly AgentKind[] = ["claude", "codex"];
+
 export interface Workspace {
   name: string;
   /** Absolute WSL path, with ~ expanded. */
@@ -28,8 +35,13 @@ export type SessionSource = "intuition" | "terminal";
 export interface SessionMeta {
   /** The runner's id for the session (a UUID). Stable across turns, and across restarts for imported ones. */
   id: string;
-  /** Claude Code's session id, known after the first turn starts. Used to resume. */
+  /**
+   * The agent's own id for the conversation, known after the first turn starts, and used to resume:
+   * Claude Code's session id, or Codex's thread id for a session whose `agent` is "codex".
+   */
   claudeSessionId: string | null;
+  /** The agent that runs the session's turns, chosen when it starts; every reply goes to the same one. Absent reads as "claude". */
+  agent?: AgentKind;
   workspace: string;
   cwd: string;
   /** First line of the first prompt, cut to 80 characters. An imported session's: its custom title, else summary, else first prompt. */
@@ -124,8 +136,13 @@ export interface ShellSettings {
 export interface Settings {
   theme: Theme;
   permissionMode: PermissionMode;
+  /**
+   * The agent new sessions run on: "claude" when left out of the file. The runner always sends it;
+   * a PUT that leaves it out keeps the current one (clients from before it existed send none).
+   */
+  agent?: AgentKind;
   /** In order: the first is the default when none was used. `path` as written (it may start with ~/). */
-  workspaces: { name: string; path: string; permissionMode?: PermissionMode }[];
+  workspaces: { name: string; path: string; permissionMode?: PermissionMode; agent?: AgentKind }[];
   /** null until something sets it: the shell then sends its local values once and reads them from here after. */
   shell: ShellSettings | null;
   port: number;
@@ -188,7 +205,8 @@ export interface ClipboardCapture {
 export interface HealthResponse { ok: true; version: string; build: string }
 export interface WorkspacesResponse { workspaces: Workspace[]; lastUsed: string | null }
 export interface SessionsResponse { sessions: SessionMeta[] }
-export interface StartSessionRequest { workspace: string; prompt: string; imagePath?: string }
+/** agent: run this session on that agent, instead of the workspace's (config `agent`). */
+export interface StartSessionRequest { workspace: string; prompt: string; imagePath?: string; agent?: AgentKind }
 /** force: reply even when another process wrote to the transcript in the last two minutes (else 409, OPEN_IN_TERMINAL). */
 export interface ReplyRequest { prompt: string; imagePath?: string; force?: boolean }
 /** The 409 error for a reply to a session another process is writing to, without force. */
@@ -213,7 +231,14 @@ export interface ClipboardPostRequest { text?: string; imagePath?: string }
 export interface NotificationsResponse { notifications: Notification[]; latest: number }
 export interface ErrorResponse { error: string }
 /** The body of PUT /api/settings: a whole Settings. A port in it is ignored. */
-export type SettingsRequest = Omit<Settings, "port"> & { port?: number };
+/**
+ * agent left out keeps the current one, at the top and on a workspace of the same name; a
+ * workspace's `agent: null` clears its own, so it runs on the top-level agent.
+ */
+export type SettingsRequest = Omit<Settings, "port" | "workspaces"> & {
+  port?: number;
+  workspaces: { name: string; path: string; permissionMode?: PermissionMode; agent?: AgentKind | null }[];
+};
 /** The 409 of POST /api/platform/open-screen-recording when no shell on macOS is connected to open it. */
 export const NO_MAC_SHELL = "no shell on macOS is connected to open System Settings";
 /** POST /api/platform/open-screen-recording's 202: the connected shells were asked. */
