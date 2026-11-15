@@ -3,7 +3,7 @@
 //   events/<id>.jsonl  one session's events, one JSON object per line, seq 1, 2, 3 with no gaps
 //   state.json         the last workspace used
 // Writes are synchronous, so two events can never get the same seq.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionEvent, SessionMeta } from "../shared/protocol";
 import type { NewEvent } from "./agent";
@@ -82,6 +82,29 @@ export class Store {
     this.sessions.set(session.id, session);
     this.save();
     return session;
+  }
+
+  /**
+   * Sets or clears the archived and pinned flags, and the title, without counting as activity
+   * (updatedAt stays). A flag that is off is absent, not false.
+   */
+  mark(id: string, patch: { archived?: boolean; pinned?: boolean; title?: string }): SessionMeta {
+    const session = this.sessions.get(id);
+    if (!session) throw new Error(`no session ${id}`);
+    for (const flag of ["archived", "pinned"] as const) {
+      if (patch[flag] === true) session[flag] = true;
+      else if (patch[flag] === false) delete session[flag];
+    }
+    if (patch.title !== undefined) session.title = patch.title;
+    this.save();
+    return session;
+  }
+
+  /** Forgets the session: its metadata and its events file. */
+  remove(id: string): void {
+    this.sessions.delete(id);
+    this.save();
+    rmSync(join(this.eventsDir, `${id}.jsonl`), { force: true });
   }
 
   /**

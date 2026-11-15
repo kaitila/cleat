@@ -50,6 +50,76 @@
 /* A session started in the terminal: a quiet glyph before its workspace. */
 .terminal-mark { margin-right: var(--space-1); }
 .sessions-empty, .connection { padding: var(--space-2) var(--space-4); }
+
+/* Finding a session: the search box, the workspace filter and the Archived view, above the list. */
+.finder { display: grid; gap: var(--space-1); padding: 0 var(--space-2) var(--space-2); }
+.filters { display: flex; align-items: center; gap: var(--space-1); }
+.filter {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-s);
+  padding: 0 var(--space-1);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.filter:hover { background: var(--hover); color: var(--text); }
+#archived-view[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+/* The row's "…": in the place of its time, under the pointer, with the focus, or on the row shown. */
+.session-item { position: relative; }
+.session-item .more {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  min-width: var(--control-s);
+  opacity: 0;
+}
+.session-item:hover .more, .session-item:focus-within .more, .more[aria-expanded="true"] { opacity: 1; }
+.session-item:hover .session-time, .session-item:focus-within .session-time { visibility: hidden; }
+.pin-mark { margin-right: var(--space-1); color: var(--accent); }
+.pin-mark::after { content: "·"; margin-left: var(--space-1); color: var(--muted); }
+.session .rename { min-height: var(--control-s); padding-block: 0; padding-inline: var(--space-1); }
+.head .rename { font-size: var(--text-l); font-weight: var(--semibold); }
+/* What was just done, with Undo, for a few seconds. */
+.undo { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-top: var(--hairline) solid var(--line); }
+.undo-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.undo:not([hidden]) { animation: rise-in var(--dur-gentle) var(--ease-gentle); }
+@keyframes rise-in { from { opacity: 0; transform: translateY(var(--rise)); } }
+
+/* A session's menu, floating over the page. */
+.menu {
+  position: fixed;
+  z-index: 10;
+  display: grid;
+  min-width: calc(var(--sidebar) / 2);
+  padding: var(--space-1);
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  animation: pop-in var(--dur-snappy) var(--ease-snappy);
+  transform-origin: top right;
+}
+@keyframes pop-in { from { opacity: 0; transform: scale(var(--pop)); } }
+.menu-item { justify-content: flex-start; color: var(--text); font-weight: var(--regular); }
+.menu-item.danger, .menu-item.danger:hover { color: var(--danger); }
+.confirm button.danger { border-color: var(--danger); color: var(--danger); }
+.confirm button.danger:hover { background: var(--hover); }
+
+/* The delete confirmation: a card in the middle of a dimmed page. */
+.confirm {
+  max-width: calc(var(--measure) * 0.6);
+  padding: var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+.confirm::backdrop { background: var(--sunken); opacity: 0.7; }
+.confirm-form { display: grid; gap: var(--space-3); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
 .connection { border-top: var(--hairline) solid var(--line); }
 
 /* The selected session */
@@ -61,6 +131,8 @@
 .meta { display: flex; align-items: center; gap: var(--space-2); }
 .meta #workspace::after { content: "·"; margin-left: var(--space-2); }
 .meta .resume { margin-left: auto; }
+.meta .stop:not([hidden]) + .resume { margin-left: var(--space-2); }
+.meta .stop { margin-left: auto; }
 .scroller { flex: 1; min-height: 0; overflow-y: auto; }
 .stream { display: flex; flex-direction: column; gap: var(--space-3); padding-block: var(--space-5); }
 .empty { display: grid; gap: var(--space-1); padding: var(--space-5); text-align: center; margin-top: 24vh; }

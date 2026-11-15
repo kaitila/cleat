@@ -51,6 +51,10 @@ export interface SessionMeta {
    * changes): "auto", "default", or another of the SDK's modes. Absent until the first turn reports it.
    */
   permissionMode?: string;
+  /** Hidden from the default lists, kept on disk (POST .../archive). Absent when not archived. */
+  archived?: true;
+  /** Listed before the others (POST .../pin). Absent when not pinned. */
+  pinned?: true;
 }
 
 interface EventBase {
@@ -74,6 +78,8 @@ export type SessionEvent = EventBase &
     /** Once per session: it asked for `requested` but Claude Code runs it in `mode`, so calls come to the person. */
     | { kind: "permission_mode"; requested: PermissionMode; mode: string }
     | { kind: "error"; message: string }
+    /** The person stopped the turn (POST .../stop): it was interrupted, and the session is idle. */
+    | { kind: "stopped" }
   );
 
 export type SessionEventKind = SessionEvent["kind"];
@@ -83,6 +89,8 @@ export type ApprovalDecision = "allow" | "deny";
 export type ServerMessage =
   | { type: "hello"; sessions: SessionMeta[] }
   | { type: "session"; session: SessionMeta }
+  /** The session was deleted (POST .../delete): its record and events are gone. */
+  | { type: "removed"; sessionId: string }
   | { type: "event"; sessionId: string; event: SessionEvent }
   /** A piece of assistant text as it streams. Not stored: the full text follows as an assistant_text event. */
   | { type: "delta"; sessionId: string; text: string }
@@ -144,6 +152,18 @@ export interface ReplyRequest { prompt: string; imagePath?: string; force?: bool
 /** The 409 error for a reply to a session another process is writing to, without force. */
 export const OPEN_IN_TERMINAL = "it looks open in a terminal: reply with force to continue it here anyway";
 export interface SessionResponse { session: SessionMeta }
+/** POST /api/sessions/:id/rename. The title is cut as any title (its first line, 80 characters). */
+export interface RenameRequest { title: string }
+/** POST /api/sessions/:id/archive: true archives, false brings it back. */
+export interface ArchiveRequest { archived: boolean }
+/** POST /api/sessions/:id/pin. */
+export interface PinRequest { pinned: boolean }
+/** POST /api/sessions/:id/delete answers with the id that is gone. */
+export interface DeletedResponse { deleted: string }
+/** The 409 for deleting a session that came from the terminal: those are only archived. */
+export const TERMINAL_NOT_DELETED = "a session from the terminal is not deleted here: archive it instead";
+/** The 409 for stopping a session the runner runs no turn of. */
+export const NOT_RUNNING = "no turn of this session is running here";
 export interface EventsResponse { events: SessionEvent[] }
 export interface ApprovalRequest { decision: ApprovalDecision }
 /** imagePath may be a Windows path (C:\...) here; the runner stores the WSL path. */

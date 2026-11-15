@@ -3,13 +3,16 @@ import { existsSync } from "node:fs";
 import { join, normalize } from "node:path";
 import {
   HOST,
+  NOT_RUNNING,
   OPEN_IN_TERMINAL,
   type ClipboardCapture,
+  type DeletedResponse,
   type ErrorResponse,
   type EventsResponse,
   type HealthResponse,
   type NotificationsResponse,
   type ServerMessage,
+  type SessionMeta,
   type SessionResponse,
   type SessionsResponse,
   type Settings,
@@ -19,6 +22,7 @@ import {
 import { driverFor, type AgentDriver } from "./agent";
 import { buildId } from "./build";
 import { Clipboard, MOUNTS, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
+import { DELETING, Manage, fakeOps, sdkOps, type Refused, type TranscriptOps } from "./manage";
 import { applySettings, permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
@@ -71,6 +75,7 @@ interface App {
   clipboard: Clipboard;
   notifications: Notifications;
   sync: Sync;
+  manage: Manage;
   /** The build id of the code this process loaded, taken once at its start (build.ts). */
   build: string;
   /** Where the Windows drives are mounted (/mnt). */
@@ -122,7 +127,9 @@ async function reply(req: Request, app: App, id: string): Promise<Response> {
   if (openElsewhere && b.force !== true) return fail(409, OPEN_IN_TERMINAL);
   // Nothing awaits between this check and the turn starting, so two replies sent at once
   // can't both start one. A session shown running only because its transcript grows is no runner turn.
-  const session = app.store.get(id)!;
+  const session = app.store.get(id);
+  if (!session) return fail(404, "no such session");
+  if (app.manage.deleting.has(id)) return fail(409, DELETING);
   const why = !app.sessions.isRunning(id) && app.sync.isLive(id) ? null : busy(session);
   if (why) return fail(409, why);
   return json({ session: app.sessions.reply(id, b.prompt, imagePath) } satisfies SessionResponse, 202);
@@ -135,6 +142,51 @@ async function answerApproval(req: Request, app: App, id: string, approvalId: st
   if (b.decision !== "allow" && b.decision !== "deny") return fail(400, 'decision must be "allow" or "deny"');
   const session = app.sessions.answer(id, approvalId, b.decision);
   return session ? json({ session } satisfies SessionResponse) : fail(404, NO_APPROVAL);
+}
+
+/** The session's answer, or the refusal's. */
+function answer(result: SessionMeta | Refused, status = 200): Response {
+  return "error" in result && "status" in result ? fail(result.status, result.error) : json({ session: result as SessionMeta } satisfies SessionResponse, status);
+}
+
+/** POST /api/sessions/:id/<action>: the person's operations on a session (manage.ts, and stop in sessions.ts). */
+async function manageSession(req: Request, app: App, id: string, action: string): Promise<Response> {
+  if (!app.store.get(id)) return fail(404, "no such session");
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  switch (action) {
+    case "rename":
+      if (typeof b.title !== "string") return fail(400, "title must be a string");
+      return answer(await app.manage.rename(id, b.title));
+    case "archive":
+      if (typeof b.archived !== "boolean") return fail(400, "archived must be true or false");
+      return answer(app.manage.archive(id, b.archived));
+    case "pin":
+      if (typeof b.pinned !== "boolean") return fail(400, "pinned must be true or false");
+      return answer(app.manage.pin(id, b.pinned));
+    case "stop": {
+      const session = await app.sessions.interrupt(id);
+      return session ? answer(session) : fail(409, NOT_RUNNING);
+    }
+    case "fork":
+      return answer(await app.manage.fork(id), 201);
+    case "delete": {
+      const result = await app.manage.remove(id);
+      return "deleted" in result ? json(result satisfies DeletedResponse) : fail(result.status, result.error);
+    }
+  }
+  return fail(404, "not found");
+}
+
+/** GET /api/sessions: the unarchived sessions, or with ?archived=1 the archived ones. Pinned first, then newest first. */
+function listSessions(app: App, url: URL): Response {
+  const raw = url.searchParams.get("archived");
+  if (raw !== null && raw !== "0" && raw !== "1") return fail(400, "archived must be 0 or 1");
+  const archived = raw === "1";
+  const sessions = app.store.list().filter((s) => (s.archived === true) === archived);
+  // A stable sort: the store's order (newest first) stays within the pinned and the others.
+  sessions.sort((a, b) => Number(b.pinned === true) - Number(a.pinned === true));
+  return json({ sessions } satisfies SessionsResponse);
 }
 
 async function postClipboard(req: Request, app: App): Promise<Response> {
@@ -179,6 +231,8 @@ async function handle(req: Request, app: App): Promise<Response> {
     if (messages) return reply(req, app, messages[1]!);
     const approval = /^\/api\/sessions\/([^/]+)\/approvals\/([^/]+)$/.exec(path);
     if (approval) return answerApproval(req, app, approval[1]!, approval[2]!);
+    const op = /^\/api\/sessions\/([^/]+)\/(rename|archive|pin|stop|fork|delete)$/.exec(path);
+    if (op) return manageSession(req, app, op[1]!, op[2]!);
   }
   if (req.method === "GET") {
     if (path === "/api/workspaces") {
@@ -188,7 +242,7 @@ async function handle(req: Request, app: App): Promise<Response> {
       return json({ workspaces, lastUsed } satisfies WorkspacesResponse);
     }
     if (path === "/api/settings") return json(settingsOf(app.config.settings, app.port()) satisfies Settings);
-    if (path === "/api/sessions") return json({ sessions: app.store.list() } satisfies SessionsResponse);
+    if (path === "/api/sessions") return listSessions(app, url);
     const events = /^\/api\/sessions\/([^/]+)\/events$/.exec(path);
     if (events) {
       if (!app.store.get(events[1]!)) return fail(404, "no such session");
@@ -226,8 +280,15 @@ const TOPIC = "all";
  * Starts the runner. `driver` replaces the agent the config asks for, `mounts` the folder the
  * Windows drives are mounted in, and `sync` the transcript sync's reader and timings (all for tests:
  * CI has no /mnt/c and no transcripts). With the fake agent there are no transcripts to read.
+ * `ops` replaces what renames, forks and deletes transcripts (manage.ts): with the fake agent, nothing does.
  */
-export function startServer(config: Config, driver: AgentDriver = driverFor(config), mounts = MOUNTS, sync: Partial<SyncOptions> = {}): Runner {
+export function startServer(
+  config: Config,
+  driver: AgentDriver = driverFor(config),
+  mounts = MOUNTS,
+  sync: Partial<SyncOptions> = {},
+  ops: TranscriptOps = config.fakeAgent ? fakeOps() : sdkOps(),
+): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
   const notifications = new Notifications((notification) => send({ type: "notification", notification }));
@@ -237,7 +298,8 @@ export function startServer(config: Config, driver: AgentDriver = driverFor(conf
     ...sync,
   });
   sessions.watcher = transcriptSync;
-  const app: App = { config, store, sessions, sync: transcriptSync, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, port: () => server.port ?? config.port, send };
+  const manage = new Manage(store, sessions, transcriptSync, ops, send);
+  const app: App = { config, store, sessions, sync: transcriptSync, manage, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, port: () => server.port ?? config.port, send };
   const server = Bun.serve({
     hostname: HOST,
     port: config.port,

@@ -4,7 +4,6 @@
 import {
   approvalView,
   backoffMs,
-  byActivity,
   cutResult,
   decidedLabel,
   inputText,
@@ -20,6 +19,7 @@ import {
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
+import { archivedLine, canStop, deleteConfirm, manage, menuItems, renameInline, sessionMenu, UNDO_MS, visible, workspacesOf } from "./chat-manage.js";
 import { resumeControl } from "./chat-resume.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -40,6 +40,15 @@ const els = {
   text: $("reply-text"),
   hint: $("reply-hint"),
   meta: $("meta"),
+  search: $("search"),
+  workspaceFilter: $("workspace-filter"),
+  archivedView: $("archived-view"),
+  undo: $("undo"),
+  stop: $("stop"),
+  confirm: $("confirm"),
+  confirmTitle: $("confirm-title"),
+  confirmBody: $("confirm-body"),
+  confirmOk: $("confirm-ok"),
   main: document.querySelector(".main"),
 };
 const resume = resumeControl(document);
@@ -82,6 +91,9 @@ let wantFocus = true;
 /** True while the person is at the bottom of the stream: new events keep it there. */
 let stick = true;
 let followQueued = false;
+/** What the sidebar lists: the archived sessions or the others, one workspace or all, and the search. */
+const view = { archived: false, workspace: "", query: "" };
+const menu = sessionMenu(document);
 
 // ---------- the stream ----------
 
@@ -398,6 +410,11 @@ function apply(event) {
       endOpenApprovals();
       add(h("div", "error", event.message));
       break;
+    case "stopped":
+      endOpenTools();
+      endOpenApprovals();
+      add(h("div", "note muted small", "Stopped"));
+      break;
     default:
       add(h("div", "note muted small", unknownNote(event)));
   }
@@ -452,10 +469,17 @@ function wanted() {
   return new URLSearchParams(location.search).get("session");
 }
 
+/** The session the URL asks for if there is one (archived too), else the first the sidebar lists. */
+function pickFor(wantedId) {
+  if (wantedId && sessions.has(wantedId)) return wantedId;
+  return pickSession(visible(sessions.values(), { ...view, workspace: "", query: "" }), null);
+}
+
 function renderSidebar() {
-  const ordered = byActivity(sessions.values());
+  const ordered = visible(sessions.values(), view);
+  const shown = new Set(ordered.map((s) => s.id));
   for (const id of [...rows.keys()]) {
-    if (!sessions.has(id)) {
+    if (!shown.has(id)) {
       rows.get(id).item.remove();
       rows.delete(id);
     }
@@ -464,7 +488,8 @@ function renderSidebar() {
   ordered.forEach((session, i) => {
     let row = rows.get(session.id);
     if (!row) {
-      const item = h("li");
+      const item = h("li", "session-item");
+      item.dataset.id = session.id;
       const link = h("a", "session row");
       link.href = `/?session=${encodeURIComponent(session.id)}`;
       link.addEventListener("click", (e) => {
@@ -481,9 +506,19 @@ function renderSidebar() {
         workspace: h("span", "session-workspace muted small"),
         place: h("span"),
         mark: terminalMark(),
+        pin: h("span", "pin-mark", "Pinned"),
+        more: h("button", "more quiet small", "…"),
       };
+      row.more.type = "button";
+      row.more.setAttribute("aria-label", "Session actions");
+      row.more.setAttribute("aria-haspopup", "menu");
+      row.more.addEventListener("click", () => openMenu(session.id, row.more));
+      link.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        openMenu(session.id, { x: e.clientX, y: e.clientY });
+      });
       link.append(row.dot, row.title, row.time, row.workspace);
-      item.append(link);
+      item.append(link, row.more);
       rows.set(session.id, row);
     }
     row.dot.dataset.status = session.status;
@@ -491,8 +526,8 @@ function renderSidebar() {
     row.title.textContent = session.title || "Untitled";
     row.place.textContent = session.workspace;
     // The mark is in the line only for a session started in the terminal.
-    const parts = startedInTerminal(session) ? [row.mark, row.place] : [row.place];
-    if (row.workspace.childNodes.length !== parts.length) row.workspace.replaceChildren(...parts);
+    const parts = [...(session.pinned ? [row.pin] : []), ...(startedInTerminal(session) ? [row.mark] : []), row.place];
+    if (parts.some((p, k) => row.workspace.childNodes[k] !== p) || row.workspace.childNodes.length !== parts.length) row.workspace.replaceChildren(...parts);
     row.time.dateTime = session.updatedAt;
     row.time.textContent = relativeTime(session.updatedAt, now);
     if (session.id === selected) row.link.setAttribute("aria-current", "true");
@@ -500,10 +535,187 @@ function renderSidebar() {
     // Moved only when the order changed, so a focused row keeps its focus.
     if (els.sessions.children[i] !== row.item) els.sessions.insertBefore(row.item, els.sessions.children[i] ?? null);
   });
-  els.sessionsEmpty.hidden = sessions.size > 0;
+  els.sessionsEmpty.textContent = sessions.size === 0 ? "No sessions yet." : view.query || view.workspace ? "Nothing matches." : view.archived ? "No archived sessions." : "Every session is archived.";
+  els.sessionsEmpty.hidden = ordered.length > 0;
   els.empty.hidden = sessions.size > 0;
   els.stream.hidden = sessions.size === 0;
+  renderWorkspaces();
 }
+
+/** The workspace filter's options: every workspace a session is in, and the one chosen even if none is now. */
+function renderWorkspaces() {
+  const names = workspacesOf(sessions.values());
+  if (view.workspace && !names.includes(view.workspace)) names.push(view.workspace);
+  const have = [...els.workspaceFilter.options].slice(1).map((o) => o.value);
+  if (have.join("\n") === names.join("\n")) return;
+  const options = names.map((name) => {
+    const o = document.createElement("option");
+    o.value = name;
+    o.textContent = name;
+    return o;
+  });
+  els.workspaceFilter.replaceChildren(els.workspaceFilter.options[0], ...options);
+  els.workspaceFilter.value = view.workspace;
+}
+
+// ---------- managing a session: the menu, rename, archive with undo, delete with a confirmation ----------
+
+let undoTimer = 0;
+
+/** The quiet line under the list, for a few seconds: what was done (with Undo), or why it couldn't be. */
+function say(text, undo) {
+  clearTimeout(undoTimer);
+  const parts = [h("span", "undo-text", text)];
+  if (undo) {
+    const b = h("button", "quiet small", "Undo");
+    b.type = "button";
+    b.addEventListener("click", () => {
+      els.undo.hidden = true;
+      undo();
+    });
+    parts.push(b);
+  }
+  els.undo.replaceChildren(...parts);
+  els.undo.hidden = false;
+  undoTimer = setTimeout(() => (els.undo.hidden = true), UNDO_MS);
+}
+
+/** Runs one operation; a refusal is said on the line. Resolves with the answer, or null. */
+async function run(verb, id, action, body) {
+  try {
+    return await manage(id, action, body);
+  } catch (e) {
+    say(`Couldn't ${verb}: ${e.message}`);
+    return null;
+  }
+}
+
+function openMenu(id, at) {
+  const session = sessions.get(id);
+  if (!session) return;
+  menu.open(menuItems(session, true), at, (action) => void act(id, action));
+}
+
+async function act(id, action) {
+  const session = sessions.get(id);
+  if (!session) return;
+  switch (action) {
+    case "rename":
+      return startRename(id);
+    case "pin":
+      return void (await run(session.pinned ? "unpin" : "pin", id, "pin", { pinned: !session.pinned }));
+    case "archive":
+      return archive(id, !session.archived);
+    case "fork": {
+      const answer = await run("fork", id, "fork");
+      if (!answer?.session) return;
+      sessions.set(answer.session.id, answer.session);
+      // The fork is a session like the others: it shows in the list it belongs to.
+      if (view.archived) setArchivedView(false);
+      select(answer.session.id, true);
+      return;
+    }
+    case "delete":
+      return confirmDelete(id);
+  }
+}
+
+/** Archives (with Undo on the line) or brings back. */
+async function archive(id, archived) {
+  const session = sessions.get(id);
+  if (!session) return;
+  const answer = await run(archived ? "archive" : "unarchive", id, "archive", { archived });
+  if (!answer) return;
+  if (archived) say(archivedLine(session), () => void run("unarchive", id, "archive", { archived: false }));
+  else say(`Unarchived “${session.title || "Untitled"}”.`);
+}
+
+/** Rename in place: in its row when the list shows it, else in the head. */
+function startRename(id) {
+  const session = sessions.get(id);
+  if (!session) return;
+  const row = rows.get(id);
+  const titleEl = row ? row.title : id === selected ? els.title : null;
+  if (!titleEl || titleEl.hidden) return;
+  void renameInline(document, titleEl, session.title || "", (title) => run("rename", id, "rename", { title }));
+}
+
+/** Delete, after a confirmation in the page that says what goes. */
+function confirmDelete(id) {
+  const session = sessions.get(id);
+  if (!session) return;
+  const text = deleteConfirm(session);
+  els.confirmTitle.textContent = text.title;
+  els.confirmBody.textContent = text.body;
+  els.confirmOk.textContent = text.confirm;
+  els.confirm.returnValue = "";
+  els.confirm.onclose = async () => {
+    els.confirm.onclose = null;
+    if (els.confirm.returnValue !== "ok") return;
+    await run("delete", id, "delete");
+  };
+  els.confirm.showModal();
+  // The safe answer has the focus.
+  els.confirm.querySelector('button[value="cancel"]').focus();
+}
+
+function setArchivedView(on) {
+  view.archived = on;
+  els.archivedView.setAttribute("aria-pressed", String(on));
+  renderSidebar();
+}
+
+els.search.addEventListener("input", () => {
+  view.query = els.search.value;
+  renderSidebar();
+});
+els.search.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && els.search.value) {
+    e.preventDefault();
+    els.search.value = "";
+    view.query = "";
+    renderSidebar();
+  }
+});
+els.workspaceFilter.addEventListener("change", () => {
+  view.workspace = els.workspaceFilter.value;
+  renderSidebar();
+});
+els.archivedView.addEventListener("click", () => setArchivedView(!view.archived));
+
+let stopping = null;
+els.stop.addEventListener("click", async () => {
+  const id = selected;
+  if (!id || stopping) return;
+  stopping = id;
+  renderHead();
+  await run("stop", id, "stop");
+  stopping = null;
+  renderHead();
+});
+
+/** The session a key acts on: the row with the focus, else the one shown. */
+function keyTarget() {
+  const item = document.activeElement?.closest?.(".session-item");
+  return item?.dataset.id ?? selected;
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.isComposing || e.altKey || e.ctrlKey || e.metaKey || menu.isOpen || els.confirm.open) return;
+  const typing = document.activeElement?.matches?.("input, textarea, select, [contenteditable]");
+  if (e.key === "F2") {
+    const id = keyTarget();
+    if (!id || typing) return;
+    e.preventDefault();
+    startRename(id);
+  } else if (e.key === "Delete" && !typing) {
+    const id = keyTarget();
+    const session = id ? sessions.get(id) : undefined;
+    if (!session || session.archived) return;
+    e.preventDefault();
+    void archive(id, true);
+  }
+});
 
 /** The quiet glyph of a session started in the terminal, with its words as the tooltip. */
 function terminalMark() {
@@ -522,7 +734,10 @@ function renderHead() {
   els.title.textContent = session.title || "Untitled";
   els.dot.dataset.status = session.status;
   els.workspace.textContent = session.workspace;
-  els.status.textContent = sessionStatus(session);
+  els.status.textContent = session.archived ? `${sessionStatus(session)} · archived` : sessionStatus(session);
+  els.stop.hidden = !canStop(session);
+  els.stop.disabled = stopping === session.id;
+  els.stop.textContent = stopping === session.id ? "Stopping" : "Stop";
   resume.show(session);
 }
 
@@ -641,7 +856,7 @@ function select(id, push = false) {
   void catchUp();
 }
 
-window.addEventListener("popstate", () => select(pickSession([...sessions.values()], wanted() ?? selected)));
+window.addEventListener("popstate", () => select(pickFor(wanted() ?? selected)));
 
 // ---------- the connection ----------
 
@@ -661,7 +876,7 @@ function onMessage(message) {
         renderReply();
         void catchUp();
       } else {
-        select(pickSession([...sessions.values()], wanted()));
+        select(pickFor(wanted()));
         renderSidebar();
       }
       break;
@@ -670,7 +885,7 @@ function onMessage(message) {
       const session = message.session;
       if (!session?.id) break;
       sessions.set(session.id, session);
-      if (!selected) select(pickSession([...sessions.values()], wanted()));
+      if (!selected) select(pickFor(wanted()));
       renderSidebar();
       if (session.id === selected) {
         renderHead();
@@ -678,11 +893,24 @@ function onMessage(message) {
       }
       break;
     }
+    case "removed": {
+      const id = message.sessionId;
+      if (!sessions.delete(id)) break;
+      streamed.delete(id);
+      typed.delete(id);
+      if (id === selected) {
+        const next = pickFor(null);
+        history.replaceState(null, "", next ? `/?session=${encodeURIComponent(next)}` : "/");
+        select(next);
+      }
+      renderSidebar();
+      break;
+    }
     case "event": {
       const event = message.event;
       if (!event) break;
       // The complete text (or the turn's end) replaces what was streamed.
-      if (event.kind === "assistant_text" || event.kind === "result" || event.kind === "error") streamed.delete(message.sessionId);
+      if (event.kind === "assistant_text" || event.kind === "result" || event.kind === "error" || event.kind === "stopped") streamed.delete(message.sessionId);
       if (message.sessionId !== selected) break;
       if (loading || event.seq > lastSeq + 1) {
         // Still loading, or one was missed: take it from the stored events, in order.
