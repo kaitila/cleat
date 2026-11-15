@@ -37,7 +37,7 @@ describe("the runner serves the pop-up", () => {
     const html = await (await runner.get("/prompt")).text();
     const assets = [...html.matchAll(/(?:href|src)="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
     // The font is preloaded: the pop-up opens often, and its first paint should be in its own type.
-    expect(assets.sort()).toEqual(["/assets/base.css", "/assets/fonts/inter-latin.woff2", "/assets/prompt.css", "/assets/prompt.js"]);
+    expect(assets.sort()).toEqual(["/assets/base.css", "/assets/fonts/inter-latin.woff2", "/assets/prompt.css", "/assets/prompt.js", "/assets/theme.js"]);
     for (const asset of assets) {
       const res = await runner.get(asset);
       expect(res.status).toBe(200);
