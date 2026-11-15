@@ -15,7 +15,9 @@ import {
   QUIET_HEIGHT,
   RECENT_EVENTS,
   asPeek,
+  dockWorkspaces,
   enqueue,
+  inWorkspace,
   islandRect,
   islandSize,
   mayClose,
@@ -27,6 +29,9 @@ import {
   pillOf,
   preselect,
   recentEvents,
+  savedWorkspace,
+  saveWorkspace,
+  WORKSPACE_KEY,
   type Peek,
 } from "../../src/web/dock-state.js";
 import { testRunner } from "../runner/helpers";
@@ -65,7 +70,7 @@ describe("served by the runner", () => {
 
   test("every module the dock imports is one the runner serves", async () => {
     const imports = (file: string) => [...source(file).matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "chat-resume.js", "markdown.js", "dock-state.js"]);
+    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "markdown.js", "dock-state.js"]);
     expect(imports("dock-state.js")).toEqual(["chat-format.js"]);
     for (const file of [...imports("dock.js"), ...imports("dock-state.js")]) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
   });
@@ -164,8 +169,8 @@ describe("the contract with the shell", () => {
   test("the links open new windows on /prompt and /?session=<id>, which the shell turns into the pop-up and the chat window", () => {
     const html = source("dock.html");
     expect(html).toMatch(/<a class="[^"]*" href="\/prompt" target="_blank" rel="noopener">New task<\/a>/);
-    expect(html).toMatch(/<a id="open-chat" class="[^"]*" href="\/" target="_blank" rel="noopener">Open in chat<\/a>/);
-    expect(source("dock.js")).toContain("els.openChat.href = `/?session=${encodeURIComponent(session.id)}`");
+    // Open in chat is in the head's "…": it opens /?session=<id> the same way, through window.open.
+    expect(source("dock.js")).toContain('window.open(`/?session=${encodeURIComponent(id)}`, "_blank", "noopener")');
   });
 });
 
@@ -299,6 +304,47 @@ describe("the session the dock opens on", () => {
     expect(preselect(calm, null, null)).toBe("new");
     expect(preselect(calm, "gone", "gone too")).toBe("new");
     expect(preselect([], null, null)).toBeNull();
+  });
+});
+
+describe("the workspace switch", () => {
+  const at = (workspace: string, archived = false) => ({ workspace, archived });
+
+  test("each workspace with a session the dock lists, by name, once", () => {
+    expect(dockWorkspaces([at("work"), at("home"), at("work"), at("old", true)])).toEqual(["home", "work"]);
+    expect(dockWorkspaces([])).toEqual([]);
+  });
+
+  test("and the one chosen, even with none left in it", () => {
+    expect(dockWorkspaces([at("work")], "gone")).toEqual(["gone", "work"]);
+    expect(dockWorkspaces([at("work")], "")).toEqual(["work"]);
+  });
+
+  test("a workspace chosen lists only its sessions; none chosen lists all", () => {
+    const all = [{ id: "a", workspace: "work" }, { id: "b", workspace: "home" }, { id: "c", workspace: "work" }];
+    expect(inWorkspace(all, "work").map((s) => s.id)).toEqual(["a", "c"]);
+    expect(inWorkspace(all, "").map((s) => s.id)).toEqual(["a", "b", "c"]);
+    expect(inWorkspace(new Map(all.map((s) => [s.id, s])).values(), "home").map((s) => s.id)).toEqual(["b"]);
+  });
+
+  test("the choice is remembered, and all of them is remembered as nothing", () => {
+    const kept = new Map<string, string>();
+    const storage = { getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v), removeItem: (k: string) => void kept.delete(k) };
+    expect(savedWorkspace(storage)).toBe("");
+    saveWorkspace(storage, "work");
+    expect(kept.get(WORKSPACE_KEY)).toBe("work");
+    expect(savedWorkspace(storage)).toBe("work");
+    saveWorkspace(storage, "");
+    expect(kept.has(WORKSPACE_KEY)).toBe(false);
+    expect(savedWorkspace(storage)).toBe("");
+  });
+
+  test("storage that refuses, or none, forgets and throws nothing", () => {
+    const refuses = { getItem: () => { throw new Error("denied"); }, setItem: () => { throw new Error("denied"); }, removeItem: () => { throw new Error("denied"); } };
+    expect(savedWorkspace(refuses)).toBe("");
+    expect(() => saveWorkspace(refuses, "work")).not.toThrow();
+    expect(savedWorkspace(null)).toBe("");
+    expect(() => saveWorkspace(undefined, "work")).not.toThrow();
   });
 });
 

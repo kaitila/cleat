@@ -29,23 +29,26 @@
 
     <section id="panel" class="panel layer" aria-label="Sessions" hidden>
       <header class="panel-head">
-        <span class="brand">intuition</span>
+        <select id="workspace" class="select quiet small workspace" aria-label="Workspace">
+          <button><selectedcontent></selectedcontent></button>
+          <option value="">All workspaces</option>
+        </select>
         <span id="connection" class="connection muted small" role="status" hidden>reconnecting</span>
-        <a class="button quiet small" href="/prompt" target="_blank" rel="noopener">New task</a>
+        <a class="button quiet small new-task" href="/prompt" target="_blank" rel="noopener">New task</a>
       </header>
       <ul id="sessions" class="sessions"></ul>
       <p id="sessions-empty" class="empty muted small" hidden>No sessions yet. Start one with New task.</p>
       <div id="session" class="session" hidden>
         <div class="session-head">
           <h1 id="title" class="session-title strong"></h1>
-          <a id="open-chat" class="button quiet small" href="/" target="_blank" rel="noopener">Open in chat</a>
+          <button id="more" class="more quiet small" type="button" aria-label="More" aria-haspopup="menu" title="More">…</button>
         </div>
         <div id="scroller" class="scroller">
           <div id="stream" class="stream" role="log" aria-label="Session"></div>
         </div>
         <form id="reply" class="reply">
           <textarea id="reply-text" class="input" rows="1" placeholder="Reply" aria-label="Reply" aria-describedby="reply-hint" disabled></textarea>
-          <p id="reply-hint" class="reply-hint muted small" role="status"></p>
+          <p id="reply-hint" class="reply-hint muted small" role="status" hidden></p>
         </form>
       </div>
     </section>

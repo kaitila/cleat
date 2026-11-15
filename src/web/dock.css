@@ -129,25 +129,30 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 
 /* Open: the sessions, the selected one's stream, the reply box. As tall as its content, up to the
    contract's height (dock.js sets that as its max-height): then the stream scrolls. */
-.panel { display: flex; flex-direction: column; }
-.panel-head { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1) var(--space-4); }
-.brand { font-weight: var(--semibold); letter-spacing: var(--track-l); }
-.connection { flex: 1; }
-.panel-head .button { margin-left: auto; }
-/* About four rows, the rest scroll. */
+/* Nothing in the panel scrolls sideways: a title is one line that ends in "…", and a long word or a
+   URL in the stream wraps. Its scrollbars are base.css's thin quiet ones, on no track of their own. */
+.panel { display: flex; flex-direction: column; overflow: hidden; }
+/* The head: which workspace's sessions, and New task. The switch is the one quiet dropdown. */
+.panel-head { flex: none; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2) var(--space-2) var(--space-1); }
+.workspace { flex: 0 1 auto; min-width: 0; max-width: 60%; }
+.connection { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-head .button { flex: none; margin-left: auto; }
+/* About four rows, the rest scroll, so the stream below has the room. */
 .sessions {
   flex: none;
   max-height: calc(var(--control) * 4 + var(--hairline) * 3 + var(--space-2));
+  overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-width: thin;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: var(--hairline);
   list-style: none;
   margin: 0;
   padding: 0 var(--space-2) var(--space-2);
 }
-.session-row { padding-inline: var(--space-2); line-height: var(--leading-tight); cursor: pointer; }
+.sessions > li { min-width: 0; }
+.session-row { min-width: 0; padding-inline: var(--space-2); line-height: var(--leading-tight); cursor: pointer; }
 .session-row[aria-current="true"] .row-title { font-weight: var(--medium); }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-workspace { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -157,23 +162,32 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .empty { padding: var(--space-2) var(--space-4) var(--space-4); }
 
 .session { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: var(--hairline) solid var(--line); }
-.session-head { flex: none; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-1) var(--space-4); }
+/* The session's head: its title, then only what applies now (Stop while a turn runs) and a quiet "…"
+   for the rest (Open in chat, Continue in terminal, Rename, Pin, Archive). */
+.session-head { flex: none; display: flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-2) var(--space-1) var(--space-4); }
 .session-title { flex: 1; min-width: 0; font-size: var(--text-m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-status { flex: none; }
+.session-status { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-head .stop { flex: none; }
+.more { flex: none; width: var(--control-s); padding: 0; color: var(--muted); letter-spacing: var(--track-l); }
+.more[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 .send-anyway { margin-left: var(--space-1); }
-.scroller { flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
-.stream { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1) var(--space-4) var(--space-3); }
+.scroller { flex: 0 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+.stream { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-1) var(--space-4) var(--space-3); overflow-wrap: anywhere; }
+.stream > * { min-width: 0; max-width: 100%; }
+/* A code block wraps here too: the chat view is where it keeps its lines. */
+.stream .md pre.code-block { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
+.stream .md .table { overflow-x: hidden; }
+.stream .md .table table { width: 100%; table-layout: fixed; }
 
 .msg { min-width: 0; overflow-wrap: anywhere; }
 .msg.user { align-self: flex-end; max-width: 85%; padding: var(--space-1) var(--space-3); white-space: pre-wrap; }
 .msg.user:not(:first-child) { margin-top: var(--space-2); }
 /* The dock is on the sunken surface: inline code sits on the page's. */
 .md :not(pre) > code { background: var(--bg); }
-.md :is(pre.code-block, .table) { scrollbar-width: thin; }
 .msg.streaming { color: var(--muted); }
 /* A tool call: one line, its name and what it works on. */
 .tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--control-s); }
-.stream .approval-input { max-height: calc(var(--control) * 4); scrollbar-width: thin; }
+.stream .approval-input { max-height: calc(var(--control) * 4); white-space: pre-wrap; overflow-wrap: anywhere; }
 .show-all { justify-self: start; }
 /* The end of a turn: quiet text, then a hairline to the edge. */
 .note { display: flex; align-items: center; gap: var(--space-3); min-width: 0; white-space: nowrap; overflow: hidden; }
@@ -181,12 +195,15 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .note.error { color: var(--danger); }
 .error:not(.note) { padding: var(--space-1) var(--space-3); border: var(--hairline) solid var(--danger); border-radius: var(--radius); color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
 
+/* The reply box says what it is for in its placeholder; the line under it shows only when a reply
+   went wrong. */
 .reply { flex: none; padding: var(--space-2) var(--space-3) var(--space-2); border-top: var(--hairline) solid var(--line); }
-.reply textarea { max-height: calc(var(--control) * 4); scrollbar-width: thin; }
-.reply-hint { margin-top: var(--space-1); padding-inline: var(--space-1); min-height: calc(var(--text-s) * var(--leading)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply textarea { max-height: calc(var(--control) * 4); overflow-x: hidden; }
+.reply textarea::placeholder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reply-hint { margin-top: var(--space-1); padding-inline: var(--space-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Managing a session from the open dock: Stop in the head, and the rows' right-click menu
-   (Rename, Pin, Archive), which stays inside the panel and so inside the island. */
+/* Managing a session from the open dock: Stop in the head, the head's "…" and the rows' right-click
+   menu, which stays inside the panel and so inside the island. */
 .menu {
   position: absolute;
   z-index: 2;
