@@ -13,14 +13,20 @@ html, body { background: transparent; overflow: hidden; }
    page, in the middle. */
 body { display: flex; justify-content: center; align-items: flex-start; }
 
+/* The island's size as drawn, as lengths the browser can animate: each springs on its own, so the
+   island grows like a droplet, down first and then out. Not inherited: dock.js sets both on the
+   island and on its surface, and the two springs run side by side. */
+@property --island-w { syntax: "<length>"; inherits: false; initial-value: 0; }
+@property --island-h { syntax: "<length>"; inherits: false; initial-value: 0; }
+
 /* The island's own colour is its edge: the surface inside it is clipped one hairline smaller on the
-   three free sides, so a hairline of the island shows around it. The top is the screen's edge. */
+   three free sides, so a hairline of the island shows around it. The top is the screen's edge: the
+   clip's top inset is always 0, so no spring moves it. */
 .island {
   position: relative;
   flex: none;
   background: var(--line-strong);
   clip-path: inset(0 calc((100% - var(--island-w)) / 2) calc(100% - var(--island-h)) calc((100% - var(--island-w)) / 2) round 0 0 var(--radius) var(--radius));
-  transition: clip-path var(--island-close) var(--ease), opacity var(--motion) linear;
   cursor: default;
 }
 .surface {
@@ -28,36 +34,78 @@ body { display: flex; justify-content: center; align-items: flex-start; }
   inset: 0;
   background: var(--sunken);
   clip-path: inset(0 calc((100% - var(--island-w)) / 2 + var(--hairline)) calc(100% - var(--island-h) + var(--hairline)) calc((100% - var(--island-w)) / 2 + var(--hairline)) round 0 0 calc(var(--radius) - var(--hairline)) calc(var(--radius) - var(--hairline)));
-  transition: clip-path var(--island-close) var(--ease);
 }
-/* Growing takes a little longer than shrinking, and settles. */
+/* Shrinking: it gathers back into the pill on the soft spring, narrowing a moment before it rises. */
+.island, .island > .surface {
+  transition: --island-w var(--dur-gentle) var(--ease-gentle), --island-h var(--dur-gentle) var(--ease-gentle) calc(var(--dur-gentle) / 10), opacity var(--motion) var(--ease);
+}
+/* Growing: a quick stretch down, the width a moment behind, both a little past their size and back.
+   The overshoot runs inside the window: open is as wide as the window, so there only the height
+   overshoots, and only when the panel is shorter than the window. */
 .island:is([data-state="peek"], [data-state="open"]),
 .island:is([data-state="peek"], [data-state="open"]) > .surface {
-  transition-duration: var(--island-open);
-  transition-timing-function: var(--settle);
+  transition: --island-h var(--dur-bouncy) var(--ease-bouncy), --island-w var(--dur-bouncy) var(--ease-bouncy) calc(var(--dur-bouncy) / 10), opacity var(--motion) var(--ease);
 }
 /* With nothing going on the sliver all but disappears: shorter (dock.js), its edge the quieter
    hairline, and the whole of it faint. */
 .island[data-state="idle"][data-tone="none"] { background: var(--line); opacity: var(--island-quiet); }
 
 /* Each state's content keeps its own full size and place, top centre, while the clip changes
-   around it, so nothing reflows on the way. It fades in once the shape is most of the way there,
-   and out at once. */
+   around it, so nothing reflows on the way. It comes in once the shape is most of the way there,
+   and fades out at once. */
 .layer {
   position: absolute;
   top: 0;
   left: 50%;
   translate: -50% 0;
-  animation: layer-in calc(var(--island-open) / 2) var(--ease) calc(var(--island-open) * 0.4) backwards;
 }
-.pill.layer { animation-duration: calc(var(--island-close) / 2); animation-delay: calc(var(--island-close) / 2); }
-.layer.leaving { animation: layer-out calc(var(--motion) / 2) linear forwards; pointer-events: none; }
-@keyframes layer-in { from { opacity: 0; transform: translateY(calc(var(--space-1) * -1)); } }
-@keyframes layer-out { to { opacity: 0; } }
+/* Open: the panel drops in a little behind the shape. */
+.panel.layer { animation: layer-drop var(--dur-gentle) var(--ease-gentle) calc(var(--dur-bouncy) * 0.3) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) * 0.3) backwards; }
+/* Peek: the line pops in from the edge with a small bounce, then its words slide in after it. */
+.peek.layer { transform-origin: 50% 0; animation: peek-pop var(--dur-bouncy) var(--ease-bouncy) calc(var(--dur-bouncy) / 5) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) / 5) backwards; }
+.peek.layer > * { animation: slide-in var(--dur-gentle) var(--ease-gentle) calc(var(--dur-bouncy) / 4) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) / 4) backwards; }
+.peek.layer > :nth-child(2) { animation-delay: calc(var(--dur-bouncy) / 4 + var(--dur-snappy) / 6); }
+.peek.layer > :nth-child(3) { animation-delay: calc(var(--dur-bouncy) / 4 + var(--dur-snappy) / 3); }
+.peek.layer > :nth-child(4) { animation-delay: calc(var(--dur-bouncy) / 4 + var(--dur-snappy) / 2); }
+/* "needs you": once the words are in, its dot gives one gentle nudge. */
+.peek.layer[data-kind="needs_approval"] > .dot {
+  animation: slide-in var(--dur-gentle) var(--ease-gentle) calc(var(--dur-bouncy) / 4) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--dur-bouncy) / 4) backwards, nudge var(--dur-bouncy) var(--ease-gentle) calc(var(--dur-bouncy) / 4 + var(--dur-gentle));
+}
+/* Idle: the pill fades in once the shape has mostly gathered. */
+.pill.layer { animation: layer-fade var(--dur-fade) var(--ease) calc(var(--dur-gentle) / 2) backwards; }
+.layer.leaving { animation: layer-out var(--dur-out) var(--ease) forwards; pointer-events: none; }
+/* The pill's running dot breathes, slowly; a new "needs you" on the pill nudges its dot once (dock.js). */
+.pill .dot[data-status="running"] { animation: breathe calc(var(--dur-gentle) * 6) var(--ease-gentle) infinite alternate; }
+.pill .dot[data-nudge] { animation: nudge var(--dur-bouncy) var(--ease-gentle); }
+
+/* Open: the sessions and the selected session's newest events rise in, one after the other
+   (data-stagger, set by dock.js on what arrives together). One that arrives on its own rises at once. */
+.sessions > li, .stream > .arrive { animation: rise var(--dur-gentle) var(--ease-gentle) backwards, layer-fade var(--dur-fade) var(--ease) backwards; }
+.sessions > li[data-stagger] { animation-delay: calc(var(--dur-bouncy) * 0.3); }
+.sessions > li[data-stagger="1"], .stream > [data-stagger="1"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) / 6); }
+.sessions > li[data-stagger="2"], .stream > [data-stagger="2"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) / 3); }
+.sessions > li[data-stagger="3"], .stream > [data-stagger="3"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) / 2); }
+.sessions > li[data-stagger="4"], .stream > [data-stagger="4"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) * 2 / 3); }
+.sessions > li[data-stagger="5"], .stream > [data-stagger="5"] { animation-delay: calc(var(--dur-bouncy) * 0.3 + var(--dur-snappy) * 5 / 6); }
+.stream > [data-stagger="0"] { animation-delay: calc(var(--dur-bouncy) * 0.3); }
+/* An approval card arrives with a small bounce. */
+.stream > .approval.arrive { transform-origin: 50% 100%; animation-name: card-pop, layer-fade; animation-duration: var(--dur-bouncy), var(--dur-fade); animation-timing-function: var(--ease-bouncy), var(--ease); }
+
+@keyframes layer-drop { from { transform: translateY(calc(var(--space-1) * -1)); } }
+@keyframes peek-pop { from { transform: translateY(calc(var(--rise) * -1)) scale(var(--pop)); } }
+@keyframes slide-in { from { transform: translateX(calc(var(--rise) * -1)); } }
+@keyframes rise { from { transform: translateY(var(--rise)); } }
+@keyframes card-pop { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
 @keyframes layer-fade { from { opacity: 0; } }
-/* Reduced motion: the shape changes at once and the content fades in, plainly. */
+@keyframes layer-out { to { opacity: 0; } }
+/* In and out: a breath is the dot drawing in and dimming, then back. */
+@keyframes breathe { to { transform: scale(0.72); opacity: var(--island-quiet); } }
+/* Up a little and back: twice the drawn size at most, for a moment. */
+@keyframes nudge { 35% { transform: scale(1.7); } }
+/* Reduced motion: the shape changes at once and the content fades in, plainly: no stagger, no
+   bounce, no breath. (base.css makes the springs linear and as short as a fade.) */
 @media (prefers-reduced-motion: reduce) {
-  .layer { animation: layer-fade var(--motion) linear !important; }
+  .layer { animation: layer-fade var(--dur-fade) var(--ease-gentle) !important; }
   .layer.leaving { animation: none !important; }
 }
 /* The dock's own chrome is not text to select: a drag that starts on it selects nothing. The stream is. */

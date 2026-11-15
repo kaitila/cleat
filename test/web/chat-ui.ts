@@ -2,9 +2,10 @@
 // This machine only: it needs the playwright that is installed globally for bun and its browser,
 // and prints a "skipped" line and exits 0 where there is none (and in CI).
 // The runner is real, on a free port with temp folders, with the fake agent (INTUITION_FAKE_AGENT=1).
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { fakeDriver } from "../../src/runner/agent-fake";
 import { Store } from "../../src/runner/store";
 import { startServer, type Runner } from "../../src/runner/server";
 import { testRunner } from "../runner/helpers";
@@ -398,6 +399,118 @@ try {
   check((await text(".session-title"))[0] === later, "a session started afterwards appears at the top of the sidebar");
   check((await page.locator('.session[aria-current="true"] .session-title').textContent()) === HOSTILE, "without taking the selection");
   check(!(await atBottom()), "and the stream stays where the person scrolled to");
+
+  // ---- the motion: what arrives rises in, an approval card bounces, a tool row springs, a new session cross-fades ----
+  {
+    // A slow fake agent, so what it does arrives while the page watches, not with the session's history.
+    const slow = testRunner({ driver: fakeDriver(500) });
+    const m = await browser.newContext({ viewport: { width: 1100, height: 720 }, colorScheme: "dark" });
+    try {
+      const mp = await m.newPage();
+      mp.on("pageerror", (e: Error) => pageErrors.push(e.message));
+      const names = (selector: string) => mp.locator(selector).first().evaluate((el: Element) => el.getAnimations().map((a) => (a as CSSAnimation).animationName).sort().join()) as Promise<string>;
+      const quiet = await slow.startSession("a quiet one, to select later");
+      await mp.goto(`${slow.url}/?session=${quiet.id}`);
+      await mp.locator(".note", { hasText: "Done" }).waitFor({ timeout: 15000 });
+      check((await mp.locator("#stream .arrive").count()) > 0, "what arrives while the page watches is marked to rise in");
+      await mp.reload();
+      await mp.locator(".note", { hasText: "Done" }).waitFor();
+      check((await mp.locator("#stream .arrive").count()) === 0, "a session's history, loaded on selecting it, doesn't rise in: it is there");
+      const asks = await slow.startSession("motion: this needs approval");
+      await mp.goto(`${slow.url}/?session=${asks.id}`);
+      // Every approval card that arrives is held at its first moment, to be stepped through.
+      await mp.evaluate(() => {
+        new MutationObserver((records) => {
+          for (const r of records) for (const n of r.addedNodes) {
+            if (!(n instanceof HTMLElement) || !n.matches(".approval.arrive")) continue;
+            for (const a of n.getAnimations()) a.pause();
+            (window as Any).__card = n;
+          }
+        }).observe(document.getElementById("stream")!, { childList: true });
+      });
+      await mp.waitForFunction(() => (window as Any).__card);
+      check((await names(".approval.arrive")) === "card-pop,fade-in", "an approval card that arrives pops in with a small bounce, and fades in");
+      check((await mp.locator(".msg.user.arrive, .msg.assistant.arrive, .tool.arrive").count()) > 0 && (await names(".msg.arrive, .tool.arrive")) === "fade-in,rise", "what arrives while the page watches rises in softly");
+      // The card at moments through its arrival: scale and place from its transform, and a strip to look at.
+      const moments = [0, 40, 80, 120, 160, 200, 250, 300, 350];
+      const pictures: string[] = [];
+      const scales: number[] = [];
+      const box = await mp.locator(".approval").boundingBox();
+      for (const ms of moments) {
+        scales.push(await mp.evaluate((t: number) => {
+          const card = (window as Any).__card as HTMLElement;
+          for (const a of card.getAnimations()) a.currentTime = t;
+          return new DOMMatrix(getComputedStyle(card).transform === "none" ? undefined : getComputedStyle(card).transform).a;
+        }, ms));
+        await mp.waitForTimeout(60);
+        pictures.push((await mp.screenshot({ clip: { x: box.x - 24, y: box.y - 24, width: box.width + 48, height: box.height + 48 } })).toString("base64"));
+      }
+      check(scales[0]! < 0.97 && Math.max(...scales) > 1.003 && Math.abs(scales.at(-1)! - 1) < 0.002, `the card grows from a little small, a little past its size and back (scale ${scales.map((v) => v.toFixed(3)).join(", ")})`);
+      await mp.evaluate(() => {
+        for (const a of ((window as Any).__card as HTMLElement).getAnimations()) a.play();
+      });
+      const sheet = await m.newPage();
+      const w = Math.ceil(box.width + 48);
+      const hgt = Math.ceil(box.height + 48);
+      await sheet.setViewportSize({ width: Math.min(moments.length, 3) * (w + 12) + 12, height: Math.ceil(moments.length / 3) * (hgt + 40) + 12 });
+      await sheet.setContent(`<body style="margin:12px;background:#000;color:#bbb;font:14px system-ui;display:flex;flex-wrap:wrap;gap:12px">${pictures
+        .map((png, i) => `<figure style="margin:0"><img width="${w}" height="${hgt}" src="data:image/png;base64,${png}"><figcaption style="height:24px;padding-top:4px">approval, ${moments[i]} ms</figcaption></figure>`)
+        .join("")}</body>`);
+      const stripPath = join(shots, "chat-strip-approval.png");
+      await sheet.screenshot({ path: stripPath });
+      await sheet.close();
+      console.log(`  frames: ${stripPath} (${moments.join(", ")} ms)`);
+      check(readFileSync(stripPath).length > 10_000, "a strip of the approval card arriving is saved, to be looked at");
+      await mp.locator(".approval button", { hasText: "Allow" }).click();
+      await mp.locator(".note", { hasText: "Done" }).waitFor({ timeout: 15000 });
+
+      // A tool row springs open, and fades before it closes.
+      const row = mp.locator("details.tool").first();
+      await row.locator("summary").click();
+      check((await row.evaluate((el: HTMLDetailsElement) => el.open)) && (await names("details.tool[open] > .tool-body")) === "drop,fade-in", "a tool row springs open: its body drops in from under the row");
+      await mp.waitForTimeout(400);
+      await row.locator("summary").click();
+      check((await row.getAttribute("data-closing")) === "" && (await row.evaluate((el: HTMLDetailsElement) => el.open)), "closing, its body fades out first");
+      await mp.waitForFunction(() => !(document.querySelector("details.tool") as HTMLDetailsElement).open);
+      check((await row.getAttribute("data-closing")) === null, "and then it closes");
+
+      // Selecting another session cross-fades: the old stream, copied over the new one, fades away.
+      await mp.locator(".session", { hasText: "a quiet one" }).click();
+      check((await mp.locator(".stream-leaving").count()) === 1 && (await names(".stream-leaving")) === "fade-out" && (await names("#stream")) === "fade-in", "selecting another session cross-fades the streams");
+      await mp.locator(".stream-leaving").waitFor({ state: "detached" });
+      check((await mp.locator(".stream-leaving [id]").count()) === 0, "and the copy is gone once faded");
+    } finally {
+      await m.close();
+    }
+
+    // Reduced motion: only short plain fades.
+    const r = await browser.newContext({ viewport: { width: 1100, height: 720 }, colorScheme: "dark", reducedMotion: "reduce" });
+    try {
+      const rp = await r.newPage();
+      const asks = await slow.startSession("reduced: this needs approval");
+      await rp.goto(`${slow.url}/?session=${asks.id}`);
+      await rp.evaluate(() => {
+        new MutationObserver((records) => {
+          for (const rec of records) for (const n of rec.addedNodes) {
+            if (n instanceof HTMLElement && n.matches(".approval.arrive")) (window as Any).__seen = n.getAnimations().map((a) => (a as CSSAnimation).animationName).join();
+          }
+        }).observe(document.getElementById("stream")!, { childList: true });
+      });
+      await rp.waitForFunction(() => (window as Any).__seen !== undefined);
+      check((await rp.evaluate(() => (window as Any).__seen)) === "fade-in", "prefers-reduced-motion: the approval card only fades in");
+      await rp.locator(".approval button", { hasText: "Deny" }).click();
+      await rp.locator(".note", { hasText: "Done" }).waitFor({ timeout: 15000 });
+      const row = rp.locator("details.tool").first();
+      if (await row.count()) {
+        await row.locator("summary").click();
+        await row.locator("summary").click();
+        check(!(await row.evaluate((el: HTMLDetailsElement) => el.open)), "and a tool row opens and closes at once");
+      }
+    } finally {
+      await r.close();
+      await slow.stop();
+    }
+  }
 
   // ---- no sessions at all ----
   const empty = testRunner();
