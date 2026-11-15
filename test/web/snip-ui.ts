@@ -257,7 +257,7 @@ try {
   check("the size label is neutral too", neutral(l.label) && neutral(l.labelBg), JSON.stringify({ label: l.label, bg: l.labelBg }));
   check("the area is lifted: the rest dimmed by about half, a faint light inside the edge", l.dim >= 0.45 && l.dim <= 0.6 && /inset/.test(l.glow), JSON.stringify({ dim: l.dim, glow: l.glow }));
   const pop = l.boxAnimations.find((a) => a.name === "box-pop");
-  check("on release the box springs in: the bouncy linear() curve, about 350ms, with a fade", pop !== undefined && pop.easing.startsWith("linear(") && pop.duration >= 300 && pop.duration <= 400 && l.boxAnimations.some((a) => a.name === "fade-in"), JSON.stringify(l.boxAnimations));
+  check("on release the box springs in: the bouncy linear() curve, about 680ms, with a fade", pop !== undefined && pop.easing.startsWith("linear(") && pop.duration >= 600 && pop.duration <= 720 && l.boxAnimations.some((a) => a.name === "fade-in"), JSON.stringify(l.boxAnimations));
   check("and the selection's corners settle on a spring", l.cornerAnimations.filter((n) => n.startsWith("corner-")).length === 4, JSON.stringify(l.cornerAnimations));
   check("its size is shown in device pixels", s.size === "500 × 313", String(s.size));
   check("the size label sits just above its top left corner", near(s.sizeAt.x, 200) && s.sizeAt.y + s.sizeAt.height <= 150 && s.sizeAt.y > 120, JSON.stringify(s.sizeAt));

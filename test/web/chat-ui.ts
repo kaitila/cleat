@@ -134,7 +134,7 @@ try {
   await page.evaluate(() => document.fonts.ready);
   check(await page.evaluate(() => document.fonts.check('13px "Geist Variable"') && document.fonts.check('12px "Geist Mono Variable"')), "the interface font and the code font are loaded");
   check(requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-latin.woff2") && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-mono-latin.woff2"), "from the runner's own /assets/fonts");
-  const borderOf = (p: Any) => p.locator(".sidebar").evaluate((el: Element) => getComputedStyle(el).borderRightWidth) as Promise<string>;
+  const borderOf = (p: Any) => p.locator("#search").evaluate((el: Element) => getComputedStyle(el).borderTopWidth) as Promise<string>;
   check((await borderOf(page)) === "1px", "a hairline is 1px where a CSS pixel is one device pixel");
   await shot("chat-light");
   await page.emulateMedia({ colorScheme: "dark" });
@@ -146,8 +146,8 @@ try {
   const gear = page.locator(".sidebar-head .settings-link");
   check((await gear.getAttribute("href")) === "/assets/settings.html" && (await gear.getAttribute("aria-label")) === "Settings", "the sidebar has a gear that opens the settings page");
   const colours = () => page.evaluate(() => ({ theme: document.documentElement.getAttribute("data-theme"), bg: getComputedStyle(document.body).backgroundColor, sidebar: getComputedStyle(document.querySelector(".sidebar")!).backgroundColor })) as Promise<{ theme: string | null; bg: string; sidebar: string }>;
-  const LIGHT = { bg: "rgb(255, 255, 255)", sidebar: "rgb(246, 246, 247)" };
-  const DARK = { bg: "rgb(21, 21, 23)", sidebar: "rgb(15, 15, 17)" };
+  const LIGHT = { bg: "rgb(236, 238, 244)", sidebar: "rgba(250, 250, 253, 0.62)" };
+  const DARK = { bg: "rgb(16, 18, 25)", sidebar: "rgba(18, 18, 24, 0.56)" };
   // Another page of the runner chooses a theme (as the settings page does), and this one follows
   // it live, without a reload: theme.js's storage listener. Each is forced against the scheme.
   const other = await context.newPage();
@@ -641,7 +641,7 @@ try {
       check((await names(".approval.arrive")) === "card-pop,fade-in", "an approval card that arrives pops in with a small bounce, and fades in");
       check((await mp.locator(".msg.user.arrive, .msg.assistant.arrive, .tool.arrive").count()) > 0 && (await names(".msg.arrive, .tool.arrive")) === "fade-in,rise", "what arrives while the page watches rises in softly");
       // The card at moments through its arrival: scale and place from its transform, and a strip to look at.
-      const moments = [0, 40, 80, 120, 160, 200, 250, 300, 350];
+      const moments = [0, 40, 80, 120, 160, 240, 320, 480, 680];
       const pictures: string[] = [];
       const scales: number[] = [];
       const box = await mp.locator(".approval").boundingBox();

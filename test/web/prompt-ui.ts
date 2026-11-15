@@ -166,6 +166,9 @@ const TIMES = [0, 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 350];
 
 async function shot(page: Page, name: string): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
+  // At rest: the springs are long now (680ms), so wait for what is moving, not for what loops.
+  // A paused one (a frame strip's) never finishes: give up after a second.
+  await page.evaluate(() => Promise.race([Promise.all(document.getAnimations().filter((a) => a.playState === "running" && a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))), new Promise((done) => setTimeout(done, 1000))]));
   const path = join(shots, `${name}.png`);
   await page.screenshot({ path });
   console.log(`screenshot: ${path}`);
@@ -184,7 +187,7 @@ try {
   await shot(page, "light-empty");
   const fonts = await page.evaluate(() => document.fonts.check('13px "Geist Variable"'));
   check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-latin.woff2"), requested.join(" "));
-  const hairline = () => getComputedStyle(document.querySelector("#workspaces")!).borderBottomWidth;
+  const hairline = () => getComputedStyle(document.querySelector("#workspaces .workspace span")!).borderBottomWidth;
   check("a hairline is 1px where a CSS pixel is one device pixel", (await page.evaluate(hairline)) === "1px", await page.evaluate(hairline));
 
   await page.keyboard.press("Enter");
@@ -397,7 +400,7 @@ try {
     await twice.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
     await twice.keyboard.type("Rename the config loader and update its tests");
     s = await twice.evaluate(state);
-    const width = await twice.evaluate(() => `${devicePixelRatio} ${getComputedStyle(document.querySelector("#workspaces")!).borderBottomWidth}`);
+    const width = await twice.evaluate(() => `${devicePixelRatio} ${getComputedStyle(document.querySelector("#workspaces .workspace span")!).borderBottomWidth}`);
     check(`at 2x (${scheme}) a hairline is 0.5px and nothing scrolls`, width === "2 0.5px" && !s.overflow && s.gutter === 0, `${width} ${JSON.stringify({ overflow: s.overflow, gutter: s.gutter })}`);
     await shot(twice, `${scheme}-2x`);
     await twice.close();
