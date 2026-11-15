@@ -57,18 +57,7 @@
 /* Finding a session: the search box, the workspace filter and the Archived view, above the list. */
 .finder { display: grid; gap: var(--space-1); padding: 0 var(--space-2) var(--space-2); }
 .filters { display: flex; align-items: center; gap: var(--space-1); }
-.filter {
-  flex: 1;
-  min-width: 0;
-  height: var(--control-s);
-  padding: 0 var(--space-2);
-  border: var(--hairline) solid transparent;
-  border-radius: var(--radius-pill);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.filter:hover { background: var(--hover); color: var(--text); }
+.filter { flex: 1; }
 #archived-view[aria-pressed="true"] { background: var(--selected); color: var(--text); }
 /* The row's "…": in the place of its time, under the pointer, with the focus, or on the row shown. */
 .session-item { position: relative; }

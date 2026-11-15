@@ -476,6 +476,116 @@ button:disabled, .button[aria-disabled="true"] { opacity: 0.5; cursor: default; 
 .input:focus-visible { border-color: var(--accent); outline-color: var(--accent-soft); }
 .input:disabled { background: var(--sunken); border-color: var(--line); }
 
+/* ---------- dropdown: .select on a <select>, with .quiet and .small ---------- */
+/* A real <select>, so its keys, its change event and what a screen reader hears stay the browser's.
+   Where the select can be styled (appearance: base-select, Chromium 135+: Electron 45 is 140) its
+   list is drawn here, like a menu, instead of by the OS; elsewhere the OS's list shows. */
+.select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: var(--control);
+  min-height: var(--control);
+  padding: 0 var(--space-2) 0 var(--space-3);
+  border: var(--hairline) solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  outline: var(--ring) solid transparent;
+  outline-offset: 0;
+  transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease), color var(--motion) var(--ease), outline-color var(--motion) var(--ease);
+}
+/* Focused, it is an input: an accent border and the soft halo. The quiet one takes the plain ring. */
+.select:focus-visible { border-color: var(--accent); outline-color: var(--accent-soft); }
+.select.quiet:focus-visible { border-color: transparent; outline-color: var(--accent); outline-offset: var(--hairline); }
+.select:hover { background: var(--hover); }
+.select:disabled { background: var(--sunken); border-color: var(--line); cursor: default; }
+.select.quiet { border-color: transparent; background: transparent; color: var(--muted); }
+.select.quiet:hover { background: var(--hover); color: var(--text); }
+.select.small { height: var(--control-s); min-height: var(--control-s); padding: 0 var(--space-1) 0 var(--space-2); border-radius: var(--radius-pill); }
+
+@supports (appearance: base-select) {
+  .select, .select::picker(select) { appearance: base-select; }
+  .select.quiet:open { background: var(--hover); color: var(--text); }
+  /* The chosen option shows in <button><selectedcontent></selectedcontent></button>, the select's
+     first child, so a long one ends in "…" instead of pushing the chevron out (the browser's own
+     label can't shrink). The button is the select's own part, not a page button. */
+  .select > button {
+    all: unset;
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+  }
+  .select selectedcontent { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The chevron: two hairlines turned into a "v", which turns over while the list is open. */
+  .select::picker-icon {
+    content: "";
+    width: var(--space-1);
+    height: var(--space-1);
+    margin: 0 var(--space-1) 0 auto;
+    border: 0;
+    border-right: var(--hairline) solid currentColor;
+    border-bottom: var(--hairline) solid currentColor;
+    color: var(--muted);
+    transform: translateY(calc(0px - var(--space-1) / 2)) rotate(45deg);
+    transition: transform var(--dur-snappy) var(--ease-snappy);
+  }
+  .select:open::picker-icon { transform: translateY(calc(var(--space-1) / 2)) rotate(225deg); }
+
+  /* The list floats over the page like a menu: floating glass with the shadow, a hair below the button,
+     at least as wide as it. It pops in from its middle, so it looks the same whether the browser
+     puts it below the button or, short of room, above; it fades out quickly. */
+  .select::picker(select) {
+    min-width: anchor-size(width);
+    margin-block: var(--space-1);
+    padding: var(--space-1);
+    border: 0;
+    border-radius: var(--radius-m);
+    background: var(--glass-float);
+    -webkit-backdrop-filter: var(--frost);
+    backdrop-filter: var(--frost);
+    color: var(--text);
+    box-shadow: var(--shadow);
+    scrollbar-width: thin;
+    opacity: 0;
+    transition: opacity var(--dur-out) var(--ease), display var(--dur-out) allow-discrete, overlay var(--dur-out) allow-discrete;
+  }
+  .select::picker(select):popover-open {
+    opacity: 1;
+    transform: none;
+    transition: opacity var(--dur-fade) var(--ease), transform var(--dur-snappy) var(--ease-snappy), display var(--dur-fade) allow-discrete, overlay var(--dur-fade) allow-discrete;
+  }
+  @starting-style {
+    .select::picker(select):popover-open { opacity: 0; transform: scale(var(--pop)); }
+  }
+
+  /* Options are rows, like a menu's: the one under the pointer or the keys is highlighted (the
+     list's focus, so no ring), and the chosen one has a check at its end. */
+  .select option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-height: var(--control);
+    padding: 0 var(--space-2);
+    border-radius: var(--radius-s);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    transition: background-color var(--motion) var(--ease);
+  }
+  .select option:is(:hover, :focus) { background: var(--selected); outline: none; }
+  .select option::checkmark { order: 1; margin-inline-start: auto; color: var(--muted); }
+  .select option:checked { font-weight: var(--medium); }
+  .select option:disabled { color: var(--muted); cursor: default; }
+}
+
 /* ---------- card: a frosted panel ---------- */
 .card { min-width: 0; border-radius: var(--radius); }
 .card:not(.glass, .glass-float) { background: var(--surface); box-shadow: var(--glass-edge); }
@@ -633,5 +743,5 @@ kbd {
 .md [data-align="right"] { text-align: right; }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
+  *, *::before, *::after, .select::picker-icon { animation: none !important; transition: none !important; }
 }

@@ -1,5 +1,7 @@
 # intuition
 
+Website: <https://kaitila.github.io/intuition/>
+
 Hand a task to a Claude Code agent from anywhere on your computer, without opening a terminal.
 
 Press a hotkey and a small pop-up appears in the middle of the screen with whatever you just copied already attached: text, or a screenshot. Pick a workspace (a project folder), type what you want done, press Enter, and go back to what you were doing. The agent works in the background. A chat window lists every session and shows the selected one streaming as it works, and when a tool call needs your say it waits there for your Allow or Deny. A small dock at the top of the screen tells you when a session has finished or needs you.
@@ -68,7 +70,7 @@ It turns start at login off, quits and removes the tray app, stops the runner an
 ## Where settings live
 | What | Where |
 |---|---|
-| Configuration: workspaces, port, permission mode, the theme, and the tray app's hotkeys, dock and start on login (the Settings window edits them) | `~/.config/intuition/config.json` |
+| Configuration: workspaces, port, permission mode, the agent (`"claude"` or `"codex"`, see [agents](docs/agents.md)), the theme, and the tray app's hotkeys, dock and start on login (the Settings window edits them) | `~/.config/intuition/config.json` |
 | Sessions, their events, the runner's log | `~/.local/share/intuition/` |
 | Windows: where the tray app finds the runner (`runnerUrl` and `wsl` only) | `%APPDATA%\intuition-shell\settings.json` |
 | Windows: the installed tray app | `%LOCALAPPDATA%\intuition\` |
@@ -108,7 +110,7 @@ Sessions sync with Claude Code both ways ([D0015](docs/decisions/D0015-transcrip
 Without the tray app, the chat view is a web page at `http://127.0.0.1:4777/`.
 
 ## How it is built
-- **Runner** (`src/runner/`, bun and TypeScript): a small server on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, streams their events over a WebSocket and stores session metadata. On Windows it runs in WSL.
+- **Runner** (`src/runner/`, bun and TypeScript): a small server on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, or OpenAI Codex sessions through the Codex SDK ([agents](docs/agents.md)), streams their events over a WebSocket and stores session metadata. On Windows it runs in WSL.
 - **Pages** (`src/web/`): the pop-up (`/prompt`), the chat view (`/`) and the dock, plain HTML, CSS and JavaScript served by the runner.
 - **Tray app** (`shell/`, Electron and TypeScript): the tray icon, the global hotkeys, clipboard capture, the snip, the dock and start at login.
 

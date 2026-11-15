@@ -62,13 +62,14 @@
   padding: var(--space-3) var(--space-4);
 }
 .workspace + .workspace { border-top: var(--hairline) solid var(--line); }
+/* As wide as its longest choice ("As above"), so the column is even and a change doesn't move the path. */
+.workspace .mode { width: calc(var(--space-6) * 2 + var(--space-5)); }
 .workspace-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 5fr) auto; gap: var(--space-2); min-width: 0; }
-.workspace .mode { width: auto; padding-block: 0; height: var(--control); }
 .workspace-actions { display: flex; align-items: center; gap: var(--space-1); }
 .workspace .field-error { grid-column: 1 / -1; margin: 0; }
 .exists { min-width: calc(var(--space-6) + var(--space-4)); text-align: right; color: var(--muted); }
 .exists[data-exists="false"] { color: var(--danger); }
-.input[aria-invalid="true"] { border-color: var(--danger); }
+.input[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--danger); }
 
 /* ---------- two or three choices drawn as one control ---------- */
 .segmented {

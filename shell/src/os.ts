@@ -159,3 +159,60 @@ export const SCREEN_RECORDING_NOTICE = {
 export function screenAllowed(os: ShellOs, status: string): boolean {
   return os !== "macos" || status === "granted";
 }
+
+// --- The OS's frosted material (docs/windows-shell.md "Frosted windows") ---
+
+/** What the OS draws behind a window's transparent page: Windows 11's acrylic, macOS's vibrancy, or nothing (the page's own fill shows). */
+export type WindowMaterial = "acrylic" | "vibrancy" | "none";
+
+/** The windows the shell makes that a material could go on. */
+export type MaterialWindow = "popup" | "dock" | "snip" | "settings";
+
+/** Windows 11 22H2: the first build where Electron's backgroundMaterial takes effect. */
+export const ACRYLIC_BUILD = 22621;
+
+/** The build number of a Windows release as os.release() gives it ("10.0.22631"), or null when it is not one. */
+export function windowsBuild(release: string): number | null {
+  const m = /^\d+\.\d+\.(\d+)/.exec(release.trim());
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * The material a window gets. Only the pop-up has one: its page fills the whole window, which the OS
+ * rounds, so the material is exactly the pop-up's shape. The dock never does: its window is a fixed
+ * rectangle bigger than the island, and neither acrylic nor vibrancy can be clipped to the island's
+ * rounded shape (setShape takes rectangles only, and not on macOS), so a material would be a blurred
+ * rectangle across the top of the screen. The snip's overlay covers a display, and Settings is a normal window.
+ * `transparent`: whether a transparent window shows what is under it here (dockTransparent).
+ */
+export function windowMaterial(which: MaterialWindow, os: ShellOs, release: string, transparent: boolean): WindowMaterial {
+  if (which !== "popup" || !transparent) return "none";
+  if (os === "macos") return "vibrancy";
+  if (os === "windows") return (windowsBuild(release) ?? 0) >= ACRYLIC_BUILD ? "acrylic" : "none";
+  return "none";
+}
+
+/** The BrowserWindow options for a material. Plain values, so this file stays without Electron. */
+export interface MaterialOptions {
+  transparent?: boolean;
+  backgroundColor: string;
+  backgroundMaterial?: "acrylic";
+  vibrancy?: "popover";
+  visualEffectState?: "active";
+}
+
+/** A fully transparent colour: the page's own background is transparent too, so the material (or the desktop) shows. */
+export const CLEAR = "#00000000";
+
+/**
+ * The options that give a window its material. Acrylic: a clear background and not `transparent`
+ * (a transparent window on Windows is a layered one, which DWM draws no material or rounded corners
+ * for). Vibrancy: active even when the window is not focused, as the pop-up is shown. No material:
+ * a transparent window, so the page's translucent fill is over the desktop; `opaque` where a
+ * transparent window would be painted black (Linux without a compositor).
+ */
+export function materialOptions(material: WindowMaterial, transparent: boolean, opaque: string): MaterialOptions {
+  if (material === "acrylic") return { backgroundColor: CLEAR, backgroundMaterial: "acrylic" };
+  if (material === "vibrancy") return { transparent: true, backgroundColor: CLEAR, vibrancy: "popover", visualEffectState: "active" };
+  return transparent ? { transparent: true, backgroundColor: CLEAR } : { backgroundColor: opaque };
+}

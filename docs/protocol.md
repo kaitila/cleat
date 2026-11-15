@@ -21,7 +21,7 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 | `GET /health` | | `HealthResponse`: `{ ok: true, version, build }`. `build` is a hash of the code the runner process loaded ([D0011](decisions/D0011-stale-runner-and-shell.md)): `start` and `up` restart a runner whose `build` differs from the repo's. |
 | `GET /api/workspaces` | | `WorkspacesResponse`: the config's workspaces and the last one used |
 | `GET /api/sessions?archived=1` | | `SessionsResponse`: the sessions that aren't archived, pinned first, then newest first. With `archived=1`, only the archived ones (same order). 400 for an `archived` other than `0` or `1`. |
-| `POST /api/sessions` | `StartSessionRequest` | 201 `SessionResponse`. The turn runs in the background. Remembers the workspace as last used. 400 for an `imagePath` that is refused (see "Clipboard images"). |
+| `POST /api/sessions` | `StartSessionRequest` | 201 `SessionResponse`. The turn runs in the background. Remembers the workspace as last used. `agent` (`"claude"` or `"codex"`), when given, runs the session on that agent instead of the workspace's (see "Agents"); any other value is a 400. 400 for an `imagePath` that is refused (see "Clipboard images"). |
 | `GET /api/sessions/:id/events?after=<seq>` | | `EventsResponse`: stored events with a higher seq (all without `after`). The first request for an imported session reads its history from the transcript first. |
 | `POST /api/sessions/:id/messages` | `ReplyRequest` | 202 `SessionResponse`, the session `running`. Stores the reply as a `user` event and runs a turn in the background that resumes the Claude Code session. 404 for an unknown session, 400 for an empty prompt or an `imagePath` that is refused, 409 while a turn runs or an approval is open, and 409 `OPEN_IN_TERMINAL` ("it looks open in a terminal: ...") when another process wrote to the session's transcript in the last two minutes, unless the body has `force: true` (see "Terminal sessions"). 400 for a `force` that isn't a boolean. A session in `error` takes a reply too: it resumes its conversation, or starts a new one in the same workspace when it never got a Claude Code session id. |
 | `POST /api/sessions/:id/approvals/:approvalId` | `ApprovalRequest` | 200 `SessionResponse`. 404 for an unknown or already answered approval. |
@@ -56,7 +56,8 @@ Every `/api/sessions/:id/...` route answers 404 for an unknown session. Rename, 
 - `notification` for each `Notification`, at the moment it is recorded. None is sent again on connect: a client shows only what arrives while it is connected. It follows the `session` message that carries the status it is about (`waiting_approval`, `idle` or `error`).
 
 ## Sessions and events
-- A session is one Claude Code conversation in one workspace. The runner keeps its own id and stores Claude Code's session id once known, to resume with it.
+- A session is one conversation of one agent (Claude Code or Codex, `SessionMeta.agent`) in one workspace. The runner keeps its own id and stores the agent's id for the conversation once known, to resume with it: Claude Code's session id, or Codex's thread id, both in `claudeSessionId`.
+- `SessionMeta.agent`: `"claude"` or `"codex"`, set when the session starts and never changed: every reply goes to the same agent. The runner sets it on every session it starts; a session stored before it existed, and one imported from the terminal, has none and is Claude Code's.
 - Each turn's SDK messages are reduced to `SessionEvent`s: `user`, `assistant_text`, `tool_use`, `tool_result`, `approval_request`, `approval_resolved`, `auto_denied`, `permission_mode`, `result`, `error`. A turn the person stopped ends with `stopped` instead of `result` or `error`.
 - `SessionMeta.permissionMode` is the permission mode the session runs in, as Claude Code reports it (the `init` system message at the start of each turn, and `status` messages when it changes). It is absent until the first turn reports it, and may be a mode other than the two the config allows (for example `"default"` where auto mode is unavailable).
 - Status: `running` while a turn runs, `waiting_approval` while at least one approval is open, `idle` after a `result` or `stopped`, `error` after a failed turn.
@@ -85,6 +86,13 @@ The person's operations on a session ([D0020](decisions/D0020-session-management
 - A turn whose result is in but whose query is still closing counts as over: a reply, a fork and a delete go ahead (fork and delete wait, at most 5 seconds, for it to close), and it never counts as another process writing to the transcript.
 
 The pages: the chat view has a search box (title and workspace, every word, as you type), a workspace filter and an Archived view above the list; each row has a "…" button and a right-click menu (Rename in place, Pin, Fork, Archive, Delete); F2 renames and the Delete key archives the focused row or the session shown, with Undo on a line under the list for six seconds; Delete asks first, in the page, naming the session and saying its transcript goes too; the head has Stop while the runner runs a turn. The dock has Stop in its open view and a right-click menu on rows with Rename, Pin and Archive.
+
+## Agents
+A session runs on Claude Code or on OpenAI Codex ([agents](agents.md), [D0029](decisions/D0029-codex-agent.md)). The agent is the request's `agent` (`POST /api/sessions`), else the workspace's own `agent` in the config file, else the top-level one, else `"claude"`. Both give the same events. With Codex:
+- Its thread events become `assistant_text` (each agent message, complete), `tool_use` and `tool_result` (a command as `Bash` with `{ command }`, a file change as `Edit` with `{ changes }`, an MCP call as `mcp__<server>__<tool>`, a web search as `WebSearch`), and a `result` (`ok: true`, the last message) or an `error`. It sends no `approval_request`, `auto_denied` or `permission_mode` events; `SessionMeta.permissionMode` is the mode the turn asked for.
+- The permission mode picks Codex's sandbox: `auto` is `workspace-write` (writes inside the workspace, no network), `default` is `read-only`, both with Codex's `on-request` approval policy. `codex exec` can't ask the host, so no call waits for the person: one the sandbox blocks fails, and the model is told.
+- Stop aborts the turn (the `codex` process ends), with a `stopped` event as for Claude Code.
+- The transcript sync doesn't read Codex's threads, and rename, fork and delete don't touch them: rename and delete are the runner's alone, fork is a 409.
 
 ## Permissions
 Each turn asks for the permission mode of its workspace: the workspace's own `permissionMode` in the config file, else the top-level one, else `"auto"` ([D0012](decisions/D0012-auto-mode.md)). Only `"auto"` and `"default"` are accepted; any other value is refused when the config is read. Sessions also load the workspace's own Claude Code settings (user, project and local), so its allow and deny rules apply.
@@ -133,15 +141,16 @@ What the page does in each state (`src/web/dock.js`; the rules are pure function
 ## Settings
 The runner owns the user's settings ([D0022](decisions/D0022-runner-owns-the-settings.md)). They live in its config file (`~/.config/intuition/config.json`, or `INTUITION_CONFIG`), which stays hand-editable; `config.ts` reads them with one zod schema (`SettingsSchema`) and `PUT /api/settings` validates with the same one.
 
-`Settings = { theme, permissionMode, workspaces, shell, port }`:
+`Settings = { theme, permissionMode, agent, workspaces, shell, port }`:
 - `theme`: `"system"` (the default), `"light"` or `"dark"`.
 - `permissionMode`: `"auto"` (the default) or `"default"`, and per workspace in `workspaces[].permissionMode` (see "Permissions").
-- `workspaces`: `{ name, path, permissionMode? }[]`, names unique, in order: the first is the default when none was used. It may be empty: a new config file has none (the first run and `intuition setup` ask for them), and the pop-up and the snip then say to add one in Settings. `path` is as written in the file (it may start with `~/`).
+- `agent`: `"claude"` (the default) or `"codex"`, and per workspace in `workspaces[].agent` (see "Agents"). The runner always sends it. A PUT that leaves `agent` out keeps the current one, at the top and on a workspace of the same name, so a client written before it can't reset it; a workspace's `agent: null` clears its own.
+- `workspaces`: `{ name, path, permissionMode?, agent? }[]`, names unique, in order: the first is the default when none was used. It may be empty: a new config file has none (the first run and `intuition setup` ask for them), and the pop-up and the snip then say to add one in Settings. `path` is as written in the file (it may start with `~/`).
 - `shell`: `{ hotkey, snipHotkey, dock, startOnLogin }` or `null`. The runner only stores it. It is `null` until something sets it: the shell then sends its own local values once (migration) and from then on reads them from the runner.
 - `port`: the port the runner serves on. Read-only: a `port` in a PUT body is ignored, and the file's is changed only by hand (a page served on that port can't move it).
 
 `PUT /api/settings` takes a whole `Settings` (a key left out takes its default, as in the file). It refuses, with 400 and the field:
-- anything the schema refuses (an unknown theme or mode, an empty name or hotkey, a `dock` that isn't a boolean);
+- anything the schema refuses (an unknown theme, mode or agent, an empty name or hotkey, a `dock` that isn't a boolean);
 - a workspace name listed twice;
 - a workspace `path` that isn't absolute (after `~/`) or isn't an existing folder. A path the current settings already have is not checked again, so a folder that went missing doesn't block other changes.
 

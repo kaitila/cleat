@@ -554,7 +554,9 @@ function renderWorkspaces() {
     o.textContent = name;
     return o;
   });
-  els.workspaceFilter.replaceChildren(els.workspaceFilter.options[0], ...options);
+  // Keep the first option ("All workspaces") and the select's <button> (base.css, .select).
+  while (els.workspaceFilter.options.length > 1) els.workspaceFilter.options[1].remove();
+  els.workspaceFilter.append(...options);
   els.workspaceFilter.value = view.workspace;
 }
 

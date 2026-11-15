@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
 import { dockBounds, type DockState, islandRect } from "../../shell/src/dock";
-import { dockArea, opaqueDockBounds } from "../../shell/src/os";
+import { dockArea, opaqueDockBounds, windowMaterial } from "../../shell/src/os";
 import { cropPlan, SELF_TEST_CROP } from "../../shell/src/snip";
 import type { Area } from "../../shell/src/geometry";
 import { parseRunnerSettings, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PAGE, SETTINGS_WINDOW } from "../../shell/src/prefs";
@@ -170,6 +170,12 @@ export function notes(r: Partial<SelfTestResult>): string[] {
   return said;
 }
 
+/** Which OS material each window got: printed on every run, so a person sees it for this machine. */
+export function materials(r: Partial<SelfTestResult>): string {
+  const release = r.windowsRelease ? ` (Windows ${r.windowsRelease})` : "";
+  return `materials${release}: pop-up ${r.popupMaterial}, dock ${r.dockMaterial}, snip ${r.snipMaterial}, settings ${r.settingsMaterial}`;
+}
+
 /** What is wrong with a self-test result, given what the stub runner received. Empty when all is well. */
 export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: string, readImage: (path: string) => Uint8Array | null, where: Where = { layout: "windows-wsl" }): string[] {
   const { layout } = where;
@@ -196,6 +202,12 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   need(image, windows ? "the saved image does not exist under /mnt/c" : "the saved image does not exist");
   need(image && PNG.every((b, i) => image[i] === b), "the saved image does not start with the PNG signature");
   need(r.notificationsSupported, "notifications are not supported");
+  need(windows === (typeof r.windowsRelease === "string"), `the shell gave Windows' release ${JSON.stringify(r.windowsRelease)} on ${layout}`);
+  const popupWants = r.os && typeof r.dockTransparent === "boolean" ? windowMaterial("popup", r.os, r.windowsRelease ?? "", r.dockTransparent) : undefined;
+  need(r.popupMaterial !== undefined && r.popupMaterial === popupWants, `the pop-up's material is ${JSON.stringify(r.popupMaterial)}, not ${JSON.stringify(popupWants)}`);
+  for (const [which, got] of [["dock", r.dockMaterial], ["snip", r.snipMaterial], ["settings", r.settingsMaterial]] as const) {
+    need(got === "none", `the ${which}'s material is ${JSON.stringify(got)}, not "none"`);
+  }
   need(r.popupCreated, "the pop-up was not created");
   // A pixel either way: on a display at 200% left of the primary one, Electron reads a 560x380 window back as 559x380 (outer bounds 560x381).
   const near = (n: unknown, want: number) => typeof n === "number" && Math.abs(n - want) <= 1;
@@ -375,6 +387,7 @@ export async function selfTestRun(): Promise<number> {
     }
     for (const s of skipped(result, where)) console.log(`skipped: ${s}`);
     for (const n of notes(result)) console.log(n);
+    console.log(materials(result));
     console.log(`start on login is ${result.openAtLogin ? "on" : "off"} on this machine (read, not changed)`);
     console.log("the shell's self-test passed");
     return 0;

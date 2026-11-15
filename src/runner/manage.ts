@@ -8,7 +8,7 @@ import { TERMINAL_NOT_DELETED } from "../shared/protocol";
 import { fakeFork } from "./agent-fake";
 import { BUSY, busy, titleOf, type Sessions } from "./sessions";
 import type { Store } from "./store";
-import type { Sync } from "./sync";
+import { hasTranscript, type Sync } from "./sync";
 
 /** What the runner does to Claude Code's transcripts for the person. A test passes its own. */
 export interface TranscriptOps {
@@ -52,6 +52,8 @@ export function fakeOps(): TranscriptOps {
 }
 
 export const NOTHING_TO_FORK = "the session has no Claude Code conversation yet: nothing to fork";
+/** The 409 for forking a Codex session: only Claude Code transcripts can be forked. */
+export const CODEX_NOT_FORKED = "a Codex session can not be forked yet";
 export const DELETING = "the session is being deleted";
 
 /** A fork's title: the session's, cut so " (fork)" fits in a title's 80 characters. */
@@ -97,7 +99,7 @@ export class Manage {
     if (!cut) return { status: 400, error: "title is empty" };
     const session = this.store.mark(id, { title: cut });
     this.send({ type: "session", session });
-    const claudeId = session.claudeSessionId;
+    const claudeId = hasTranscript(session) ? session.claudeSessionId : null;
     if (claudeId) {
       try {
         await this.sync.own(id, () => this.ops.rename(claudeId, cut, session.cwd));
@@ -136,6 +138,7 @@ export class Manage {
     // A reply may have come in meanwhile.
     const now = this.busy(id);
     if (now) return { status: 409, error: now };
+    if (!hasTranscript(source)) return { status: 409, error: CODEX_NOT_FORKED };
     if (!source.claudeSessionId) return { status: 409, error: NOTHING_TO_FORK };
     const title = forkTitle(source.title);
     // The new transcript isn't the runner's until its session exists: the sync waits for it.
@@ -182,7 +185,8 @@ export class Manage {
     this.deleting.add(id);
     try {
       await this.sessions.closed(id);
-      const claudeId = session.claudeSessionId;
+      // A Codex thread stays in ~/.codex/sessions: only Claude Code transcripts are deleted here.
+      const claudeId = hasTranscript(session) ? session.claudeSessionId : null;
       if (claudeId) {
         try {
           await this.ops.remove(claudeId, session.cwd);
