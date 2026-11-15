@@ -1,4 +1,4 @@
-// Where the Windows shell lives, seen from WSL. Windows is asked through cmd.exe; wslpath converts.
+// Where the Windows shell lives, seen from WSL (the windows-wsl layout of ./platform). Windows is asked through cmd.exe; wslpath converts.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SETTINGS_FILE } from "../../shell/src/settings";
@@ -59,7 +59,7 @@ export function settingsFile(): string {
 }
 
 export interface ShellPaths {
-  /** <LocalAppData>\intuition, as a WSL path. */
+  /** The shell's own folder: <LocalAppData>\intuition as a WSL path for windows-wsl; for the native layouts, ./platform's nativeHome. */
   home: string;
   /** The installed app: main.cjs, package.json and node_modules/electron. */
   app: string;

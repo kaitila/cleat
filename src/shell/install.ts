@@ -1,17 +1,19 @@
-// Installing, starting and stopping the Windows shell from WSL.
+// Installing, starting and stopping the shell: the Windows shell from WSL, or the shell on this machine (macOS, Linux).
+// What differs per layout comes from ./platform.
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DOCK_PRELOAD } from "../../shell/src/dock";
 import type { LoginResult } from "../../shell/src/login";
 import { SNIP_PRELOAD } from "../../shell/src/snip";
-import { PID_FILE, withWsl } from "../../shell/src/settings";
-import { parseWsl, type WslSettings } from "../../shell/src/wsl";
-import { hasWindows, REPO, settingsFile, SHELL_SRC, type ShellPaths, shellPaths, toWindows } from "./paths";
+import { DEFAULT_SETTINGS, PID_FILE, withWsl } from "../../shell/src/settings";
+import type { WslSettings } from "../../shell/src/wsl";
+import { REPO, SHELL_SRC, type ShellPaths } from "./paths";
+import { autostartEntry, autostartFile, currentPlatform, type LocalRunner, type Platform, platformFor, type RunnerLocation, windowsPidAlive } from "./platform";
+
+export { windowsPidAlive };
 
 export const BUNDLE = "main.cjs";
-/** Electron is fetched for Windows although npm and node run in WSL. */
-const FOR_WINDOWS = { npm_config_platform: "win32", npm_config_arch: "x64" };
 
 /** One entry point bundled into one CommonJS file in outDir. Electron stays a require(). */
 async function bundle(entry: string, outDir: string, name: string): Promise<string> {
@@ -56,13 +58,16 @@ async function run(cmd: string[], cwd: string, env: Record<string, string>): Pro
   if ((await p.exited) !== 0) throw new Error(`${cmd.join(" ")} failed in ${cwd}`);
 }
 
-function needWindows(): void {
-  if (!hasWindows()) throw new Error("the Windows shell needs WSL with the Windows disk at /mnt/c");
+/** Throws when the shell cannot be installed or run on this layout: windows-wsl without the Windows disk, or (to start it) Linux without a display. */
+function needPlatform(platform: Platform, starting: boolean): void {
+  const why = platform.layout === "linux" && !starting ? null : platform.unavailable();
+  if (why) throw new Error(why);
 }
 
-/** Copies the bundle and package.json into the Windows folder, and installs Electron there unless the pinned version already is. */
-export async function install(paths = shellPaths(), log: (line: string) => void = console.log): Promise<void> {
-  needWindows();
+/** Copies the bundle and package.json into the shell's folder, and installs Electron there for the shell's OS unless the pinned version already is. */
+export async function install(paths?: ShellPaths, log: (line: string) => void = console.log, platform: Platform = currentPlatform()): Promise<void> {
+  needPlatform(platform, false);
+  paths ??= platform.shellPaths();
   mkdirSync(paths.app, { recursive: true });
   await buildShell(paths.app);
   copyFileSync(join(SHELL_SRC, "package.json"), join(paths.app, "package.json"));
@@ -72,10 +77,10 @@ export async function install(paths = shellPaths(), log: (line: string) => void 
     log(`Electron ${wanted} is already installed`);
     return;
   }
-  log(`installing Electron ${wanted} for Windows (a download of about 130 MB the first time)`);
-  // WSL's npm and node: the Node on the Windows side is too old for Electron's installer.
-  await run(["npm", "install", "--no-audit", "--no-fund", "--no-package-lock"], paths.app, FOR_WINDOWS);
-  await run(["node", join("node_modules", "electron", "install.js")], paths.app, FOR_WINDOWS);
+  log(`installing Electron ${wanted} for ${platform.os} (a download of about 130 MB the first time)`);
+  // This machine's npm and node. For windows-wsl, WSL's: the Node on the Windows side is too old for Electron's installer.
+  await run(["npm", "install", "--no-audit", "--no-fund", "--no-package-lock"], paths.app, platform.electronEnv);
+  await run(["node", join("node_modules", "electron", "install.js")], paths.app, platform.electronEnv);
   if (installedElectron(paths) !== wanted) throw new Error(`Electron ${wanted} is not at ${paths.electronExe} after the install`);
   log(`Electron ${wanted}: ${paths.electronExe}`);
 }
@@ -109,87 +114,111 @@ export async function isCurrent(paths: ShellPaths): Promise<boolean> {
   }
 }
 
-function needInstalled(paths: ShellPaths): void {
-  needWindows();
+function needInstalled(paths: ShellPaths, platform: Platform): void {
+  needPlatform(platform, true);
   if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
 }
 
-/** Where the runner lives, for the shell to start it: this distribution, this repo and the bun running this command. */
+/** Where the runner lives in WSL, for the Windows shell to start it: this distribution, this repo and the bun running this command. */
 export function runnerLocation(env: Record<string, string | undefined> = process.env, repo = REPO, bun = process.execPath): WslSettings | undefined {
-  return parseWsl({ distro: env.WSL_DISTRO_NAME, repo, bun });
+  const location = platformFor("windows-wsl").runnerLocation(env, repo, bun);
+  return location?.kind === "wsl" ? location.wsl : undefined;
 }
 
-/** Writes `wsl` into the shell's settings file, keeping what else is there. Returns false when there is nothing usable to write. */
-export function writeRunnerLocation(file = settingsFile(), wsl: WslSettings | null = runnerLocation() ?? null, log: (line: string) => void = console.log): boolean {
-  if (!wsl) {
-    log("WSL_DISTRO_NAME is not set, or the repo's or bun's path is unusable: the shell will not be able to start the runner itself");
+/** The settings file's text with `runner` set to a local runner and everything else kept, as withWsl does: text that is not a JSON object starts from the defaults. */
+export function withLocalRunner(text: string | null, runner: LocalRunner): string {
+  let raw: unknown = null;
+  try {
+    raw = JSON.parse(text ?? "");
+  } catch {
+    // Missing or broken: the defaults.
+  }
+  const o = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : DEFAULT_SETTINGS;
+  return JSON.stringify({ ...o, runner }, null, 2) + "\n";
+}
+
+/**
+ * Writes where the runner lives into the shell's settings file, keeping what else is there: `wsl` for the
+ * Windows shell (a WslSettings, as before), or `runner: { kind: "local", repo, bun }` for a shell on this
+ * machine, which starts the runner itself as a detached child process. Returns false when there is nothing usable to write.
+ */
+export function writeRunnerLocation(file?: string, location?: WslSettings | RunnerLocation | null, log: (line: string) => void = console.log, platform: Platform = currentPlatform()): boolean {
+  file ??= platform.settingsFile();
+  const where = location === undefined ? (platform.runnerLocation() ?? null) : location;
+  if (!where) {
+    log(
+      platform.layout === "windows-wsl"
+        ? "WSL_DISTRO_NAME is not set, or the repo's or bun's path is unusable: the shell will not be able to start the runner itself"
+        : "the repo's or bun's path is unusable: the shell will not be able to start the runner itself",
+    );
     return false;
   }
+  const wsl = !("kind" in where) ? where : where.kind === "wsl" ? where.wsl : null;
+  const local = "kind" in where && where.kind === "local" ? where : null;
   const before = existsSync(file) ? readFileSync(file, "utf8") : null;
-  const after = withWsl(before, wsl);
+  const after = wsl ? withWsl(before, wsl) : withLocalRunner(before, local!);
   if (after !== before) {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, after);
-    log(`settings: ${file} (the shell starts the runner with ${wsl.bun} ${join(wsl.repo, "src", "cli.ts")} start, in ${wsl.distro})`);
+    const r = wsl ?? local!;
+    log(`settings: ${file} (the shell starts the runner with ${r.bun} ${join(r.repo, "src", "cli.ts")} start${wsl ? `, in ${wsl.distro}` : ""})`);
   }
   return true;
 }
 
-/** electron.exe on the app folder with extra arguments, run from a Windows folder. */
-export function electron(paths: ShellPaths, args: string[], detached = false) {
-  needInstalled(paths);
-  return Bun.spawn([paths.electronExe, toWindows(paths.app), ...args], { cwd: paths.app, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached });
+/** The installed Electron on the app folder with extra arguments, run from the app folder (for windows-wsl, a Windows folder). */
+export function electron(paths: ShellPaths, args: string[], detached = false, platform: Platform = currentPlatform()) {
+  needInstalled(paths, platform);
+  return Bun.spawn([paths.electronExe, ...platform.electronFlags(), platform.appArg(paths.app), ...args], { cwd: paths.app, stdin: "ignore", stdout: "ignore", stderr: "ignore", detached });
 }
 
 /** Starts the shell and leaves it running. A second start only brings up the first one's chat window. */
-export function start(paths = shellPaths()): void {
-  electron(paths, [], true).unref();
+export function start(paths?: ShellPaths, platform: Platform = currentPlatform()): void {
+  electron(paths ?? platform.shellPaths(), [], true, platform).unref();
 }
 
 /** Asks the running shell to quit: a second copy hands it --quit and exits. Does nothing when none runs. */
-export async function stop(paths = shellPaths()): Promise<void> {
-  await electron(paths, ["--quit"]).exited;
+export async function stop(paths?: ShellPaths, platform: Platform = currentPlatform()): Promise<void> {
+  await electron(paths ?? platform.shellPaths(), ["--quit"], false, platform).exited;
 }
 
 /** How long `stopAndWait` waits for the shell's process to end. */
 const QUIT_MS = 10_000;
 
-/** True while a Windows process has this pid (tasklist.exe). */
-export function windowsPidAlive(pid: number): boolean {
-  const p = Bun.spawnSync(["/mnt/c/Windows/System32/tasklist.exe", "/NH", "/FI", `PID eq ${pid}`], { cwd: "/mnt/c", stdin: "ignore", stdout: "pipe", stderr: "ignore" });
-  return p.exitCode === 0 && new RegExp(`\\s${pid}\\s`).test(p.stdout.toString());
-}
-
 /**
  * Asks the running shell to quit and waits until its process has ended, so files can be replaced and
  * a new shell can take the single-instance lock. The shell writes its pid beside its settings; a shell
- * from before that is given two seconds. `pidFile` is that file, as a WSL path.
+ * from before that is given two seconds. `pidFile` is that file (for windows-wsl, as a WSL path).
  */
-export async function stopAndWait(paths: ShellPaths, pidFile: string, alive = windowsPidAlive): Promise<void> {
+export async function stopAndWait(paths: ShellPaths, pidFile: string, alive?: (pid: number) => boolean, platform: Platform = currentPlatform()): Promise<void> {
+  const isAlive = alive ?? platform.pidAlive;
   const pid = existsSync(pidFile) ? Number(readFileSync(pidFile, "utf8").trim()) : NaN;
-  await stop(paths);
+  await stop(paths, platform);
   if (!Number.isSafeInteger(pid) || pid <= 0) {
     await Bun.sleep(2000);
     return;
   }
   const end = Date.now() + QUIT_MS;
-  while (Date.now() < end && alive(pid)) await Bun.sleep(200);
+  while (Date.now() < end && isAlive(pid)) await Bun.sleep(200);
   rmSync(pidFile, { force: true });
 }
 
-/** The shell's pid file, as a WSL path: beside its settings file. */
-export function pidFile(settings = settingsFile()): string {
+/** The shell's pid file (for windows-wsl, as a WSL path): beside its settings file. */
+export function pidFile(settings = currentPlatform().settingsFile()): string {
   return join(dirname(settings), PID_FILE);
 }
 
 /**
- * Start on login: runs the shell's exe with --login on|off|status and returns what it wrote.
- * `on` and `off` change this Windows user's login items; `status` only reads.
+ * Start on login. Windows and macOS: runs the shell's exe with --login on|off|status and returns what it
+ * wrote; `on` and `off` change this user's login items. Linux: writes or removes an XDG autostart file.
+ * `status` only reads.
  */
-export async function login(action: "on" | "off" | "status", paths = shellPaths()): Promise<LoginResult> {
+export async function login(action: "on" | "off" | "status", paths?: ShellPaths, platform: Platform = currentPlatform()): Promise<LoginResult> {
+  paths ??= platform.shellPaths();
+  if (platform.login === "xdg-autostart") return autostart(action, paths, platform);
   const resultFile = join(paths.home, "login-result.json");
   rmSync(resultFile, { force: true });
-  const shell = electron(paths, ["--login", action, "--login-result", toWindows(resultFile)]);
+  const shell = electron(paths, ["--login", action, "--login-result", platform.appArg(resultFile)], false, platform);
   const timer = setTimeout(() => shell.kill(), 30_000);
   await shell.exited;
   clearTimeout(timer);
@@ -201,4 +230,19 @@ export async function login(action: "on" | "off" | "status", paths = shellPaths(
   } finally {
     rmSync(resultFile, { force: true });
   }
+}
+
+/**
+ * Start on login for the linux layout: an XDG autostart file that runs the installed Electron on the app
+ * folder, as `shell start` does. `on` needs the shell installed; `off` removes the file; `status` only reads.
+ */
+export function autostart(action: "on" | "off" | "status", paths: ShellPaths, platform: Platform, file = autostartFile()): LoginResult {
+  if (action === "on") {
+    if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, autostartEntry(paths.electronExe, [...platform.electronFlags(), platform.appArg(paths.app)]));
+  } else if (action === "off") {
+    rmSync(file, { force: true });
+  }
+  return { openAtLogin: existsSync(file), error: null };
 }

@@ -5,12 +5,13 @@ import { link, unlink } from "./cli/link";
 import { resume } from "./cli/resume";
 import * as runner from "./cli/runner";
 import { parseLogin } from "../shell/src/login";
+import { doctor } from "./cli/doctor";
 import { install, isCurrent, isInstalled, login, pidFile, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
-import { hasWindows, shellPaths } from "./shell/paths";
+import { currentPlatform } from "./shell/platform";
 
 const USAGE = `usage: intuition <command>     (no command: intuition up)
 
-  up              start the runner, install the Windows shell, and start it: the one command to run. A runner or
+  up              start the runner, install the shell, and start it: the one command to run. A runner or
                   shell that runs older code than this repo's is restarted (a runner with sessions running is kept)
   start           start the runner in the background and print its URL (--login-env: with the login shell's environment).
                   A runner already running older code is restarted, unless a session is running or waits for approval:
@@ -23,12 +24,16 @@ const USAGE = `usage: intuition <command>     (no command: intuition up)
                   No id: the newest session. An id may be the runner's or Claude Code's, or the start of one;
                   one that matches no session, or several, prints them
 
-  shell install   bundle the Windows shell and install it, with Electron, under the Windows user's AppData\\Local\\intuition
-  shell start     start the Windows shell (tray icon, hotkey and dock)
-  shell stop      quit the Windows shell
+  doctor          say which layout this is (windows-wsl, macos, linux) and check each prerequisite and part, with a fix
+                  for each one missing (exit code 1 when something needed is missing)
+
+  shell install   bundle the shell and install it, with Electron, in its folder: the Windows user's AppData\\Local\\intuition
+                  from WSL, ~/Library/Application Support/intuition on macOS, ~/.local/share/intuition on Linux
+  shell start     start the shell (tray icon, hotkey and dock)
+  shell stop      quit the shell
   shell login on|off|status
-                  start the shell when you log in to Windows: turn it on, turn it off, or say which it is
-  shell selftest  install the shell and run its self-test against a stub runner
+                  start the shell when you log in: turn it on, turn it off, or say which it is
+  shell selftest  install the shell and run its self-test against a stub runner (Windows)
 
   link [dir]      put this command on the PATH: a link named intuition, in dir or else in the folder bun is in
   unlink [dir]    remove that link
@@ -62,11 +67,13 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
     // A runner kept because sessions are in the way still serves: the shell is brought up to date, and the exit code says so.
     const code = await runner.start();
     if (code !== 0 && code !== runner.KEPT) return code;
-    if (!hasWindows()) {
-      console.log("the Windows shell needs WSL with the Windows disk at /mnt/c: only the runner was started");
+    const platform = currentPlatform();
+    const unavailable = platform.unavailable();
+    if (unavailable) {
+      console.log(`${unavailable}: only the runner was started`);
       return code;
     }
-    const paths = shellPaths();
+    const paths = platform.shellPaths();
     if (!isInstalled(paths)) {
       await install(paths);
     } else if (!(await isCurrent(paths))) {
@@ -83,6 +90,7 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
     writeRunnerLocation();
   },
   "shell start": startShell,
+  doctor: () => doctor(),
   "shell stop": async () => {
     await stop();
     console.log("the shell was asked to quit");
