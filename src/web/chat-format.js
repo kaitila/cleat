@@ -137,10 +137,14 @@ export function shellWord(word) {
   return `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-/** The command that continues the session in a WSL terminal, or null before it has a Claude Code session id. */
+/**
+ * The command that continues the session in a terminal, or null before the agent has given its id:
+ * `codex resume <thread id>` for a Codex session, `claude --resume <session id>` for the rest.
+ */
 export function resumeCommand(session) {
   if (!session?.claudeSessionId || !session.cwd) return null;
-  return `cd ${shellWord(session.cwd)} && claude --resume ${shellWord(session.claudeSessionId)}`;
+  const command = session.agent === "codex" ? "codex resume" : "claude --resume";
+  return `cd ${shellWord(session.cwd)} && ${command} ${shellWord(session.claudeSessionId)}`;
 }
 
 /** Whether a reply can be sent, and the hint under the reply box. */

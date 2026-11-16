@@ -24,7 +24,7 @@ declare module "*/web/chat-format.js" {
   export function isOpenInTerminal(status: number, error: unknown): boolean;
   export const OPEN_IN_TERMINAL_HINT: string;
   export function shellWord(word: string): string;
-  export function resumeCommand(session: { claudeSessionId: string | null; cwd: string } | undefined): string | null;
+  export function resumeCommand(session: { claudeSessionId: string | null; cwd: string; agent?: "claude" | "codex" } | undefined): string | null;
   export function resultLine(event: { ok: boolean; durationMs?: number; costUsd?: number }): string;
   export function unknownNote(event: unknown): string;
   export function backoffMs(attempt: number): number;
