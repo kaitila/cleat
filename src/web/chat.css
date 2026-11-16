@@ -32,7 +32,11 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
+  /* One column that may shrink below its content: without it a grid's column is as wide as its
+     widest row's unwrapped title, and the row runs past the sidebar instead of ending in "…". */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: var(--hairline);
   list-style: none;
@@ -41,9 +45,9 @@
 }
 /* The sessions by workspace (D0033): a heading per workspace, a hairline between groups. With one
    workspace (or one chosen in the filter) the heading isn't drawn and the list is a plain list. */
-.group { display: grid; gap: var(--hairline); }
+.group { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--hairline); }
 .sessions.grouped > .group + .group { border-top: var(--hairline) solid var(--line); padding-top: var(--space-1); margin-top: var(--space-1); }
-.group-list { display: grid; gap: var(--hairline); list-style: none; margin: 0; padding: 0; }
+.group-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--hairline); list-style: none; margin: 0; padding: 0; }
 /* A heading: the workspace's name and a muted count, its chevron at the end; folds its group. */
 .group-head {
   justify-content: flex-start;
