@@ -54,6 +54,46 @@ describe("which session", () => {
   });
 });
 
+describe("a Codex session", () => {
+  const codex = (id: string, thread: string | null, updatedAt: string): SessionMeta => ({ ...meta(id, thread, updatedAt), agent: "codex" });
+  const mixed = [...sessions, codex("dddd5555-0000", "thread-new", "2026-11-13T14:00:00.000Z"), codex("eeee6666-0000", null, "2026-11-13T15:00:00.000Z")];
+  test("resumes with codex resume <thread id> in its folder; the rest stay claude --resume", () => {
+    expect(plan(mixed)).toMatchObject({ cmd: ["codex", "resume", "thread-new"], cwd: "/work/dddd5555-0000" });
+    expect(plan(mixed, "thread-n")).toMatchObject({ cmd: ["codex", "resume", "thread-new"], cwd: "/work/dddd5555-0000" });
+    expect(plan(mixed, "bbbb")).toMatchObject({ cmd: ["claude", "--resume", "claude-new"] });
+    expect(plan([{ ...meta("ffff", "claude-x", "2026-11-13T10:00:00.000Z"), agent: "claude" }])).toMatchObject({ cmd: ["claude", "--resume", "claude-x"] });
+  });
+  test("without a thread it says so, not that it lacks a Claude Code session", () => {
+    const result = plan(mixed, "eeee");
+    expect("error" in result && result.error).toContain("no Codex thread yet");
+    expect("error" in result && result.error).not.toContain("Claude Code");
+    const listed = plan(mixed, "zzz");
+    expect("error" in listed && listed.error).toContain("title eeee6666-0000 (w, no Codex thread yet)");
+    expect("error" in listed && listed.error).toContain("title cccc4444-0000 (w, no Claude Code session yet)");
+  });
+  test("intuition resume runs codex resume in the session's folder", async () => {
+    const ran: { cmd: string[]; cwd: string }[] = [];
+    const code = await resume("dddd", {}, () => {}, {
+      sessions: async () => mixed,
+      exists: () => true,
+      run: async (cmd, cwd) => {
+        ran.push({ cmd, cwd });
+        return 0;
+      },
+    });
+    expect(code).toBe(0);
+    expect(ran).toEqual([{ cmd: ["codex", "resume", "thread-new"], cwd: "/work/dddd5555-0000" }]);
+  });
+  test("a codex that won't start is named as Codex", async () => {
+    const lines: string[] = [];
+    const run = async () => {
+      throw new Error("ENOENT");
+    };
+    expect(await resume("dddd", {}, (l) => lines.push(l), { sessions: async () => mixed, exists: () => true, run })).toBe(1);
+    expect(lines.at(-1)).toBe("could not run codex: ENOENT. Is Codex installed and on the PATH?");
+  });
+});
+
 describe("what it runs", () => {
   test("claude --resume <claudeSessionId> in the session's folder, and its exit code", async () => {
     const ran: { cmd: string[]; cwd: string }[] = [];
