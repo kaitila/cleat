@@ -797,6 +797,48 @@ try {
     }
   }
 
+  // ---- long titles in the sidebar: ellipsized, the time kept, nothing scrolls sideways (T-0058) ----
+  {
+    const ldir = mkdtempSync(join(tmpdir(), "intuition-chat-long-"));
+    const longTitles = ["Tighten the hero copy on the pricing page", "Summarise the notes from Tuesday's planning call and send them round"];
+    {
+      const store = new Store(join(ldir, "data"));
+      const when = new Date(Date.now() - 2 * 3_600_000).toISOString();
+      store.create({ id: crypto.randomUUID(), claudeSessionId: null, workspace: "work", cwd: "/nowhere", title: longTitles[0], status: "idle", createdAt: when, updatedAt: when, lastSeq: 0 });
+      store.create({ id: crypto.randomUUID(), claudeSessionId: null, workspace: "elsewhere", cwd: "/nowhere", title: longTitles[1], status: "idle", createdAt: when, updatedAt: when, lastSeq: 0 });
+    }
+    const l = testRunner({ dir: ldir });
+    try {
+      await page.setViewportSize({ width: 1200, height: 760 });
+      await page.goto(`${l.url}/`);
+      await page.locator(".group-head:visible").nth(1).waitFor();
+      const fits = () => page.evaluate(() => {
+        const side = document.querySelector(".sidebar")!.getBoundingClientRect();
+        const list = document.querySelector(".sessions")!;
+        return {
+          scrolls: list.scrollWidth > list.clientWidth || list.scrollLeft !== 0,
+          rows: [...document.querySelectorAll(".session")].map((row) => {
+            const title = row.querySelector(".session-title") as HTMLElement;
+            const time = row.querySelector(".session-time")!.getBoundingClientRect();
+            const r = row.getBoundingClientRect();
+            return { cut: title.scrollWidth > title.clientWidth && getComputedStyle(title).textOverflow === "ellipsis", inside: r.right <= side.right + 0.5 && time.width > 0 && time.right <= r.right + 0.5 };
+          }),
+        };
+      }) as Promise<{ scrolls: boolean; rows: { cut: boolean; inside: boolean }[] }>;
+      let f = await fits();
+      check(f.rows.length === 2 && f.rows.every((r) => r.cut && r.inside), `at 1200 wide a long title ends in "…" and its time shows inside the sidebar (${JSON.stringify(f.rows)})`);
+      check(!f.scrolls, "and the sidebar doesn't scroll sideways");
+      await page.locator(".session", { hasText: "Summarise" }).click();
+      await page.waitForTimeout(100);
+      f = await fits();
+      check(!f.scrolls && f.rows.every((r) => r.cut && r.inside), "nor after a click on a row");
+      await shot("chat-long-titles-light");
+    } finally {
+      await l.stop();
+      await page.setViewportSize({ width: 1100, height: 720 });
+    }
+  }
+
   // ---- no sessions at all ----
   const empty = testRunner();
   try {
