@@ -37,6 +37,7 @@ import {
   writeFolded,
 } from "./chat-manage.js";
 import { resumeControl } from "./chat-resume.js";
+import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.js";
 import { renderMarkdown } from "./markdown.js";
 
 const $ = (id) => document.getElementById(id);
@@ -48,6 +49,7 @@ const els = {
   title: $("title"),
   dot: $("dot"),
   workspace: $("workspace"),
+  agent: $("agent"),
   status: $("status"),
   scroller: $("scroller"),
   stream: $("stream"),
@@ -576,7 +578,7 @@ function glideAfter(el, change) {
   }
 }
 
-/** A session's one-line row: its dot, the terminal mark if it has one, its title, Pinned, its time. */
+/** A session's one-line row: its dot, its agent's glyph, the terminal mark if it has one, its title, Pinned, its time. */
 function rowFor(session) {
   let row = rows.get(session.id);
   if (row) return row;
@@ -593,6 +595,7 @@ function rowFor(session) {
     item,
     link,
     dot: h("span", "dot"),
+    agent: agentMark(document, agentOf(session)),
     title: h("span", "session-title"),
     time: h("time", "session-time muted small"),
     mark: terminalMark(),
@@ -648,7 +651,8 @@ function renderSidebar() {
       row.dot.title = sessionStatus(session);
       row.title.textContent = session.title || "Untitled";
       // One line: the mark only for a session started in the terminal, Pinned only when pinned.
-      const parts = [row.dot, ...(startedInTerminal(session) ? [row.mark] : []), row.title, ...(session.pinned ? [row.pin] : []), row.time];
+      setAgentMark(row.agent, agentOf(session));
+      const parts = [row.dot, row.agent, ...(startedInTerminal(session) ? [row.mark] : []), row.title, ...(session.pinned ? [row.pin] : []), row.time];
       if (parts.some((p, k) => row.link.childNodes[k] !== p) || row.link.childNodes.length !== parts.length) {
         // A title being renamed has its input right after it: keep it there.
         const input = row.link.querySelector("input.rename");
@@ -870,6 +874,12 @@ function renderHead() {
   els.title.textContent = session.title || "Untitled";
   els.dot.dataset.status = session.status;
   els.workspace.textContent = session.workspace;
+  // The head names the agent, after its glyph.
+  const kind = agentOf(session);
+  if (els.agent.dataset.agent !== kind) {
+    els.agent.dataset.agent = kind;
+    els.agent.replaceChildren(agentSvg(document, kind), agentName(kind));
+  }
   els.status.textContent = session.archived ? `${sessionStatus(session)} · archived` : sessionStatus(session);
   els.stop.hidden = !canStop(session);
   els.stop.disabled = stopping === session.id;

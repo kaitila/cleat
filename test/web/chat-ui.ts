@@ -143,6 +143,27 @@ try {
   await shot("chat-dark");
   await page.emulateMedia({ colorScheme: "light" });
 
+  // ---- the agent: a quiet glyph on each row, and the head names it ----
+  check((await page.locator('.session[aria-current="true"] .agent-mark').getAttribute("data-agent")) === "claude", "a Claude Code session's row has Claude Code's glyph");
+  check((await page.locator('.session[aria-current="true"] .agent-mark').getAttribute("title")) === "Runs on Claude Code", "with the agent as its tooltip, not a word on the row");
+  check((await page.locator("#agent").textContent()) === "Claude Code", "the head names the agent");
+  const codexPrompt = "Please answer on codex";
+  const codexRes = await api.post("/api/sessions", { workspace: "work", prompt: codexPrompt, agent: "codex" });
+  const codexId = ((await codexRes.json()) as { session: { id: string } }).session.id;
+  await page.goto(`${runner.url}/?session=${codexId}`);
+  await page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${codexPrompt}` }).waitFor();
+  await page.locator(".note", { hasText: "Done" }).waitFor();
+  const codexRow = page.locator('.session[aria-current="true"] .agent-mark');
+  check((await codexRow.getAttribute("data-agent")) === "codex" && (await codexRow.getAttribute("aria-label")) === "Runs on Codex" && (await codexRow.locator("svg").count()) === 1, "a Codex session's row has Codex's glyph, named for screen readers");
+  check((await page.locator("#agent").textContent()) === "Codex", "and its head names Codex");
+  check((await page.locator(".session .agent-mark").count()) === (await page.locator(".session").count()), "every row has its agent's mark");
+  await shot("chat-codex-light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot("chat-codex-dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto(`${runner.url}/?session=${session.id}`);
+  await page.locator(".note", { hasText: "Done" }).waitFor();
+
   // ---- the theme setting (docs/design.md, "Themes"): theme.js first, then live ----
   check(await page.evaluate(() => document.head.querySelector("script, link")?.getAttribute("src") === "/assets/theme.js"), "theme.js is the first thing the page loads");
   const gear = page.locator(".sidebar-head .settings-link");

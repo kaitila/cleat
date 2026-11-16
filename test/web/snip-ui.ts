@@ -111,7 +111,7 @@ function windowsTemp(): string | null {
 const dir = mkdtempSync(join(tmpdir(), "intuition-snip-ui-"));
 for (const name of ["alpha", "beta"]) mkdirSync(join(dir, name));
 const env = { INTUITION_CONFIG: join(dir, "config.json"), INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0", INTUITION_FAKE_AGENT: "1" };
-writeFileSync(env.INTUITION_CONFIG, JSON.stringify({ workspaces: ["gone", "alpha", "beta"].map((name) => ({ name, path: join(dir, name) })) }));
+writeFileSync(env.INTUITION_CONFIG, JSON.stringify({ workspaces: ["gone", "alpha", "beta"].map((name) => ({ name, path: join(dir, name), ...(name === "beta" ? { agent: "codex" } : {}) })) }));
 const runner = startServer(loadConfig(env));
 const shots = join(dir, "screenshots");
 mkdirSync(shots);
@@ -171,6 +171,12 @@ const state = () => {
   return {
     focus: document.activeElement?.id ?? "",
     boxShown: !box.hidden,
+    agent: document.querySelector<HTMLElement>("#agent")!.dataset.agent ?? null,
+    placeholder: document.querySelector<HTMLTextAreaElement>("#task")!.placeholder,
+    footFits: (() => {
+      const foot = document.querySelector(".foot")!;
+      return foot.scrollWidth <= foot.clientWidth;
+    })(),
     // Where the box is laid out: its spring (a transform) doesn't move this.
     box: { x: box.offsetLeft, y: box.offsetTop, width: box.offsetWidth, height: box.offsetHeight },
     drawn: rect(box),
@@ -290,6 +296,14 @@ try {
   await page.keyboard.press("Tab");
   s = await page.evaluate(state);
   check("Tab switches the workspace, and the focus stays in the box", s.workspace === "beta" && s.focus === "task", `${s.workspace} ${s.focus}`);
+  check("the agent switch follows the workspace: beta runs on Codex", s.agent === "codex" && s.placeholder === "What should Codex do with this?", JSON.stringify([s.agent, s.placeholder]));
+  check("the box's foot holds the workspace, the agent and the hints without overflowing", s.footFits);
+  await shot(page, "light-codex");
+  await page.keyboard.press("Alt+A");
+  s = await page.evaluate(state);
+  check("Alt+A flips it to Claude Code, and nothing is typed", s.agent === "claude" && s.task === "What is in this area?\nBe brief.", JSON.stringify([s.agent, s.task]));
+  await page.keyboard.press("Alt+A");
+  check("Alt+A again turns it back to Codex", (await page.evaluate(state)).agent === "codex");
   await page.keyboard.press("Alt+1");
   check("Alt+1 can't pick the missing workspace", (await page.evaluate(state)).workspace === "beta");
   await page.keyboard.press("Alt+2");
@@ -322,6 +336,7 @@ try {
   const started = list.find((x) => x.title === "What is in this area?");
   const user = started ? await userEvents(started.id) : [];
   check("in the chosen workspace", started?.workspace === "beta", String(started?.workspace));
+  check("on the agent the switch showed, Codex", started?.agent === "codex", String(started?.agent));
   check("with the snip as its imagePath, apart from the text", user[0]?.text === "What is in this area?\nBe brief." && user[0]?.imagePath === cropFile, JSON.stringify(user));
   check("then the overlays close", seen.closes === 1, String(seen.closes));
   await page.close();

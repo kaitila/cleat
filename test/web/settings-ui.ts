@@ -58,7 +58,8 @@ type Mode = "auto" | "default";
 interface Settings {
   theme: "system" | "light" | "dark";
   permissionMode: Mode;
-  workspaces: { name: string; path: string; permissionMode?: Mode }[];
+  agent?: "claude" | "codex";
+  workspaces: { name: string; path: string; permissionMode?: Mode; agent?: "claude" | "codex" | null }[];
   shell: { hotkey: string; snipHotkey: string; dock: boolean; startOnLogin: boolean } | null;
   port: number;
 }
@@ -72,6 +73,7 @@ const WEB = join(import.meta.dir, "..", "..", "src", "web");
 let stored: Settings = {
   theme: "system",
   permissionMode: "auto",
+  agent: "claude",
   workspaces: [
     { name: "alpha", path: join(dir, "alpha") },
     { name: "gone", path: join(dir, "gone"), permissionMode: "default" },
@@ -113,6 +115,14 @@ let platform = {
   layout: "macos",
   runner: { running: true, version: "0.1.0" },
   shell: { connected: true, report: { os: "macos", startOnLogin: false, hotkeys: { hotkey: true, snipHotkey: true }, dockTransparent: true, screenRecording: "denied", reportedAt: new Date().toISOString() } as Record<string, unknown> | null },
+};
+/** GET /api/agents as the runner answers it: Claude Code ready, Codex installed but not logged in. */
+const agentStatus = {
+  agents: [
+    { agent: "claude", installed: true, version: "2.1.325 (Claude Code)", loggedIn: true, detail: "2.1.325 (Claude Code), logged in", fix: "" },
+    { agent: "codex", installed: true, version: "codex-cli 0.169.0", loggedIn: false, detail: "codex-cli 0.169.0, not logged in", fix: "Log in: codex login" },
+  ],
+  checkedAt: new Date().toISOString(),
 };
 /** How many times the page asked the shell to open Screen Recording's pane. */
 let screenOpens = 0;
@@ -156,6 +166,7 @@ const server = Bun.serve({
       return json(stored);
     }
     if (path === "/api/platform" && req.method === "GET") return json(platform);
+    if (path === "/api/agents" && req.method === "GET") return json(agentStatus);
     if (path === "/api/platform/open-screen-recording" && req.method === "POST") {
       screenOpens++;
       return json({ sent: true }, 202);
@@ -261,6 +272,25 @@ try {
   await until("Sessions: Ask is saved", () => stored.permissionMode === "default");
   await page.click('.segmented label:has(input[value="auto"])');
   await until("Sessions: Auto is saved", () => stored.permissionMode === "auto");
+
+  // ---------- agents ----------
+  const agentRows = () => page.evaluate(() => [...document.querySelectorAll("#agents > li")].map((li) => ({ agent: (li as HTMLElement).dataset.agent, tone: (li as HTMLElement).dataset.tone, value: li.querySelector(".setup-value")!.textContent, detail: li.querySelector(".setup-detail")!.textContent, glyph: li.querySelector(".setup-name svg") !== null })));
+  await until("Agents: one line per agent, from GET /api/agents", async () => (await agentRows()).map((r) => `${r.agent}:${r.tone}`).join() === "claude:ok,codex:off", () => agentRows());
+  const [claudeRow, codexRow] = await agentRows();
+  check("Agents: each line says what the agent needs and what doctor found, after its glyph", claudeRow!.detail === "Needs Claude Code installed and logged in. Found 2.1.325 (Claude Code), logged in." && codexRow!.detail === "Needs Codex installed and logged in. Log in: codex login" && claudeRow!.glyph && codexRow!.glyph, JSON.stringify([claudeRow, codexRow]));
+  check("Agents: the default agent shows the stored one", (await page.evaluate(() => document.querySelector<HTMLInputElement>('input[name="agent"]:checked')?.value)) === "claude");
+  await page.click('.segmented label:has(input[value="codex"])');
+  await until("Agents: Codex as the default is saved", () => stored.agent === "codex");
+  await until("Agents: Codex not logged in turns red once sessions would run on it", async () => (await agentRows())[1]?.tone === "bad", () => agentRows());
+  await shot(page, "settings-agents-codex");
+  await page.click('.segmented label:has(input[value="claude"])');
+  await until("Agents: back to Claude Code", () => stored.agent === "claude");
+  await page.selectOption(".workspace:nth-child(1) .agent", "codex");
+  await until("Workspaces: a workspace's own agent is saved", () => stored.workspaces[0]?.agent === "codex");
+  await page.selectOption(".workspace:nth-child(1) .agent", "");
+  await until("Workspaces: Default clears the workspace's own agent (null)", () => stored.workspaces[0]?.agent === null);
+  const fieldWidths = await page.evaluate(() => [".name", ".path"].map((c) => document.querySelector<HTMLElement>(`.workspace ${c}`)!.getBoundingClientRect().width));
+  check("Workspaces: the name and the folder keep their room beside the two choices", fieldWidths[0]! >= 120 && fieldWidths[1]! >= 300, JSON.stringify(fieldWidths));
 
   await page.fill(".workspace:nth-child(1) .name", "alpha2");
   await page.keyboard.press("Tab");

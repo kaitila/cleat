@@ -4,8 +4,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fieldKeys, isDraft, keycaps, keyOf, move, putBody, recordKey, setupLines } from "../../src/web/settings-model.js";
-import type { PlatformResponse, ShellReport } from "../../src/shared/protocol";
+import { agentLines, fieldKeys, isDraft, keycaps, keyOf, move, putBody, recordKey, setupLines, usedAgents } from "../../src/web/settings-model.js";
+import type { AgentsResponse, AgentStatus, PlatformResponse, ShellReport } from "../../src/shared/protocol";
 import { testRunner } from "../runner/helpers";
 
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
@@ -67,9 +67,17 @@ describe("saving", () => {
       permissionMode: "auto",
       port: 4777,
       shell: state.shell,
-      workspaces: [{ name: "one", path: "/a", permissionMode: "default" }, { name: "three", path: "/c" }, { name: "", path: "/d" }],
+      workspaces: [{ name: "one", path: "/a", permissionMode: "default", agent: null }, { name: "three", path: "/c", agent: null }, { name: "", path: "/d", agent: null }],
     });
     expect(rows).toEqual([0, 3, 4]);
+  });
+
+  test("the agent goes at the top when the page has one, and on each workspace: its own, or null to clear it", () => {
+    const { body } = putBody({ ...state, agent: "codex", workspaces: [{ name: "a", path: "/a", agent: "claude" }, { name: "b", path: "/b", agent: "codex" }, { name: "c", path: "/c" }] });
+    expect(body.agent).toBe("codex");
+    expect(body.workspaces.map((w) => w.agent)).toEqual(["claude", "codex", null]);
+    // A runner from before agents sent none: none is sent, so it keeps its own.
+    expect("agent" in putBody(state).body).toBe(false);
   });
 
   test("a 400's field is the page's keys, most precise first, in any of the usual spellings", () => {
@@ -185,7 +193,7 @@ describe("the Setup section", () => {
 describe("the page", () => {
   test("has every section the task names, in order", () => {
     const sections = [...html.matchAll(/<h2 id="h-[a-z]+" class="label">([^<]+)<\/h2>/g)].map((m) => m[1]);
-    expect(sections).toEqual(["Setup", "Workspaces", "Sessions", "Appearance", "Shortcuts", "Dock", "Startup", "About"]);
+    expect(sections).toEqual(["Setup", "Workspaces", "Agents", "Sessions", "Appearance", "Shortcuts", "Dock", "Startup", "About"]);
   });
 
   test("has a control for every setting of the contract, each named for the 400's field", () => {
@@ -208,5 +216,42 @@ describe("the page", () => {
       const res = await runner.get(`/assets/${file}`);
       expect({ file, status: res.status }).toEqual({ file, status: 200 });
     }
+  });
+});
+
+describe("the Agents section", () => {
+  const status = (agent: "claude" | "codex", installed: boolean, loggedIn: boolean, detail = "", fix = ""): AgentStatus => ({ agent, installed, version: installed ? "1.0" : null, loggedIn, detail, fix });
+  const answer = (...agents: AgentStatus[]): AgentsResponse => ({ agents, checkedAt: "2026-11-16T00:00:00Z" });
+
+  test("one line per agent, Claude Code first, each saying what it needs and what doctor found", () => {
+    const lines = agentLines(answer(status("claude", true, true, "2.1.0 (Claude Code), logged in"), status("codex", true, true, "codex-cli 0.169.0, logged in using ChatGPT")), true);
+    expect(lines.map((l) => [l.key, l.name, l.tone, l.value])).toEqual([["claude", "Claude Code", "ok", "Ready"], ["codex", "Codex", "ok", "Ready"]]);
+    expect(lines[0]!.detail).toBe("Needs Claude Code installed and logged in. Found 2.1.0 (Claude Code), logged in.");
+    expect(lines[1]!.detail).toContain("Needs Codex installed and logged in.");
+  });
+
+  test("an agent that can't run says what to do: red when sessions would run on it, amber when nothing uses it", () => {
+    const missing = answer(status("claude", true, false, "", "Log in: claude auth login"), status("codex", false, false, "", "bun install in the repo installs it"));
+    const [claude, codex] = agentLines(missing, true, ["claude"]);
+    expect([claude!.tone, claude!.value, claude!.detail]).toEqual(["bad", "Not logged in", "Needs Claude Code installed and logged in. Log in: claude auth login"]);
+    expect([codex!.tone, codex!.value]).toEqual(["off", "Not installed"]);
+    expect(agentLines(missing, true, ["codex"])[1]!.tone).toBe("bad");
+  });
+
+  test("unknown before the answer, from a runner without the route, and while the runner is away", () => {
+    expect(agentLines(null, true).map((l) => [l.tone, l.value])).toEqual([["unknown", "Unknown"], ["unknown", "Unknown"]]);
+    expect(agentLines(answer(status("claude", true, true)), false)[0]!.detail).toContain("Shown once the runner answers.");
+  });
+
+  test("the agents in use: the default and each workspace's own", () => {
+    expect(usedAgents(null)).toEqual(["claude"]);
+    expect(usedAgents({ agent: "codex", workspaces: [{}, { agent: "claude" }] })).toEqual(["codex", "claude"]);
+  });
+
+  test("the page has the default agent's choice and a workspace's own, with Default to clear it", () => {
+    expect(html).toContain('data-field="agent"');
+    expect(html).toMatch(/<input type="radio" name="agent" value="claude"><span>Claude Code<\/span>/);
+    expect(html).toMatch(/<input type="radio" name="agent" value="codex"><span>Codex<\/span>/);
+    expect(html).toMatch(/<select class="select agent" aria-label="Agent">[\s\S]*<option value="">Default agent<\/option>[\s\S]*<option value="codex">Codex<\/option>/);
   });
 });

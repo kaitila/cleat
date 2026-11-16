@@ -19,6 +19,7 @@ A session runs on one of two agents: **Claude Code** (the default) or **OpenAI C
 ## Choosing
 - Config `agent`: `"claude"` (the default) or `"codex"`, at the top level and on any workspace, where it overrides the top level. Any other value is refused when the config is read. `GET` and `PUT /api/settings` carry both (the settings page will show them).
 - `POST /api/sessions` takes an optional `agent` that overrides both for that session.
+- The pages ([D0034](decisions/D0034-agent-choice-in-the-pages.md)): the pop-up and the snip have an agent switch beside the workspace that starts on the workspace's agent (`GET /api/workspaces` gives each its `agent`); a click or **Alt+A** flips it, the flip holds for that pop-up whichever workspace is picked after, and the task goes with `agent` set to what it shows. The task box asks "What should Codex do?" when it is Codex. The settings page has the default agent (Agents) and each workspace's own (Default agent, Claude Code or Codex), and a line per agent from `GET /api/agents`: what it needs and what doctor found, red when sessions would run on an agent that can't, amber when nothing uses it. The chat view and the dock put the agent's glyph on each session's row (Claude Code an eight-ray spark, Codex a hexagon; the name only as the tooltip) and name the agent in the session's head.
 - The session keeps its agent (`SessionMeta.agent`) for good: every reply goes to it, whatever the config says by then. A session stored before agents existed is Claude Code's. One imported from the terminal is the agent whose transcript it came from: a Codex thread is `codex`, whatever the workspace's `agent` says.
 - With `INTUITION_FAKE_AGENT=1` (tests, CI) the fake agent stands in for both.
 
@@ -34,10 +35,10 @@ Codex writes every thread, the runner's and a terminal's (`codex`, `codex exec`,
 - A thread that grows while the runner isn't running its turn streams, shows `running` with `terminalTurn`, and goes idle 5 seconds after the turn's end. A reply within two minutes of another process's write needs `force`, as for Claude Code.
 - Nothing writes under `~/.codex`: the runner's own turns go through the SDK, and a rename in the runner stays the runner's (the thread keeps its name in Codex; a new name given there replaces the runner's).
 - The format is Codex's own, not a documented interface: it was read from real files of codex 0.167.1 and 0.169.0. After a Codex upgrade, run `scripts/smoke-codex-sync.ts`.
-- "Continue in terminal" (the chat view and the dock, `resumeCommand` in `src/web/chat-format.js`) copies `cd <cwd> && codex resume <thread id>` for a Codex session, and `intuition resume` runs `codex resume <thread id>` in its folder (`claude --resume <id>` for the rest). A Codex session without a thread yet says "no Codex thread yet". The form is from `codex resume --help` (codex 0.169.0): `codex resume [SESSION_ID]`.
+- "Continue in terminal" (the chat view and the dock, `resumeCommand` in `src/web/chat-format.js`) copies `cd <cwd> && codex resume <thread id>` for a Codex session, and `intuition resume` runs `codex resume <thread id>` in its folder (`claude --resume <id>` for the rest). A Codex session without a thread yet says "no Codex thread yet". The form is from `codex resume --help` (codex 0.167.1): `codex resume [SESSION_ID]`.
 
 ## doctor
-`intuition doctor` reports **Codex** (the version of the `codex` binary the SDK runs, the one `@openai/codex` installs for this platform) and **Codex login** (`codex login status`). Both are optional: they never make doctor fail.
+`intuition doctor` reports **Codex** (the version of the `codex` binary the SDK runs, the one `@openai/codex` installs for this platform) and **Codex login** (`codex login status`). Both are optional: they never make doctor fail. `GET /api/agents` (`src/runner/agent-status.ts`) asks the same commands, for Claude Code and Codex, so the settings page shows the same answers.
 
 ## Tested where
 - `test/runner/codex.test.ts` (CI): the permission mapping, the reduction of every Codex event kind, and the driver's start, resume, Stop and failure against a stand-in for the SDK.
@@ -48,5 +49,4 @@ Codex writes every thread, the runner's and a terminal's (`codex`, `codex exec`,
 - Not tested: Codex on macOS or on Windows (the SDK has binaries for both), Stop against a real Codex turn, and the sync against a thread from the interactive TUI written while shown (the format of its files was read from real ones, from codex 0.167.1).
 
 ## Follow-ups
-- The pages: an agent choice in the settings page and the pop-up.
 - Approvals from Codex to the person, if the SDK gains a way for the host to answer them (or through Codex's app-server protocol).

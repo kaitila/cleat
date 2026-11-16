@@ -111,6 +111,6 @@ export function errorText(status, body) {
 }
 
 /** The body of POST /api/sessions for a snip. */
-export function sessionBody(workspace, prompt, imagePath) {
-  return { workspace, prompt, imagePath };
+export function sessionBody(workspace, prompt, imagePath, agent = null) {
+  return agent === "claude" || agent === "codex" ? { workspace, prompt, imagePath, agent } : { workspace, prompt, imagePath };
 }
