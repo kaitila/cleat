@@ -34,6 +34,7 @@ Codex writes every thread, the runner's and a terminal's (`codex`, `codex exec`,
 - A thread that grows while the runner isn't running its turn streams, shows `running` with `terminalTurn`, and goes idle 5 seconds after the turn's end. A reply within two minutes of another process's write needs `force`, as for Claude Code.
 - Nothing writes under `~/.codex`: the runner's own turns go through the SDK, and a rename in the runner stays the runner's (the thread keeps its name in Codex; a new name given there replaces the runner's).
 - The format is Codex's own, not a documented interface: it was read from real files of codex 0.167.1 and 0.169.0. After a Codex upgrade, run `scripts/smoke-codex-sync.ts`.
+- "Continue in terminal" (the chat view and the dock, `resumeCommand` in `src/web/chat-format.js`) copies `cd <cwd> && codex resume <thread id>` for a Codex session, and `intuition resume` runs `codex resume <thread id>` in its folder (`claude --resume <id>` for the rest). A Codex session without a thread yet says "no Codex thread yet". The form is from `codex resume --help` (codex 0.169.0): `codex resume [SESSION_ID]`.
 
 ## doctor
 `intuition doctor` reports **Codex** (the version of the `codex` binary the SDK runs, the one `@openai/codex` installs for this platform) and **Codex login** (`codex login status`). Both are optional: they never make doctor fail.
@@ -47,5 +48,5 @@ Codex writes every thread, the runner's and a terminal's (`codex`, `codex exec`,
 - Not tested: Codex on macOS or on Windows (the SDK has binaries for both), Stop against a real Codex turn, and the sync against a thread from the interactive TUI written while shown (the format of its files was read from real ones, from codex 0.167.1).
 
 ## Follow-ups
-- The pages: an agent choice in the settings page and the pop-up, and a resume command for a Codex session (`codex resume <thread id>`, not `claude --resume`) in the chat view and `intuition resume`.
+- The pages: an agent choice in the settings page and the pop-up.
 - Approvals from Codex to the person, if the SDK gains a way for the host to answer them (or through Codex's app-server protocol).

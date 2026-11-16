@@ -1,6 +1,6 @@
 // The "Continue in terminal" control of the chat view's and the dock's session head: it copies
-// `cd <cwd> && claude --resume <claudeSessionId>` to the clipboard and says so for a moment.
-// Hidden while the session has no Claude Code session id. Shared by chat.js and dock.js.
+// `cd <cwd> && claude --resume <claudeSessionId>` (`codex resume <thread id>` for a Codex session)
+// to the clipboard and says so for a moment. Hidden while the agent has not given its id. Shared by chat.js and dock.js.
 import { resumeCommand } from "./chat-format.js";
 
 const LABEL = "Continue in terminal";

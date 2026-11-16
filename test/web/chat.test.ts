@@ -194,6 +194,11 @@ describe("the rest of the helpers", () => {
     expect(resumeCommand(undefined)).toBeNull();
     expect(resumeCommand({ claudeSessionId: "abc-123", cwd: "/home/a/w" })).toBe("cd /home/a/w && claude --resume abc-123");
     expect(resumeCommand({ claudeSessionId: "abc", cwd: "/home/a/my work" })).toBe("cd '/home/a/my work' && claude --resume abc");
+    expect(resumeCommand({ claudeSessionId: "abc", cwd: "/home/a/w", agent: "claude" })).toBe("cd /home/a/w && claude --resume abc");
+  });
+  test("resumeCommand: a Codex session resumes with codex resume <thread id>", () => {
+    expect(resumeCommand({ claudeSessionId: "thread-9", cwd: "/home/a/my work", agent: "codex" })).toBe("cd '/home/a/my work' && codex resume thread-9");
+    expect(resumeCommand({ claudeSessionId: null, cwd: "/home/a/w", agent: "codex" })).toBeNull();
     expect(shellWord("it's $here")).toBe(`'it'\\''s $here'`);
   });
   test("resultLine", () => {
