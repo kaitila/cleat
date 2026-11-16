@@ -800,7 +800,7 @@ try {
   // ---- long titles in the sidebar: ellipsized, the time kept, nothing scrolls sideways (T-0058) ----
   {
     const ldir = mkdtempSync(join(tmpdir(), "intuition-chat-long-"));
-    const longTitles = ["Tighten the hero copy on the pricing page", "Summarise the notes from Tuesday's planning call and send them round"];
+    const longTitles: [string, string] = ["Tighten the hero copy on the pricing page", "Summarise the notes from Tuesday's planning call and send them round"];
     {
       const store = new Store(join(ldir, "data"));
       const when = new Date(Date.now() - 2 * 3_600_000).toISOString();
