@@ -966,6 +966,92 @@ try {
     for (let i = pageErrors.length - 1; i >= 0; i--) if (/409 \(Conflict\)/.test(pageErrors[i]!)) pageErrors.splice(i, 1);
   }
 
+  // ================= the keyboard: typing at once, hotkeys, the session remembered (D0036) =================
+  {
+    const kb = await dock("dark");
+    const { page: p } = kb;
+    await p.goto(`${runner.url}/dock`);
+    await p.locator("#pill").waitFor();
+    // Calm first: a session of an earlier part that finishes now would peek, and the dock rightly opens on news.
+    await p.waitForFunction(() => document.getElementById("pill")?.dataset.tone !== "running" && document.getElementById("peek")!.hidden, undefined, { timeout: 30000 });
+    await kb.settle("idle");
+    const title = () => p.locator("#title").textContent() as Promise<string>;
+    await kb.hover();
+    await p.locator("#panel").waitFor();
+    await kb.settle("open");
+    await p.locator("#reply-text:not([disabled])").waitFor();
+    check(await p.evaluate(() => document.activeElement?.id === "reply-text"), "opening puts the keyboard in the reply box");
+    await p.keyboard.type("typed at once");
+    check((await p.locator("#reply-text").inputValue()) === "typed at once", "and what is typed lands there, without a click");
+    await p.locator("#reply-text").fill("");
+    // A box the dock focused itself does not hold the dock open: leaving still closes it.
+    await kb.leave();
+    await p.locator("#pill").waitFor({ timeout: 3000 });
+    await kb.settle("idle");
+    check(true, "a box focused by the dock, with nothing typed, does not keep it open when the pointer leaves");
+
+    await kb.hover();
+    await p.locator("#panel").waitFor();
+    await kb.settle("open");
+    const rowsTitles = await p.locator(".sessions .row-title").allTextContents();
+    const first = await title();
+    await p.keyboard.press("Alt+ArrowDown");
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent !== t, first);
+    const second = await title();
+    check(rowsTitles.indexOf(second) === rowsTitles.indexOf(first) + 1, `Alt+Down shows the next session in the list ('${first}' to '${second}')`);
+    check(await p.evaluate(() => document.activeElement?.id === "reply-text" || (document.getElementById("reply-text") as HTMLTextAreaElement).disabled), "and the keyboard stays in the reply box");
+    await p.keyboard.press("Alt+ArrowUp");
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t, first);
+    check(true, "Alt+Up goes back up");
+    await p.keyboard.press("Alt+ArrowDown");
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t, second);
+    const names = await p.locator("#workspace option").evaluateAll((os: Element[]) => os.map((o) => (o as HTMLOptionElement).value));
+    if (names.length > 1) {
+      await p.keyboard.press("Alt+1");
+      await p.waitForFunction((v: string) => (document.getElementById("workspace") as HTMLSelectElement).value === v, names[1]);
+      check(true, `Alt+1 picks the first workspace, '${names[1]}'`);
+      await p.keyboard.press("Alt+0");
+      await p.waitForFunction(() => (document.getElementById("workspace") as HTMLSelectElement).value === "");
+      check(true, "Alt+0 shows all workspaces again");
+    }
+    check((await p.locator("#reply-text").inputValue()) === "", "no hotkey typed a character into the box");
+    // The one shown when it closes: after a switch to another workspace, one of that workspace's.
+    const leftOn = await title();
+    await kb.leave();
+    await p.locator("#pill").waitFor({ timeout: 3000 });
+    await kb.settle("idle");
+    await kb.hover();
+    await p.locator("#panel").waitFor();
+    await kb.settle("open");
+    check((await title()) === leftOn, `opened again, the dock shows the session it was left on ('${leftOn}')`);
+    // A draft holds the dock open while it has the keyboard; once another window has it, the dock
+    // closes as the pointer is away (nothing the person presses reaches it any more), keeping the draft.
+    await p.keyboard.type("a draft");
+    await kb.leave();
+    await p.waitForTimeout(800);
+    check((await p.locator("#island").getAttribute("data-state")) === "open", "with a draft and the keyboard, the dock stays open when the pointer leaves");
+    // Playwright keeps every page "focused" (its focus emulation): the window losing the keyboard is played here.
+    await p.evaluate(() => {
+      document.hasFocus = () => false;
+      window.dispatchEvent(new Event("blur"));
+    });
+    await p.locator("#pill").waitFor({ timeout: 3000 });
+    await kb.settle("idle");
+    check(true, "once another window has the keyboard, the dock with a draft closes");
+    await p.evaluate(() => {
+      // @ts-expect-error: back to the document's own hasFocus.
+      delete document.hasFocus;
+    });
+    await kb.hover();
+    await p.locator("#panel").waitFor();
+    await kb.settle("open");
+    check((await p.locator("#reply-text").inputValue()) === "a draft", "and the draft is there when it opens again");
+    await p.locator("#reply-text").fill("");
+    await kb.leave();
+    await p.locator("#pill").waitFor({ timeout: 3000 });
+    await kb.context.close();
+  }
+
   // ================= out of a Mac's notch (D0035) =================
   for (const scheme of ["dark", "light"] as const) {
     const notch = { width: 179, height: 32 };

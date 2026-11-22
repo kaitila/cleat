@@ -32,6 +32,11 @@ import {
   peekStatus,
   pillOf,
   preselect,
+  SESSION_KEY,
+  dockKey,
+  savedSession,
+  saveSession,
+  stepSession,
   recentEvents,
   savedWorkspace,
   saveWorkspace,
@@ -328,17 +333,68 @@ describe("the session the dock opens on", () => {
     expect(preselect(sessions, "old", "peeked")).toBe("old");
   });
 
+  test("else the one that peeked since it was last open, else the one it was last left on while it is still listed", () => {
+    expect(preselect(sessions, null, null, "old")).toBe("old");
+    // News wins: the one peeking now, or the one that peeked since.
+    expect(preselect(sessions, "peeked", null, "old")).toBe("peeked");
+    expect(preselect(sessions, null, "peeked", "old")).toBe("peeked");
+    // Gone (archived, or another workspace is shown): the usual pick.
+    expect(preselect(sessions, null, null, "gone")).toBe("waits");
+  });
+
+  test("it is remembered in the dock's own storage, and a storage that fails remembers nothing", () => {
+    const map = new Map<string, string>();
+    const storage = { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => void map.set(k, v), removeItem: (k: string) => void map.delete(k) };
+    expect(savedSession(storage)).toBeNull();
+    saveSession(storage, "old");
+    expect(map.get(SESSION_KEY)).toBe("old");
+    expect(savedSession(storage)).toBe("old");
+    saveSession(storage, null);
+    expect(savedSession(storage)).toBeNull();
+    const broken = { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); }, removeItem: () => { throw new Error("blocked"); } };
+    expect(savedSession(broken)).toBeNull();
+    expect(() => saveSession(broken, "old")).not.toThrow();
+    expect(savedSession(null)).toBeNull();
+  });
+
   test("else the newest that waits for approval", () => {
-    expect(preselect(sessions, null, "peeked")).toBe("waits");
+    expect(preselect(sessions, null, null)).toBe("waits");
     expect(preselect([...sessions, session("waits2", "waiting_approval", 5)], null, null)).toBe("waits2");
   });
 
-  test("else the one that peeked last, else the newest", () => {
+  test("the one that peeked last wins over one that waits; else the newest", () => {
+    expect(preselect(sessions, null, "peeked")).toBe("peeked");
     const calm = sessions.filter((s) => s.id !== "waits");
     expect(preselect(calm, null, "peeked")).toBe("peeked");
     expect(preselect(calm, null, null)).toBe("new");
     expect(preselect(calm, "gone", "gone too")).toBe("new");
     expect(preselect([], null, null)).toBeNull();
+  });
+});
+
+describe("the open dock's hotkeys", () => {
+  test("Alt+Up and Alt+Down step through the sessions, Alt+1..9 pick a workspace and Alt+0 all of them", () => {
+    expect(dockKey({ key: "ArrowUp", altKey: true })).toEqual({ step: -1 });
+    expect(dockKey({ key: "ArrowDown", altKey: true })).toEqual({ step: 1 });
+    expect(dockKey({ key: "1", code: "Digit1", altKey: true })).toEqual({ workspace: 1 });
+    expect(dockKey({ key: "0", code: "Digit0", altKey: true })).toEqual({ workspace: 0 });
+    // A Mac's Alt turns 1 into ¡: the physical key decides.
+    expect(dockKey({ key: "¡", code: "Digit1", altKey: true })).toEqual({ workspace: 1 });
+    expect(dockKey({ key: "3", code: "Numpad3", altKey: true })).toEqual({ workspace: 3 });
+    // Anything else, or Alt with another modifier, is the box's.
+    for (const e of [{ key: "ArrowUp" }, { key: "1", code: "Digit1" }, { key: "ArrowUp", altKey: true, shiftKey: true }, { key: "ArrowDown", altKey: true, metaKey: true }, { key: "1", code: "Digit1", altKey: true, ctrlKey: true }, { key: "a", code: "KeyA", altKey: true }, { key: "ArrowUp", altKey: true, isComposing: true }]) expect(dockKey(e)).toBeNull();
+    expect(dockKey(null)).toBeNull();
+  });
+
+  test("a step stops at either end of the list; from outside it, down starts at the top and up at the bottom", () => {
+    const ids = ["a", "b", "c"];
+    expect(stepSession(ids, "b", 1)).toBe("c");
+    expect(stepSession(ids, "b", -1)).toBe("a");
+    expect(stepSession(ids, "c", 1)).toBe("c");
+    expect(stepSession(ids, "a", -1)).toBe("a");
+    expect(stepSession(ids, null, 1)).toBe("a");
+    expect(stepSession(ids, "gone", -1)).toBe("c");
+    expect(stepSession([], "a", 1)).toBeNull();
   });
 });
 
