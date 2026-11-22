@@ -32,6 +32,7 @@ import {
   PEEK_MS,
   RECENT_EVENTS,
   asPeek,
+  dockSizes,
   dockWorkspaces,
   enqueue,
   inWorkspace,
@@ -39,6 +40,7 @@ import {
   mayClose,
   nextPeek,
   onIsland,
+  parseNotch,
   peekLabel,
   peekOver,
   peekStatus,
@@ -48,6 +50,11 @@ import {
   savedWorkspace,
   saveWorkspace,
 } from "./dock-state.js";
+
+/** A Mac's notch, from the shell (`?notch=WxH`): the island grows out of it. Null without one. */
+const NOTCH = parseNotch(location.search);
+/** The most the island covers in each state, out of the notch or not (docs/protocol.md, "Dock"). */
+const SIZES = dockSizes(NOTCH);
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -169,7 +176,7 @@ function show(el, on) {
  * no box changes size, here or in the shell.
  */
 function resize() {
-  const size = islandSize(state, { pill: els.pill.offsetWidth, panel: els.panel.offsetHeight, quiet: els.pill.dataset.tone === "none" });
+  const size = islandSize(state, { pill: els.pill.offsetWidth, panel: els.panel.offsetHeight, quiet: els.pill.dataset.tone === "none" }, NOTCH);
   if (size.width === drawn.width && size.height === drawn.height) return;
   drawn = size;
   // Both the island and its surface: the size is not inherited, so each springs to it (dock.css).
@@ -233,7 +240,7 @@ function renderPill(quiet = false) {
   els.pillFailed.hidden = !pill.failed || pill.tone === "failed";
   if (news) nudge(els.pillDot);
   // With nothing going on the sliver is shorter still.
-  els.pill.style.height = `${islandSize("idle", { quiet: pill.tone === "none" }).height}px`;
+  els.pill.style.height = `${islandSize("idle", { quiet: pill.tone === "none" }, NOTCH).height}px`;
   resize();
 }
 
@@ -920,7 +927,7 @@ let closeTimer = 0;
  */
 function over(x, y) {
   const box = els.island.getBoundingClientRect();
-  return onIsland(state, drawn, x - (box.left + box.width / 2), y - box.top);
+  return onIsland(state, drawn, x - (box.left + box.width / 2), y - box.top, NOTCH);
 }
 
 /** The pointer is on the island, or not. Opening waits a moment: a pointer that brushes past opens nothing. */
@@ -1142,11 +1149,19 @@ setInterval(() => {
 // content has its own size and never changes with the island's shape.
 els.island.style.width = `${DOCK_WINDOW.width}px`;
 els.island.style.height = `${DOCK_WINDOW.height}px`;
-els.pill.style.maxWidth = `${DOCK_SIZES.idle.width}px`;
-els.peek.style.width = `${DOCK_SIZES.peek.width}px`;
+// Out of a notch (dock.css, [data-notch]): the pill spans the notch and its wings, and the peek's
+// line and the panel's content start below the notch's band.
+if (NOTCH) {
+  els.island.dataset.notch = "";
+  els.island.style.setProperty("--notch-w", `${NOTCH.width}px`);
+  els.island.style.setProperty("--notch-h", `${NOTCH.height}px`);
+  els.island.style.setProperty("--wing", `${(SIZES.idle.width - NOTCH.width) / 2}px`);
+  els.pill.style.width = `${SIZES.idle.width}px`;
+} else els.pill.style.maxWidth = `${SIZES.idle.width}px`;
+els.peek.style.width = `${SIZES.peek.width}px`;
 els.peek.style.height = `${DOCK_SIZES.peek.height}px`;
-els.panel.style.width = `${DOCK_SIZES.open.width}px`;
-els.panel.style.maxHeight = `${DOCK_SIZES.open.height}px`;
+els.panel.style.width = `${SIZES.open.width}px`;
+els.panel.style.maxHeight = `${SIZES.open.height}px`;
 renderPill();
 go("idle");
 connect();

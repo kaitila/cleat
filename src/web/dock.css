@@ -113,6 +113,18 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 /* The dock's own chrome is not text to select: a drag that starts on it selects nothing. The stream is. */
 .pill, .peek, .panel-head, .sessions, .session-head { user-select: none; }
 
+/* Out of a Mac's notch (D0035; dock.js sets data-notch, --notch-w, --notch-h and --wing): the island
+   is the notch's own black, opaque and without a rim, so the notch and the island read as one shape.
+   With nothing going on it is the notch itself, fully there (black on black shows nothing); with
+   something going on a wing on each side holds the dot (left) and the words (right), never under
+   the notch. Peek's line and the panel start below the notch's band, which the hardware covers. */
+.island[data-notch], .island[data-notch] > .surface { background: var(--notch); }
+.island[data-notch][data-state="idle"][data-tone="none"] { opacity: 1; }
+.island[data-notch] .pill { justify-content: flex-start; padding-inline: var(--space-3); }
+.island[data-notch] .pill-text { order: 2; margin-inline-start: auto; max-width: calc(var(--wing) - var(--space-3)); }
+.island[data-notch] .peek.layer { top: var(--notch-h); }
+.island[data-notch] .panel { padding-top: var(--notch-h); }
+
 /* Idle: a sliver. A dot alone when nothing is going on; a few quiet words when something runs;
    colour only when a session needs the person or failed. */
 .pill { display: flex; align-items: center; justify-content: center; gap: var(--space-2); padding: 0 var(--space-3); white-space: nowrap; line-height: var(--leading-tight); }

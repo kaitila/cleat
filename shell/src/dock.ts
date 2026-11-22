@@ -40,22 +40,54 @@ export const DOCK_STALE_RUNNER = {
   body: "The dock needs a newer runner: run intuition up in WSL. The dock appears by itself once it is restarted.",
 } as const;
 
+/**
+ * A Mac's notch, in points: its size, and its left edge from the display's left. Measured by the
+ * shell (os.ts, notchOf) and handed to the page as /dock?notch=WxH (docs/protocol.md, "Dock").
+ */
+export interface Notch { x: number; width: number; height: number }
+
+/**
+ * Beside the notch, a wing on each side shows the idle pill's dot (left) and words (right): the
+ * notch itself hides whatever is drawn under it. The same number as the page's (dock-state.js).
+ */
+export const NOTCH_WING = 76;
+
+/**
+ * The most the island covers in each state, with a notch or without one. With one, the island
+ * hangs from the notch: idle is the notch and its wings at the notch's height, peek is the peek's
+ * line below the notch's band, and open is as before. The same as the page's dockSizes.
+ */
+export function dockSizes(notch: Pick<Notch, "width" | "height"> | null): Record<DockState, { width: number; height: number }> {
+  if (!notch) return DOCK_SIZES;
+  const idle = { width: notch.width + 2 * NOTCH_WING, height: notch.height };
+  return {
+    idle,
+    peek: { width: Math.max(DOCK_SIZES.peek.width, idle.width), height: notch.height + DOCK_SIZES.peek.height },
+    open: DOCK_SIZES.open,
+  };
+}
+
 export function isDockState(value: unknown): value is DockState {
   return typeof value === "string" && (DOCK_STATES as readonly string[]).includes(value);
 }
 
 /**
- * Where the dock's window is, in every state: centred on the display, touching its top edge.
- * `display` is the primary display's bounds, not its work area: the dock sits on the very edge.
+ * Where the dock's window is, in every state: centred on the area, touching its top edge. `area` is
+ * what os.ts dockArea gives: the primary display's bounds (the very edge), a Mac's area below the
+ * menu bar, or, with a notch, the display's bounds centred on the notch.
  */
-export function dockBounds(display: Area): Area {
+export function dockBounds(area: Area): Area {
   const { width, height } = DOCK_WINDOW;
-  return { x: Math.round(display.x + (display.width - width) / 2), y: display.y, width, height };
+  return { x: Math.round(area.x + (area.width - width) / 2), y: area.y, width, height };
 }
 
-/** The island's rectangle in a state, inside the window: top centre, the state's size. */
-export function islandRect(state: DockState): Area {
-  const { width, height } = DOCK_SIZES[state];
+/**
+ * The island's rectangle in a state, inside the window: top centre, the state's size. It is where
+ * the shell takes the mouse. With a notch, idle's is the notch alone: its wings are drawn over the
+ * menu bar and let every click through to it, so the notch is the handle.
+ */
+export function islandRect(state: DockState, notch: Notch | null = null): Area {
+  const { width, height } = state === "idle" && notch ? notch : dockSizes(notch)[state];
   return { x: (DOCK_WINDOW.width - width) / 2, y: 0, width, height };
 }
 
@@ -63,8 +95,8 @@ export function islandRect(state: DockState): Area {
 export interface Spot { x: number; y: number }
 
 /** How far the cursor is from the island, in pixels: 0 on it. `win` is the window's bounds on the screen. */
-export function islandDistance(win: Area, state: DockState, cursor: Spot): number {
-  const r = islandRect(state);
+export function islandDistance(win: Area, state: DockState, cursor: Spot, notch: Notch | null = null): number {
+  const r = islandRect(state, notch);
   const left = win.x + r.x;
   const top = win.y + r.y;
   // The right and bottom edges are the first pixels outside.
@@ -78,8 +110,8 @@ export function islandDistance(win: Area, state: DockState, cursor: Spot): numbe
  * last reported. `state` is null until the page has reported one (not loaded yet, failed, crashed,
  * reloading): then the window lets every click through, so a broken page can block nothing.
  */
-export function takesMouse(win: Area, state: DockState | null, cursor: Spot): boolean {
-  return state !== null && islandDistance(win, state, cursor) === 0;
+export function takesMouse(win: Area, state: DockState | null, cursor: Spot, notch: Notch | null = null): boolean {
+  return state !== null && islandDistance(win, state, cursor, notch) === 0;
 }
 
 /** While the cursor is within this many pixels of the island it is watched closely. */
@@ -89,8 +121,8 @@ export const DOCK_WATCH_NEAR_MS = 20;
 export const DOCK_WATCH_FAR_MS = 120;
 
 /** How long until the cursor is looked at again. */
-export function watchMs(win: Area, state: DockState | null, cursor: Spot): number {
-  return state !== null && islandDistance(win, state, cursor) <= DOCK_NEAR ? DOCK_WATCH_NEAR_MS : DOCK_WATCH_FAR_MS;
+export function watchMs(win: Area, state: DockState | null, cursor: Spot, notch: Notch | null = null): number {
+  return state !== null && islandDistance(win, state, cursor, notch) <= DOCK_NEAR ? DOCK_WATCH_NEAR_MS : DOCK_WATCH_FAR_MS;
 }
 
 /** Only in "open" can the window take the keyboard. */

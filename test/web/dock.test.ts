@@ -4,7 +4,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOCK_SIZES as SHELL_SIZES, DOCK_STATES, DOCK_WINDOW as SHELL_WINDOW, islandRect as shellIslandRect } from "../../shell/src/dock";
+import { DOCK_SIZES as SHELL_SIZES, DOCK_STATES, DOCK_WINDOW as SHELL_WINDOW, dockSizes as shellDockSizes, islandRect as shellIslandRect, NOTCH_WING as SHELL_WING } from "../../shell/src/dock";
+import { dockUrl } from "../../shell/src/origin";
 import {
   CLOSE_MS,
   DOCK_SIZES,
@@ -15,6 +16,7 @@ import {
   QUIET_HEIGHT,
   RECENT_EVENTS,
   asPeek,
+  dockSizes,
   dockWorkspaces,
   enqueue,
   inWorkspace,
@@ -22,7 +24,9 @@ import {
   islandSize,
   mayClose,
   nextPeek,
+  NOTCH_WING,
   onIsland,
+  parseNotch,
   peekLabel,
   peekOver,
   peekStatus,
@@ -97,6 +101,34 @@ describe("the contract with the shell", () => {
       expect(DOCK_SIZES[state].height).toBeLessThanOrEqual(DOCK_WINDOW.height);
       expect(islandRect(state)).toEqual(shellIslandRect(state));
     }
+  });
+
+  test("out of a notch, the page's sizes and rectangles are the shell's, and it reads the notch from the address the shell gives", () => {
+    const notch = { width: 179, height: 38 };
+    expect(NOTCH_WING).toBe(SHELL_WING);
+    expect(parseNotch(new URL(dockUrl("http://127.0.0.1:4777", notch)).search)).toEqual(notch);
+    expect(parseNotch("")).toBeNull();
+    for (const bad of ["?notch=179", "?notch=179x", "?notch=x38", "?notch=9x38", "?notch=179x8", "?notch=179x99", "?notch=1790x38", "?notch=179.5x38", "?notch=<b>x38"]) expect(parseNotch(bad)).toBeNull();
+    expect(dockSizes(null)).toEqual(DOCK_SIZES);
+    expect(dockSizes(notch)).toEqual(shellDockSizes(notch));
+    for (const state of DOCK_STATES) {
+      expect(islandRect(state, notch)).toEqual(shellIslandRect(state, { ...notch, x: 666.5 }));
+      expect(dockSizes(notch)[state].width).toBeLessThanOrEqual(DOCK_WINDOW.width);
+      expect(dockSizes(notch)[state].height).toBeLessThanOrEqual(DOCK_WINDOW.height);
+    }
+  });
+
+  test("out of a notch: idle is the notch with nothing going on and the notch with its wings otherwise; peek below the notch's band; the notch is the idle handle", () => {
+    const notch = { width: 179, height: 38 };
+    expect(islandSize("idle", { pill: 30, quiet: true }, notch)).toEqual(notch);
+    expect(islandSize("idle", { pill: 30 }, notch)).toEqual({ width: 179 + 2 * NOTCH_WING, height: 38 });
+    expect(islandSize("peek", {}, notch)).toEqual({ width: 380, height: 78 });
+    expect(islandSize("open", { panel: 0 }, notch)).toEqual({ width: 460, height: 78 });
+    const wings = { width: 179 + 2 * NOTCH_WING, height: 38 };
+    expect(onIsland("idle", wings, 0, 20, notch)).toBe(true);
+    // On a wing: over the menu bar, where the shell lets the mouse through, so not the island.
+    expect(onIsland("idle", wings, 89.5 + NOTCH_WING / 2, 20, notch)).toBe(false);
+    expect(onIsland("peek", { width: 380, height: 78 }, 0, 70, notch)).toBe(true);
   });
 
   test("the island is drawn no larger than its state's rectangle: idle as wide as its words, open as tall as its content", () => {
