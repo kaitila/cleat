@@ -771,6 +771,16 @@ let dockWatch: ReturnType<typeof setTimeout> | null = null;
 
 /** The primary display's notch, as last measured (a Mac's built-in display); null without one. */
 let dockNotch: Notch | null = null;
+/** The first measurement, which every load of the dock waits for: its place and its page's address depend on it. */
+let notchMeasured: Promise<void> | null = null;
+
+/** Measures the notch once, the first time it is asked; later calls wait for that one. A change of display measures again (remeasureNotch). */
+function firstNotch(): Promise<void> {
+  notchMeasured ??= measureNotch().then((notch) => {
+    dockNotch = notch;
+  });
+  return notchMeasured;
+}
 
 /** Measures the primary display's notch through AppKit (os.ts NOTCH_PROBE). Null off a Mac, without a notch, or when osascript fails. */
 function measureNotch(): Promise<Notch | null> {
@@ -975,6 +985,8 @@ function dockCrashed(): boolean {
 }
 
 async function loadDock(): Promise<void> {
+  // Whoever asks first (the start, the runner coming up, the settings), the notch is known before the window is placed and the page loaded.
+  await firstNotch();
   if (dockCrashed()) closeDock();
   const win = (dock ??= createDock());
   try {
@@ -1043,6 +1055,7 @@ function dockEvents(): void {
 /** Measures the notch again and puts the dock in its place; a notch that came, went or changed loads the page again, for its shape. */
 async function remeasureNotch(): Promise<void> {
   placeDock();
+  await firstNotch();
   const before = JSON.stringify(dockNotch);
   dockNotch = await measureNotch();
   if (JSON.stringify(dockNotch) === before) return;
@@ -1070,11 +1083,7 @@ async function checkDock(): Promise<void> {
 /** Checks every few seconds. This never starts the runner: the shell's start, the hotkey and the tray do. */
 function watchDock(): void {
   const tick = () => void checkDock().catch((e) => console.error("checking the dock failed", e)).finally(() => setTimeout(tick, DOCK_CHECK_MS));
-  // The notch first: the window's place and the page's address depend on it.
-  void measureNotch().then((notch) => {
-    dockNotch = notch;
-    tick();
-  });
+  tick();
 }
 
 // --- Settings ---

@@ -659,6 +659,10 @@ describe("the dock", () => {
     // Over the menu bar from a notch: a frameless window goes there only with enableLargerThanScreen, at the status level.
     expect(create).toContain('enableLargerThanScreen: OS === "macos"');
     expect(dockCode).toContain('win.setAlwaysOnTop(true, dockNotch ? "status" : "floating")');
+    // Every load waits for the first measurement, whoever asks first: the start, the runner coming up or the settings.
+    const load = main.slice(main.indexOf("async function loadDock()"), main.indexOf("function showDock()"));
+    expect(load.indexOf("await firstNotch();")).toBeGreaterThan(0);
+    expect(load.indexOf("await firstNotch();")).toBeLessThan(load.indexOf("createDock()"));
   });
 
   test("main.ts: one listener on the dock's channel, and it takes a state only through the validation", () => {
