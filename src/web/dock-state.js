@@ -177,29 +177,78 @@ export function peekStatus(kind) {
 
 /**
  * Whether the open dock may close now. It stays open while the pointer is on it or held down
- * (a selection dragged out of it), and while the reply box has the focus or text in it.
+ * (a selection dragged out of it), and while the reply box has the focus or text in it. A focus
+ * the dock gave the box itself, on opening, is not the person's, and text counts only while the
+ * dock has the keyboard: dock.js does not count either.
  */
 export function mayClose({ pointerInside, pointerDown, replyFocused, replyText }) {
   return !pointerInside && !pointerDown && !replyFocused && !(replyText ?? "").trim();
 }
 
 /**
- * The session the dock opens on: the one peeking now; else the newest that waits for approval;
- * else the one that peeked last, since the dock was last open; else the newest.
+ * The session the dock opens on: the one peeking now; else the one that peeked last, since the dock
+ * was last open (news the person may be opening it for); else the one it was last left on
+ * (`remembered`), while it is listed; else the newest that waits for approval; else the newest.
  */
-export function preselect(sessions, peeking, lastPeeked) {
+export function preselect(sessions, peeking, lastPeeked, remembered = null) {
   const ordered = byActivity(sessions);
   const has = (id) => typeof id === "string" && ordered.some((s) => s.id === id);
   if (has(peeking)) return peeking;
+  if (has(lastPeeked)) return lastPeeked;
+  if (has(remembered)) return remembered;
   const waiting = ordered.find((s) => s.status === "waiting_approval");
   if (waiting) return waiting.id;
-  if (has(lastPeeked)) return lastPeeked;
   return ordered[0]?.id ?? null;
 }
 
 /** The newest events of a session: all the open dock draws of it. */
 export function recentEvents(events, max = RECENT_EVENTS) {
   return events.slice(Math.max(0, events.length - max));
+}
+
+/** Where the open dock keeps the session it was last left on (localStorage), to open on it again. */
+export const SESSION_KEY = "intuition.dock.session";
+
+/** The session the dock was last left on, from `storage` (localStorage); null when there is none or it can't be read. */
+export function savedSession(storage) {
+  try {
+    const value = storage?.getItem(SESSION_KEY);
+    return typeof value === "string" && value ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remembers the session shown, for the next opening. Nothing to remember (null) forgets it. */
+export function saveSession(storage, id) {
+  try {
+    if (id) storage?.setItem(SESSION_KEY, id);
+    else storage?.removeItem(SESSION_KEY);
+  } catch {
+    // Not remembered: the dock opens on its usual pick.
+  }
+}
+
+/**
+ * What a key does in the open dock, or null: Alt+Up and Alt+Down step to the session above or below
+ * in the list ({ step: -1 | 1 }); Alt+1..9 picks that workspace in the switch and Alt+0 all of them
+ * ({ workspace: 0..9 }), as Alt+digit picks a workspace in the pop-up. The physical key is read
+ * first: with Alt held some layouts report another character in `key`.
+ */
+export function dockKey(event) {
+  if (!event?.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) return null;
+  if (event.key === "ArrowUp") return { step: -1 };
+  if (event.key === "ArrowDown") return { step: 1 };
+  const digit = /^(?:Digit|Numpad)([0-9])$/.exec(event.code ?? "")?.[1] ?? (/^[0-9]$/.test(event.key ?? "") ? event.key : null);
+  return digit === null ? null : { workspace: Number(digit) };
+}
+
+/** The session `step` rows from `current` in the list `ids`, stopping at either end; from outside the list, the first (down) or the last (up). */
+export function stepSession(ids, current, step) {
+  if (ids.length === 0) return null;
+  const at = ids.indexOf(current);
+  if (at === -1) return step > 0 ? ids[0] : ids[ids.length - 1];
+  return ids[Math.min(ids.length - 1, Math.max(0, at + step))];
 }
 
 /** Where the open dock keeps the workspace it shows (localStorage): "" or absent for all of them. */

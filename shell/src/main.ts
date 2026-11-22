@@ -900,6 +900,10 @@ function setDockState(state: DockState): void {
     // On Windows, making a window focusable puts it back in the taskbar.
     win.setSkipTaskbar(true);
   }
+  // Open, the keyboard is the dock's, so the person types straight into its reply box (the page puts
+  // it there). On a Mac the window is a non-activating panel: the app the person was in stays the
+  // active one and has the keyboard back when the dock closes.
+  if (focusable && !win.isFocused()) win.focus();
   fitOpaqueDock();
   // At once, not at the next look: the island just changed under the cursor.
   watchDockMouseLoop();
@@ -938,8 +942,9 @@ function createDock(): BrowserWindow {
     // On a Mac a frameless window goes where it is put, over the menu bar too (from a notch), only with this.
     enableLargerThanScreen: OS === "macos",
     skipTaskbar: true,
-    // A tool window: not in the taskbar and not in Alt+Tab, also while it is focusable.
-    type: "toolbar",
+    // A tool window: not in the taskbar and not in Alt+Tab, also while it is focusable. On a Mac a
+    // non-activating panel: it takes the keyboard when open without making the shell the active app.
+    type: OS === "macos" ? "panel" : "toolbar",
     focusable: false,
     title: "intuition dock",
     webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) },

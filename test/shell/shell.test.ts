@@ -640,15 +640,17 @@ describe("the dock", () => {
     expect(DOCK_MISSES).toBe(2);
   });
 
-  test("main.ts: the window is frameless, clear, on top, out of the taskbar, never activated, and placed from the display's bounds", () => {
+  test("main.ts: the window is frameless, clear, on top, out of the taskbar, shown without activating, focused only when open, and placed from the display's bounds", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     const create = main.slice(main.indexOf("function createDock()"), main.indexOf("async function loadDock()"));
-    for (const option of ["frame: false", "...materialOptions(DOCK_MATERIAL, DOCK_TRANSPARENT, OPAQUE_BACKGROUND)", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
+    for (const option of ["frame: false", "...materialOptions(DOCK_MATERIAL, DOCK_TRANSPARENT, OPAQUE_BACKGROUND)", "hasShadow: false", "alwaysOnTop: true", "skipTaskbar: true", 'type: OS === "macos" ? "panel" : "toolbar"', "focusable: false", "show: false", "movable: false"]) expect(create).toContain(option);
     expect(create).toContain('win.on("will-resize", (event) => event.preventDefault());');
     const dockCode = main.slice(main.indexOf("// --- Dock ---"), main.indexOf("// --- Self-test ---"));
-    // Shown without activating, and never focused by the shell.
+    // Shown without activating. Focused once, in setDockState, and only when the state lets it take the keyboard ("open").
     expect(dockCode).toContain("win.showInactive();");
-    expect(dockCode).not.toMatch(/\.show\(\)|\.focus\(\)/);
+    expect(dockCode).not.toMatch(/\.show\(\)/);
+    expect(dockCode.match(/\.focus\(\)/g)).toHaveLength(1);
+    expect(dockCode).toContain("if (focusable && !win.isFocused()) win.focus();");
     // From the primary display, through dockArea: its bounds on Windows and Linux, from the work area's top on a Mac, or from its notch.
     expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch));");
     // Once for the place, once for the bounds the notch's measurement is checked against.

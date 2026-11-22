@@ -27,7 +27,12 @@ declare module "*/web/dock-state.js" {
   export function peekLabel(kind: string): string;
   export function peekStatus(kind: string): string;
   export function mayClose(holds: { pointerInside: boolean; pointerDown: boolean; replyFocused: boolean; replyText?: string }): boolean;
-  export function preselect(sessions: SessionLike[], peeking: string | null, lastPeeked: string | null): string | null;
+  export function preselect(sessions: SessionLike[], peeking: string | null, lastPeeked: string | null, remembered?: string | null): string | null;
+  export const SESSION_KEY: string;
+  export function savedSession(storage: StorageLike | null | undefined): string | null;
+  export function saveSession(storage: StorageLike | null | undefined, id: string | null): void;
+  export function dockKey(event: { key?: string; code?: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; isComposing?: boolean } | null | undefined): { step: -1 | 1 } | { workspace: number } | null;
+  export function stepSession(ids: string[], current: string | null, step: number): string | null;
   export function recentEvents<T>(events: T[], max?: number): T[];
   interface StorageLike { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }
   export const WORKSPACE_KEY: string;

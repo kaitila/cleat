@@ -32,6 +32,7 @@ import {
   PEEK_MS,
   RECENT_EVENTS,
   asPeek,
+  dockKey,
   dockSizes,
   dockWorkspaces,
   enqueue,
@@ -47,8 +48,11 @@ import {
   pillOf,
   preselect,
   recentEvents,
+  savedSession,
   savedWorkspace,
+  saveSession,
   saveWorkspace,
+  stepSession,
 } from "./dock-state.js";
 
 /** A Mac's notch, from the shell (`?notch=WxH`): the island grows out of it. Null without one. */
@@ -317,6 +321,13 @@ let replyError = "";
 let openElsewhere = null;
 /** True when the box was switched off while it had the focus: the focus goes back to it when the turn ends. */
 let wantFocus = false;
+/**
+ * True while the box has the focus only because the dock gave it (on opening, or after a hotkey):
+ * the person has not clicked or typed in it, so it does not hold the dock open (holds). `pendingAuto`
+ * is the same for a focus that waits for the box to be switched on again (wantFocus).
+ */
+let autoFocused = false;
+let pendingAuto = false;
 /** True while the person is at the bottom of the stream: new events keep it there. */
 let stick = true;
 let followQueued = false;
@@ -796,7 +807,10 @@ function renderReply() {
   const replying = replyState(session);
   const enabled = replying.enabled && !sending;
   // Switched off under the person's caret (their reply was sent): the focus comes back with the box.
-  if (!enabled && document.activeElement === els.text) wantFocus = true;
+  if (!enabled && document.activeElement === els.text) {
+    wantFocus = true;
+    pendingAuto = autoFocused;
+  }
   els.text.disabled = !enabled;
   // What the box is for now is its placeholder; the line under it is only for what went wrong.
   els.text.placeholder = replying.hint || "Reply";
@@ -815,7 +829,11 @@ function renderReply() {
   if (enabled && wantFocus) {
     wantFocus = false;
     const active = document.activeElement;
-    if (state === "open" && (active === null || active === document.body || active === els.text)) els.text.focus();
+    if (state === "open" && (active === null || active === document.body || active === els.text)) {
+      els.text.focus({ preventScroll: true });
+      autoFocused = pendingAuto;
+    }
+    pendingAuto = false;
   }
   // The box may have lost the focus by being switched off: nothing else says so.
   scheduleClose();
@@ -873,7 +891,30 @@ els.text.addEventListener("input", () => {
   }
   scheduleClose();
 });
-els.text.addEventListener("blur", () => scheduleClose());
+els.text.addEventListener("blur", () => {
+  autoFocused = false;
+  scheduleClose();
+});
+// The person's own click in the box: from now on its focus holds the dock open.
+els.text.addEventListener("pointerdown", () => {
+  autoFocused = false;
+});
+
+/**
+ * Puts the keyboard in the reply box, so the person can type at once. `auto`: the dock did it, not
+ * the person, so it does not hold the dock open. A box switched off (a turn running) gets it when it
+ * comes back on.
+ */
+function focusReply(auto) {
+  if (state !== "open") return;
+  if (els.text.disabled) {
+    wantFocus = true;
+    pendingAuto = auto;
+    return;
+  }
+  els.text.focus({ preventScroll: true });
+  autoFocused = auto;
+}
 els.reply.addEventListener("submit", (e) => e.preventDefault());
 
 /** Shows a session in the open dock. The one already shown only fetches what it missed. */
@@ -900,6 +941,8 @@ function select(id) {
   replyError = "";
   openElsewhere = null;
   wantFocus = false;
+  // Remembered for the next opening (preselect).
+  saveSession(storage(), id);
   els.text.value = (id && typed.get(id)) || "";
   renderList();
   // The list shows about four rows: the one shown is one of them.
@@ -960,8 +1003,11 @@ function holds() {
     pointerInside: inside,
     pointerDown: down,
     // A row's menu or its title being edited holds it open as a focused reply box does.
-    replyFocused: (document.hasFocus() && document.activeElement === els.text) || menu.isOpen || renaming || picking(),
-    replyText: els.text.value,
+    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || renaming || picking(),
+    // A draft holds it open only while the dock has the keyboard: once the person has gone to another
+    // app, nothing they could press reaches the dock (not Esc, not a press beside it), so it closes
+    // when the pointer is away, and the draft is kept for when it opens again.
+    replyText: document.hasFocus() ? els.text.value : "",
   };
 }
 
@@ -973,7 +1019,7 @@ function open() {
   workspace = savedWorkspace(storage());
   const peeked = peeking?.sessionId ?? null;
   if (workspace && peeked && sessions.has(peeked) && sessions.get(peeked).workspace !== workspace) workspace = "";
-  const pick = preselect(listed(), peeked, lastPeeked);
+  const pick = preselect(listed(), peeked, lastPeeked, savedSession(storage()));
   // Opened, the peeks are answered by the list.
   peeking = null;
   queue = [];
@@ -988,6 +1034,8 @@ function open() {
   renderHead();
   renderReply();
   grow();
+  // The keyboard is the dock's while it is open (the shell focuses the window): typing goes straight into the reply.
+  focusReply(true);
 }
 
 function close() {
@@ -1029,7 +1077,7 @@ for (const type of ["pointerup", "pointercancel"]) {
     scheduleClose();
   });
 }
-// The person went to another window: an empty reply box no longer holds the dock open.
+// The person went to another window: the reply box, empty or not, no longer holds the dock open (holds).
 window.addEventListener("blur", () => {
   down = false;
   scheduleClose();
@@ -1039,6 +1087,27 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape" || e.isComposing || state !== "open" || picking()) return;
   e.preventDefault();
   close();
+});
+
+// Alt+Up and Alt+Down: the session above or below in the list. Alt+1..9: that workspace; Alt+0: all
+// of them. The keyboard stays in the reply box, as it was (dock-state.js, dockKey).
+document.addEventListener("keydown", (e) => {
+  if (state !== "open" || picking() || menu.isOpen || renaming) return;
+  const key = dockKey(e);
+  if (!key) return;
+  e.preventDefault();
+  const auto = document.activeElement !== els.text || autoFocused;
+  if ("step" in key) {
+    const next = stepSession(visible(sessions.values(), { workspace }).map((s) => s.id), selected, key.step);
+    if (!next || next === selected) return;
+    select(next);
+  } else {
+    const value = key.workspace === 0 ? "" : els.workspace.options[key.workspace]?.value;
+    if (value === undefined || value === workspace) return;
+    els.workspace.value = value;
+    els.workspace.dispatchEvent(new Event("change"));
+  }
+  focusReply(auto);
 });
 
 // ---------- the connection ----------
