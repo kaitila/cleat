@@ -3,10 +3,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { dockBounds, islandRect } from "../../shell/src/dock";
+import { DOCK_SIZES, dockBounds, dockSizes, islandRect, NOTCH_WING, takesMouse } from "../../shell/src/dock";
 import { autostartEntry, autostartFile, LAUNCH_AGENT, launchAgentFile, launchAgentPlist } from "../../shell/src/login";
 import {
-  ACRYLIC_BUILD, CLEAR, defaultHotkeys, dockArea, materialOptions, windowMaterial, windowsBuild, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
+  ACRYLIC_BUILD, CLEAR, defaultHotkeys, dockArea, NOTCH_PROBE, parseNotch, materialOptions, windowMaterial, windowsBuild, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
   runnerDownHint, runnerSpawn, SCREEN_RECORDING_PANE, screenAllowed, shellOs,
 } from "../../shell/src/os";
 import { SHELL_DEFAULTS } from "../../shell/src/prefs";
@@ -85,6 +85,42 @@ describe("the dock per OS", () => {
     // Centred on the display, not on a work area the Dock app narrowed from the side.
     expect(dockArea("macos", bounds, { ...workArea, x: 80, width: 1432 }).x).toBe(0);
     for (const os of ["windows", "linux"] as const) expect(dockArea(os, bounds, workArea)).toEqual(bounds);
+  });
+
+  test("with a notch, a Mac's dock hangs from the very top, centred on the notch", () => {
+    const notch = { x: 666.5, width: 179, height: 38 };
+    expect(dockArea("macos", bounds, workArea, notch)).toEqual({ x: 0, y: 0, width: 1512, height: 982 });
+    expect(dockBounds(dockArea("macos", bounds, workArea, notch))).toEqual({ x: 526, y: 0, width: 460, height: 480 });
+    // A notch off the middle (and a display to the right of another): the window is centred on the notch.
+    expect(dockBounds(dockArea("macos", { ...bounds, x: 1920 }, { ...workArea, x: 1920 }, { ...notch, x: 700 })).x).toBe(Math.round(1920 + 700 + 179 / 2 - 460 / 2));
+    // Only a Mac has one.
+    expect(dockArea("windows", bounds, workArea, notch)).toEqual(bounds);
+  });
+
+  test("the notch is measured by osascript with an argument array, and read only when it is a sensible notch on this display", () => {
+    expect(NOTCH_PROBE.slice(0, 3)).toEqual(["-l", "JavaScript", "-e"]);
+    expect(NOTCH_PROBE[3]).toContain("auxiliaryTopLeftArea");
+    // A 14-inch MacBook Pro, at its default scale.
+    expect(parseNotch('{"width":1512,"left":666.5,"right":666.5,"top":38}\n', bounds)).toEqual({ x: 666.5, width: 179, height: 38 });
+    // No notch: the areas are empty.
+    expect(parseNotch('{"width":1512,"left":0,"right":0,"top":0}', bounds)).toBeNull();
+    // Another display than the primary Electron sees.
+    expect(parseNotch('{"width":1470,"left":645.5,"right":645.5,"top":32}', bounds)).toBeNull();
+    // Nonsense.
+    for (const bad of ["", "nope", "null", "[]", '{"width":1512}', '{"width":1512,"left":10,"right":10,"top":38}', '{"width":1512,"left":666,"right":666,"top":300}']) expect(parseNotch(bad, bounds)).toBeNull();
+  });
+
+  test("out of a notch, idle is the notch and its wings, peek its line below the notch, and the mouse is taken on the notch alone in idle", () => {
+    const notch = { x: 666.5, width: 179, height: 38 };
+    expect(dockSizes(null)).toEqual(DOCK_SIZES);
+    expect(dockSizes(notch)).toEqual({ idle: { width: 179 + 2 * NOTCH_WING, height: 38 }, peek: { width: 380, height: 78 }, open: DOCK_SIZES.open });
+    expect(islandRect("idle", notch)).toEqual({ x: (460 - 179) / 2, y: 0, width: 179, height: 38 });
+    expect(islandRect("peek", notch)).toEqual({ x: 40, y: 0, width: 380, height: 78 });
+    const win = dockBounds(dockArea("macos", bounds, workArea, notch));
+    // On the notch: taken. On a wing, over the menu bar: let through to the menu.
+    expect(takesMouse(win, "idle", { x: 756, y: 10 }, notch)).toBe(true);
+    expect(takesMouse(win, "idle", { x: 666 - NOTCH_WING / 2, y: 10 }, notch)).toBe(false);
+    expect(takesMouse(win, "peek", { x: 756, y: 60 }, notch)).toBe(true);
   });
 
   test("transparent on Windows and macOS; on Linux under Wayland or a compositing desktop, else opaque; the variable decides when set", () => {

@@ -5,7 +5,7 @@
 // It installs the shell, starts a stub runner, runs Electron with --self-test and checks every field it wrote.
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { dockBounds, type DockState, islandRect } from "../../shell/src/dock";
+import { dockBounds, type DockState, islandRect, type Notch } from "../../shell/src/dock";
 import { dockArea, opaqueDockBounds, windowMaterial } from "../../shell/src/os";
 import { cropPlan, SELF_TEST_CROP } from "../../shell/src/snip";
 import type { Area } from "../../shell/src/geometry";
@@ -225,19 +225,23 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
 
   need(r.dockOffNoWindow, 'a dock window was created although "dock" is false');
   need(r.dockCreated, "the dock window was not created");
-  need(r.dockUrl === `${runnerUrl}/dock`, `the dock loaded ${r.dockUrl}, not ${runnerUrl}/dock`);
+  // A notch is the shell's to measure (AppKit, only on a Mac); judged here as sensible, then used for the rest.
+  const notch: Notch | null = r.dockNotch ?? null;
+  need(notch === null || (OS_OF[layout] === "macos" && notch.width >= 40 && notch.height >= 16), `the shell measured a notch ${JSON.stringify(r.dockNotch)} on ${layout}`);
+  const dockAt = notch ? `${runnerUrl}/dock?notch=${notch.width}x${notch.height}` : `${runnerUrl}/dock`;
+  need(r.dockUrl === dockAt, `the dock loaded ${r.dockUrl}, not ${dockAt}`);
   need(r.dockVisible, "the dock was not shown");
   need(r.dockBridge === "object:setState:undefined:undefined", `the page sees more or less than intuitionDock.setState: ${r.dockBridge}`);
   // The same pure function the shell uses, run here on the display the shell reported.
   const display = isArea(r.primaryDisplay) && r.primaryDisplay.width > 0 && r.primaryDisplay.height > 0 ? r.primaryDisplay : null;
   need(display, `the primary display's bounds are ${JSON.stringify(r.primaryDisplay)}`);
   // One place and one size, whatever the state: the window is never resized or moved. On a Mac the place
-  // hangs from the work area's top, below the menu bar. An opaque dock (Linux without a compositor) is the
-  // state's island at the top centre of that place.
+  // hangs from the work area's top, below the menu bar, or from the very top, centred on a notch. An
+  // opaque dock (Linux without a compositor) is the state's island at the top centre of that place.
   const workArea = isArea(r.primaryWorkArea) ? r.primaryWorkArea : display;
   const inside = (a: Area, b: Area) => a.x >= b.x && a.y >= b.y && a.x + a.width <= b.x + b.width && a.y + a.height <= b.y + b.height;
   need(workArea && display && inside(workArea, display), `the primary display's work area is ${JSON.stringify(r.primaryWorkArea)}, not inside its bounds ${JSON.stringify(display)}`);
-  const place = display && workArea ? dockBounds(dockArea(OS_OF[layout], display, workArea)) : null;
+  const place = display && workArea ? dockBounds(dockArea(OS_OF[layout], display, workArea, notch)) : null;
   need(typeof r.dockTransparent === "boolean", `the shell did not say whether the dock was transparent: ${JSON.stringify(r.dockTransparent)}`);
   const at = (bounds: unknown, when: string, state: DockState = "idle") => {
     const want = place && (r.dockTransparent === false ? opaqueDockBounds(place, islandRect(state)) : place);

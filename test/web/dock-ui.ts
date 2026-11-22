@@ -13,7 +13,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fakeDriver } from "../../src/runner/agent-fake";
 import { Store } from "../../src/runner/store";
-import { DOCK_SIZES, DOCK_WINDOW, type DockState, islandRect } from "../../shell/src/dock";
+import { DOCK_SIZES, DOCK_WINDOW, type DockState, dockSizes } from "../../shell/src/dock";
 import { testRunner } from "../runner/helpers";
 import { MARKDOWN_EXPECTED, markdownProblems, seedMarkdown } from "./markdown-sample";
 import { assistantEntry, MemoryTranscripts, userEntry } from "./chat-transcripts";
@@ -192,10 +192,12 @@ function instruments(bridge: boolean): void {
   };
 }
 
-interface Options { bridge?: boolean; scale?: number; reducedMotion?: "reduce" | "no-preference" }
+interface Options { bridge?: boolean; scale?: number; reducedMotion?: "reduce" | "no-preference"; notch?: { width: number; height: number } | null }
 
 /** A dock page in a window of the shell's one size, with the stand-in for the bridge. */
-async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, reducedMotion = "no-preference" }: Options = {}) {
+async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, reducedMotion = "no-preference", notch = null }: Options = {}) {
+  /** The most the island covers in each state: out of the notch when the page is given one. */
+  const sizes = dockSizes(notch);
   const viewport = bridge ? { ...DOCK_WINDOW } : { width: 1000, height: 700 };
   const context = await browser.newContext({ viewport, colorScheme, deviceScaleFactor: scale, reducedMotion });
   context.on("request", (r: Any) => requested.push(r.url()));
@@ -264,18 +266,20 @@ async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, r
         }
         return why;
       },
-      [DOCK_SIZES[state], islandRect(state), bridge ? DOCK_WINDOW : null, state === "idle" ? "pill" : state === "peek" ? "peek" : "panel", state === "peek"] as const,
+      [sizes[state], { x: (DOCK_WINDOW.width - sizes[state].width) / 2, y: 0 }, bridge ? DOCK_WINDOW : null, state === "idle" ? "pill" : state === "peek" ? "peek" : "panel", state === "peek" || (notch !== null && state === "idle")] as const,
     ) as Promise<string[]>;
   const fits = async (state: DockState) => {
     const why = await wrong(state);
     const s = await shape();
-    check(why.length === 0, `${colorScheme}, ${state}: the island is drawn ${s.width}x${s.height}, inside its ${DOCK_SIZES[state].width}x${DOCK_SIZES[state].height} rectangle at the top centre, with its content inside it (${why.join("; ") || "all inside"})`);
+    check(why.length === 0, `${colorScheme}${notch ? ", out of the notch" : ""}, ${state}: the island is drawn ${s.width}x${s.height}, inside its ${sizes[state].width}x${sizes[state].height} rectangle at the top centre, with its content inside it (${why.join("; ") || "all inside"})`);
     return s;
   };
   /** A screenshot over a stand-in for the desktop. `tall` false: only the top of the window, where the pill and the peek are. */
   const shot = async (name: string, tall = true) => {
     const path = join(shots, `dock-${name}-${colorScheme}.png`);
-    await page.evaluate((colour: string) => document.documentElement.style.setProperty("background", colour), DESKTOP[colorScheme]);
+    // With a notch, the desktop has one: the hardware's black, at the top centre.
+    const desktop = notch ? `linear-gradient(black, black) center top / ${notch.width}px ${notch.height}px no-repeat, ${DESKTOP[colorScheme]}` : DESKTOP[colorScheme];
+    await page.evaluate((colour: string) => document.documentElement.style.setProperty("background", colour), desktop);
     await page.screenshot({ path, clip: { x: 0, y: 0, width: viewport.width, height: tall ? viewport.height : 72 } });
     await page.evaluate(() => document.documentElement.style.removeProperty("background"));
     console.log(`  screenshot: ${path}`);
@@ -960,6 +964,54 @@ try {
     }
     // The 409 above was asked for: the browser logs every refused request.
     for (let i = pageErrors.length - 1; i >= 0; i--) if (/409 \(Conflict\)/.test(pageErrors[i]!)) pageErrors.splice(i, 1);
+  }
+
+  // ================= out of a Mac's notch (D0035) =================
+  for (const scheme of ["dark", "light"] as const) {
+    const notch = { width: 179, height: 32 };
+    const n = await dock(scheme, { notch });
+    await n.page.goto(`${runner.url}/dock?notch=${notch.width}x${notch.height}`);
+    await n.page.locator("#pill").waitFor();
+    await n.page.evaluate(() => document.fonts.ready);
+    await n.settle("idle");
+    const black = await n.page.evaluate(() => [getComputedStyle(document.getElementById("island")!).backgroundColor, getComputedStyle(document.querySelector("#island > .surface")!).backgroundColor]);
+    check(black.every((c: string) => c === "rgb(0, 0, 0)"), `${scheme}, out of the notch: the island is the notch's opaque black (${black.join(", ")})`);
+    if ((await n.page.locator("#pill").getAttribute("data-tone")) === "none") {
+      const quiet = await n.shape();
+      check(quiet.width === notch.width && quiet.height === notch.height, `${scheme}, out of the notch, nothing going on: the island is the notch itself, ${quiet.width}x${quiet.height}`);
+      await n.shot("notch-idle-nothing", false);
+    }
+    const title = `Out of the notch, ${scheme}`;
+    await runner.startSession(title);
+    await n.page.locator("#pill-text", { hasText: "running" }).waitFor();
+    await n.settle("idle");
+    await n.fits("idle");
+    // The dot in the left wing, the words in the right one: nothing under the notch, which hides it.
+    const wings = await n.page.evaluate((w: number) => {
+      const mid = window.innerWidth / 2;
+      const dot = document.getElementById("pill-dot")!.getBoundingClientRect();
+      const words = document.getElementById("pill-text")!.getBoundingClientRect();
+      return { left: dot.right <= mid - w / 2, right: words.left >= mid + w / 2 };
+    }, notch.width);
+    check(wings.left && wings.right, `${scheme}, out of the notch, something running: the dot is left of the notch and the words right of it (${JSON.stringify(wings)})`);
+    await n.shot("notch-idle-running", false);
+    await n.page.locator("#peek-title", { hasText: title }).waitFor();
+    await n.settle("peek");
+    await n.fits("peek");
+    const peekTop = await n.page.evaluate(() => document.getElementById("peek")!.getBoundingClientRect().top);
+    check(peekTop >= notch.height, `${scheme}, out of the notch: the peek's line starts below the notch's band, at ${peekTop}px`);
+    await n.shot("notch-peek", false);
+    await n.hover();
+    await n.page.locator("#panel").waitFor();
+    await n.settle("open");
+    await n.fits("open");
+    const headTop = await n.page.evaluate(() => document.querySelector(".panel-head")!.getBoundingClientRect().top);
+    check(headTop >= notch.height, `${scheme}, out of the notch: the open panel starts below the notch's band, at ${headTop}px`);
+    await n.shot("notch-open");
+    await n.leave();
+    await n.page.locator("#pill").waitFor();
+    await n.settle("idle");
+    await n.context.close();
   }
 
   // ================= a normal browser: no bridge =================

@@ -15,6 +15,38 @@ export const DOCK_SIZES = {
   open: { width: DOCK_WINDOW.width, height: DOCK_WINDOW.height },
 };
 
+/**
+ * Beside a Mac's notch, a wing on each side shows the idle pill's dot (left) and words (right): the
+ * notch hides what is drawn under it. The same number as the shell's NOTCH_WING.
+ */
+export const NOTCH_WING = 64;
+
+/**
+ * The notch the shell measured, from the page's query (`?notch=179x32`, in CSS pixels), or null: no
+ * notch, or a value that is not a sensible one.
+ */
+export function parseNotch(search) {
+  const m = /^(\d{2,3})x(\d{2})$/.exec(new URLSearchParams(search).get("notch") ?? "");
+  if (!m) return null;
+  const notch = { width: Number(m[1]), height: Number(m[2]) };
+  return notch.width >= 40 && notch.width <= 400 && notch.height >= 16 && notch.height <= 64 ? notch : null;
+}
+
+/**
+ * The most the island covers in each state, with a notch or without one. With one, it hangs from the
+ * notch: idle is the notch and its wings at the notch's height, peek the peek's line below the
+ * notch's band, open as before. The same as the shell's dockSizes.
+ */
+export function dockSizes(notch) {
+  if (!notch) return DOCK_SIZES;
+  const idle = { width: notch.width + 2 * NOTCH_WING, height: notch.height };
+  return {
+    idle,
+    peek: { width: Math.max(DOCK_SIZES.peek.width, idle.width), height: notch.height + DOCK_SIZES.peek.height },
+    open: DOCK_SIZES.open,
+  };
+}
+
 /** The pill with nothing going on is shorter still: a dot in a sliver. */
 export const QUIET_HEIGHT = 16;
 
@@ -31,9 +63,12 @@ export const RECENT_EVENTS = 30;
 
 const KINDS = ["finished", "needs_approval", "error"];
 
-/** The island's rectangle in a state, inside the window: the same as the shell's islandRect. */
-export function islandRect(state) {
-  const { width, height } = DOCK_SIZES[state];
+/**
+ * The island's rectangle in a state, inside the window: the same as the shell's islandRect. With a
+ * notch, idle's is the notch alone: the wings let clicks through to the menu bar.
+ */
+export function islandRect(state, notch = null) {
+  const { width, height } = state === "idle" && notch ? notch : dockSizes(notch)[state];
   return { x: (DOCK_WINDOW.width - width) / 2, y: 0, width, height };
 }
 
@@ -43,14 +78,17 @@ export function islandRect(state) {
  * (`measured.quiet`); open is as tall
  * as the panel's content (`measured.panel`); peek is exactly its rectangle.
  */
-export function islandSize(state, measured) {
-  const most = DOCK_SIZES[state];
+export function islandSize(state, measured, notch = null) {
+  const sizes = dockSizes(notch);
+  const most = sizes[state];
   const fit = (value, least, limit) => Math.min(limit, Math.max(least, Math.ceil(Number.isFinite(value) ? value : 0)));
+  // With a notch, idle is the notch itself when nothing goes on (black on black: nothing shows), else the notch and its wings.
+  if (state === "idle" && notch) return measured?.quiet ? { width: notch.width, height: notch.height } : { ...most };
   if (state === "idle") {
     const height = measured?.quiet ? Math.min(QUIET_HEIGHT, most.height) : most.height;
     return { width: fit(measured?.pill, height, most.width), height };
   }
-  if (state === "open") return { width: most.width, height: fit(measured?.panel, DOCK_SIZES.peek.height, most.height) };
+  if (state === "open") return { width: most.width, height: fit(measured?.panel, sizes.peek.height, most.height) };
   return { ...most };
 }
 
@@ -59,9 +97,11 @@ export function islandSize(state, measured) {
  * is drawn (`drawn`), and, closed, anywhere in the state's rectangle, which is where the shell
  * takes the mouse: the dot of a quiet pill is small, its rectangle is the handle.
  */
-export function onIsland(state, drawn, x, y) {
+export function onIsland(state, drawn, x, y, notch = null) {
   const inside = (size) => y >= 0 && y < size.height && Math.abs(x) <= size.width / 2;
-  return inside(drawn) || (state !== "open" && inside(DOCK_SIZES[state]));
+  // Idle under a notch: the notch is the handle, as the shell takes the mouse there only.
+  if (state === "idle" && notch) return inside(notch);
+  return inside(drawn) || (state !== "open" && inside(dockSizes(notch)[state]));
 }
 
 /**

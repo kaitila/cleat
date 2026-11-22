@@ -1,5 +1,6 @@
 // What differs in the shell between the OS it runs on: Windows (the runner in WSL), macOS and Linux
 // (the runner on the same machine). No Electron imports here: main.ts asks these and does the rest.
+import type { Notch } from "./dock";
 import type { Area } from "./geometry";
 import { runnerCommand, type WslSettings } from "./wsl";
 
@@ -73,13 +74,51 @@ export function runnerDownHint(os: ShellOs, tried: boolean): string {
 
 /**
  * The area the dock hangs from. Windows and Linux: the display's bounds, so the dock touches the very
- * top edge. macOS: from the work area's top down, so it sits below the menu bar (and below the notch,
- * whose height the menu bar takes), centred on the display.
+ * top edge. macOS with a notch: the display's very top too, centred on the notch, so the island grows
+ * out of it over the menu bar. macOS without one: from the work area's top down, so it sits below the
+ * menu bar, centred on the display.
  */
-export function dockArea(os: ShellOs, bounds: Area, workArea: Area): Area {
+export function dockArea(os: ShellOs, bounds: Area, workArea: Area, notch: Notch | null = null): Area {
   if (os !== "macos") return bounds;
+  if (notch) return { x: bounds.x + notch.x + notch.width / 2 - bounds.width / 2, y: bounds.y, width: bounds.width, height: bounds.height };
   const top = Math.max(bounds.y, workArea.y);
   return { x: bounds.x, y: top, width: bounds.width, height: bounds.height - (top - bounds.y) };
+}
+
+/**
+ * How the shell measures a Mac's notch: osascript runs this JavaScript for Automation, which asks
+ * AppKit about the primary display (the first screen, the one with the menu bar). Electron's Display
+ * has no notch. It prints the screen's width, the menu bar's areas left and right of the notch (both
+ * 0 without one) and the height the notch takes from the top.
+ */
+export const NOTCH_PROBE: readonly string[] = [
+  "-l",
+  "JavaScript",
+  "-e",
+  'ObjC.import("AppKit"); var s = $.NSScreen.screens.objectAtIndex(0); ' +
+    "JSON.stringify({ width: s.frame.size.width, left: s.auxiliaryTopLeftArea.size.width, right: s.auxiliaryTopRightArea.size.width, top: s.safeAreaInsets.top })",
+];
+
+/**
+ * The notch from what NOTCH_PROBE printed, or null: no notch, an answer for another display than
+ * `bounds` (the primary display Electron sees), or anything that is not a sensible notch.
+ */
+export function parseNotch(output: string, bounds: Area): Notch | null {
+  let v: unknown;
+  try {
+    v = JSON.parse(output.trim());
+  } catch {
+    return null;
+  }
+  if (typeof v !== "object" || v === null) return null;
+  const { width: w, left: l, right: r, top: t } = v as Record<string, unknown>;
+  const num = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+  if (!num(w) || !num(l) || !num(r) || !num(t)) return null;
+  if (Math.round(w) !== Math.round(bounds.width) || l <= 0 || r <= 0) return null;
+  const notch = { x: l, width: Math.round(w - l - r), height: Math.round(t) };
+  // A notch is a small bar at the top: anything else is not one.
+  if (notch.width < 40 || notch.width > 400 || notch.height < 16 || notch.height > 64) return null;
+  return notch;
 }
 
 /** Desktops that run a compositor by default on X11: a transparent window shows what is under it. */

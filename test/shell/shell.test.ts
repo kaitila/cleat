@@ -649,10 +649,16 @@ describe("the dock", () => {
     // Shown without activating, and never focused by the shell.
     expect(dockCode).toContain("win.showInactive();");
     expect(dockCode).not.toMatch(/\.show\(\)|\.focus\(\)/);
-    // From the primary display, through dockArea: its bounds on Windows and Linux, from the work area's top on a Mac.
-    expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea));");
-    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(1);
-    for (const event of ["display-metrics-changed", "display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", placeDock);`);
+    // From the primary display, through dockArea: its bounds on Windows and Linux, from the work area's top on a Mac, or from its notch.
+    expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch));");
+    // Once for the place, once for the bounds the notch's measurement is checked against.
+    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(2);
+    // A change of display places the dock again and measures the notch again.
+    for (const event of ["display-metrics-changed", "display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", displays);`);
+    expect(dockCode).toContain('spawn("osascript", [...NOTCH_PROBE], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 5000 })');
+    // Over the menu bar from a notch: a frameless window goes there only with enableLargerThanScreen, at the status level.
+    expect(create).toContain('enableLargerThanScreen: OS === "macos"');
+    expect(dockCode).toContain('win.setAlwaysOnTop(true, dockNotch ? "status" : "floating")');
   });
 
   test("main.ts: one listener on the dock's channel, and it takes a state only through the validation", () => {
@@ -842,7 +848,7 @@ describe("self-test runner", () => {
     notificationsSupported: true, popupCreated: true, popupWidth: 560, popupHeight: 380, popupUrl: "http://127.0.0.1:5000/prompt",
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
     noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
-    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock", dockVisible: true, dockBridge: "object:setState:undefined:undefined",
+    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock", dockNotch: null, dockVisible: true, dockBridge: "object:setState:undefined:undefined",
     primaryDisplay: display, dockIgnoresMouseBeforeLoad: true, dockIdleBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockIdleFocusable: false, dockIdleFocused: false,
     dockMouseOnIdleIsland: true, dockMouseAwayIgnored: true, dockMouseBelowPillIgnored: true,
     dockPeekBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockPeekFocusable: false, dockMouseOnPeekIsland: true,
@@ -927,6 +933,18 @@ describe("self-test runner", () => {
     test("a clean Mac result has no problems, and its dock is judged below the menu bar", () => {
       expect(at(mac, { layout: "macos" })).toEqual([]);
       expect(at({ ...mac, ...placeAt(dockBounds(macDisplay)) }, { layout: "macos" })).toHaveLength(4);
+    });
+
+    test("with a notch, the dock is judged at the very top, centred on it, and its page has the notch's size", () => {
+      const notch = { x: 666.5, width: 179, height: 38 };
+      const notched = { ...mac, dockNotch: notch, dockUrl: "http://127.0.0.1:5000/dock?notch=179x38", ...placeAt(dockBounds(dockArea("macos", macDisplay, macWork, notch))) };
+      expect(notched.dockIdleBounds).toEqual({ x: 526, y: 0, width: 460, height: 480 });
+      expect(at(notched, { layout: "macos" })).toEqual([]);
+      // Below the menu bar, or without the notch in its address, is not where it should be.
+      expect(at({ ...notched, ...placeAt(macPlace) }, { layout: "macos" })).toHaveLength(4);
+      expect(at({ ...notched, dockUrl: "http://127.0.0.1:5000/dock" }, { layout: "macos" })).toEqual([expect.stringContaining("the dock loaded")]);
+      // A notch is a Mac's.
+      expect(at({ ...linux, dockNotch: notch }, { layout: "linux" })).toContainEqual(expect.stringContaining("measured a notch"));
     });
 
     test("the shell must have run on the layout's OS, with the layout's paths", () => {
@@ -1213,8 +1231,8 @@ describe("starting the runner from Windows", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     expect(RUNNER_START_MS).toBe(10_000);
     expect(main).toContain("spawn(how.file, how.args, { stdio: \"ignore\", windowsHide: true, shell: false, detached: how.detached })");
-    // The other spawn asks gnome-extensions what is enabled, also without a shell.
-    expect(main.match(/\bspawn\(/g)).toHaveLength(2);
+    // The other spawns ask gnome-extensions what is enabled and osascript for the notch, also without a shell.
+    expect(main.match(/\bspawn\(/g)).toHaveLength(3);
     expect(main).toContain('spawn("gnome-extensions", ["list", "--enabled"], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 3000 })');
     expect(main).not.toMatch(/\bexec(Sync|File|FileSync)?\(/);
     // The self-test never starts a runner.

@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, takesMouse, watchMs } from "./dock";
+import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, takesMouse, watchMs } from "./dock";
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
@@ -21,7 +21,7 @@ import { REPORT_PATH, type ShellReport, shellAction, shellReport, shellSocketUrl
 import type { SelfTestResult } from "./result";
 import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Settings } from "./settings";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
-import { dockArea, dockTransparent, materialOptions, windowMaterial, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
+import { dockArea, dockTransparent, materialOptions, NOTCH_PROBE, parseNotch, windowMaterial, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
 import { RUNNER_START_MS } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
@@ -769,13 +769,43 @@ let dockIgnoresMouse = true;
 let dockCursor = (): Electron.Point => screen.getCursorScreenPoint();
 let dockWatch: ReturnType<typeof setTimeout> | null = null;
 
+/** The primary display's notch, as last measured (a Mac's built-in display); null without one. */
+let dockNotch: Notch | null = null;
+
+/** Measures the primary display's notch through AppKit (os.ts NOTCH_PROBE). Null off a Mac, without a notch, or when osascript fails. */
+function measureNotch(): Promise<Notch | null> {
+  if (OS !== "macos") return Promise.resolve(null);
+  const bounds = screen.getPrimaryDisplay().bounds;
+  return new Promise((resolve) => {
+    let out = "";
+    const child = spawn("osascript", [...NOTCH_PROBE], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 5000 });
+    child.stdout?.on("data", (chunk: Buffer) => {
+      out += chunk.toString("utf8");
+    });
+    child.on("error", (e) => {
+      console.error("measuring the notch failed", e);
+      resolve(null);
+    });
+    child.on("close", (code) => resolve(code === 0 ? parseNotch(out, bounds) : null));
+  });
+}
+
 /**
  * Where the transparent dock's window is, on the primary display as it is now: touching the very top
- * edge (the display's bounds, not its work area), or on a Mac just below the menu bar.
+ * edge (the display's bounds, not its work area); on a Mac just below the menu bar, or with a notch
+ * on the very top edge, centred on the notch.
  */
 function dockPlace(): Electron.Rectangle {
   const display = screen.getPrimaryDisplay();
-  return dockBounds(dockArea(OS, display.bounds, display.workArea));
+  return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch));
+}
+
+/**
+ * Hanging from a notch, the window sits over the menu bar, so above its level ("status"); the menus
+ * that drop from the bar are above that again. Without a notch, the usual always-on-top level.
+ */
+function setDockLevel(win: BrowserWindow): void {
+  if (OS === "macos") win.setAlwaysOnTop(true, dockNotch ? "status" : "floating");
 }
 
 /** The window's bounds: its one place, or for an opaque dock the island of the state the page last reported, at the top centre of that place. */
@@ -817,8 +847,8 @@ function watchDockMouse(): number {
   const cursor = dockCursor();
   // A page that has reported nothing, or a window that is not shown, takes nothing.
   const state = dockLoaded ? dockState : null;
-  setDockMouse(win, takesMouse(bounds, state, cursor));
-  return watchMs(bounds, state, cursor);
+  setDockMouse(win, takesMouse(bounds, state, cursor, dockNotch));
+  return watchMs(bounds, state, cursor, dockNotch);
 }
 
 /** Looks at the cursor now and again after a while, for as long as the shell runs. */
@@ -895,6 +925,8 @@ function createDock(): BrowserWindow {
     minimizable: false,
     fullscreenable: false,
     alwaysOnTop: true,
+    // On a Mac a frameless window goes where it is put, over the menu bar too (from a notch), only with this.
+    enableLargerThanScreen: OS === "macos",
     skipTaskbar: true,
     // A tool window: not in the taskbar and not in Alt+Tab, also while it is focusable.
     type: "toolbar",
@@ -904,6 +936,7 @@ function createDock(): BrowserWindow {
   });
   // On a Mac: on every Space, and beside full-screen apps.
   if (OS === "macos") win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  setDockLevel(win);
   // The default, before any page: every click goes through the window to what is under it.
   dockState = null;
   dockIgnoresMouse = true;
@@ -952,7 +985,7 @@ async function loadDock(): Promise<void> {
     const late = new Promise<"late">((resolve) => {
       timer = setTimeout(() => resolve("late"), DOCK_LOAD_MS);
     });
-    const loaded = await Promise.race([win.loadURL(dockUrl(settings.runnerUrl)), late]).finally(() => clearTimeout(timer));
+    const loaded = await Promise.race([win.loadURL(dockUrl(settings.runnerUrl, dockNotch)), late]).finally(() => clearTimeout(timer));
     if (loaded === "late") {
       // Its page process is stuck: the window goes, and the next check starts over in a new one.
       if (dock === win) closeDock();
@@ -960,7 +993,7 @@ async function loadDock(): Promise<void> {
     }
     if (win.isDestroyed() || dock !== win) return;
     // A runner without the page answers 404 with a body, which loads: that is not the dock.
-    if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl)} answered ${dockStatus}`);
+    if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl, dockNotch)} answered ${dockStatus}`);
     dockLoaded = true;
     staleRunnerSaid = false;
     // Never activated: showing the dock takes nothing from what the person is doing.
@@ -999,10 +1032,26 @@ function onDockState(event: Electron.IpcMainEvent, value: unknown): void {
 function dockEvents(): void {
   ipcMain.on(DOCK_CHANNEL, onDockState);
   watchDockMouseLoop();
-  // A display added or removed, a new resolution or scale: centred again on the primary display.
-  screen.on("display-metrics-changed", placeDock);
-  screen.on("display-added", placeDock);
-  screen.on("display-removed", placeDock);
+  // A display added or removed, a new resolution or scale: centred again on the primary display,
+  // and its notch measured again (another display became the primary, or the lid closed).
+  const displays = () => void remeasureNotch().catch((e) => console.error("placing the dock failed", e));
+  screen.on("display-metrics-changed", displays);
+  screen.on("display-added", displays);
+  screen.on("display-removed", displays);
+}
+
+/** Measures the notch again and puts the dock in its place; a notch that came, went or changed loads the page again, for its shape. */
+async function remeasureNotch(): Promise<void> {
+  placeDock();
+  const before = JSON.stringify(dockNotch);
+  dockNotch = await measureNotch();
+  if (JSON.stringify(dockNotch) === before) return;
+  if (dock && !dock.isDestroyed()) setDockLevel(dock);
+  placeDock();
+  if (dockLoaded) {
+    dockLoaded = false;
+    await showDock();
+  }
 }
 
 let dockMisses = 0;
@@ -1021,7 +1070,11 @@ async function checkDock(): Promise<void> {
 /** Checks every few seconds. This never starts the runner: the shell's start, the hotkey and the tray do. */
 function watchDock(): void {
   const tick = () => void checkDock().catch((e) => console.error("checking the dock failed", e)).finally(() => setTimeout(tick, DOCK_CHECK_MS));
-  tick();
+  // The notch first: the window's place and the page's address depend on it.
+  void measureNotch().then((notch) => {
+    dockNotch = notch;
+    tick();
+  });
 }
 
 // --- Settings ---
@@ -1314,7 +1367,7 @@ async function selfTest(): Promise<SelfTestResult> {
     settingsNotices: [], settingsDockShown: false, settingsDockHidden: false, settingsTheme: null, settingsOpenAtLogin: null,
     settingsWindowUrl: null, settingsWindowWidth: 0, settingsWindowHeight: 0, settingsWindowReused: false, settingsLinkOpened: null,
     externalLinks: [], errors: [],
-    os: OS, dockTransparent: DOCK_TRANSPARENT, primaryWorkArea: null,
+    os: OS, dockTransparent: DOCK_TRANSPARENT, primaryWorkArea: null, dockNotch: null,
     windowsRelease: OS === "windows" ? release() : null, popupMaterial: POPUP_MATERIAL, dockMaterial: DOCK_MATERIAL, snipMaterial: "none", settingsMaterial: "none",
     screenAccess: OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted",
   };
@@ -1410,12 +1463,15 @@ async function selfTest(): Promise<SelfTestResult> {
   await step("dock", async () => {
     // The cursor is made up from here on: the self-test cannot move the real one. The watching is the real loop.
     const display = screen.getPrimaryDisplay().bounds;
+    // The notch as the shell measures it at start: the place, the rectangles and the page's address follow it.
+    dockNotch = await measureNotch();
+    r.dockNotch = dockNotch;
     // Where the transparent window is, and the island is found from, for an opaque dock too.
     const windowAt = dockPlace();
     /** A point on the screen from one inside the dock's window. */
     const spot = (x: number, y: number): Electron.Point => ({ x: windowAt.x + x, y: windowAt.y + y });
     const middle = (state: DockState) => {
-      const island = islandRect(state);
+      const island = islandRect(state, dockNotch);
       return spot(Math.floor(island.x + island.width / 2), Math.floor(island.height / 2));
     };
     /** Puts the made-up cursor somewhere and waits for the loop to have looked. Returns whether the window ignores the mouse. */

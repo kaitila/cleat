@@ -161,6 +161,8 @@ export interface SelfTestResult {
   dockTransparent: boolean;
   /** The primary display's work area: on a Mac the dock hangs from its top, below the menu bar. */
   primaryWorkArea: Area | null;
+  /** The primary display's notch the shell measured (a Mac's built-in display), or null: the dock hangs from it. */
+  dockNotch: { x: number; width: number; height: number } | null;
   /** macOS's Screen Recording status for the shell ("granted", "denied", "not-determined", ...); "granted" elsewhere. Without it a snip captures no windows. */
   screenAccess: string;
   /** os.release() on Windows ("10.0.22631"): what the pop-up's acrylic was decided on. Null elsewhere. */

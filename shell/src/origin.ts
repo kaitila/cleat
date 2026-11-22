@@ -16,8 +16,11 @@ export function promptUrl(runnerUrl: string): string {
   return new URL("/prompt", runnerUrl).href;
 }
 
-export function dockUrl(runnerUrl: string): string {
-  return new URL("/dock", runnerUrl).href;
+/** The dock's page. With a notch, its size in points as `?notch=WxH`: the page draws the island out of it. */
+export function dockUrl(runnerUrl: string, notch: { width: number; height: number } | null = null): string {
+  const url = new URL("/dock", runnerUrl);
+  if (notch) url.searchParams.set("notch", `${notch.width}x${notch.height}`);
+  return url.href;
 }
 
 /** The Settings page, which the Settings window loads. */

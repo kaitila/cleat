@@ -61,6 +61,8 @@
   --glass-float: rgb(250 250 253 / 0.88);
   /* The glass's rim where it is drawn as a ring (the dock's island). */
   --glass-rim: rgb(22 24 44 / 0.12);
+  /* A Mac's notch, the same black in every scheme: the dock grows out of it as one object (D0035). */
+  --notch: rgb(0 0 0);
   /* The person's own message: a bubble tinted with the accent. */
   --bubble: rgb(75 99 230 / 0.13);
   /* On glass, back to front: wells for code and output; inputs and inner cards. */
@@ -181,6 +183,10 @@
   /* The island's size as drawn. dock.js sets both on the island; until it has, nothing is drawn. */
   --island-w: 0px;
   --island-h: 0px;
+  /* A Mac's notch and the wings beside it, as dock.js measures them (?notch=WxH); 0 without one. */
+  --notch-w: 0px;
+  --notch-h: 0px;
+  --wing: 0px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -191,6 +197,8 @@
     --glass: rgb(18 18 24 / 0.56);
     --glass-float: rgb(18 18 24 / 0.86);
     --glass-rim: rgb(255 255 255 / 0.2);
+    /* A Mac's notch, the same black in every scheme: the dock grows out of it as one object (D0035). */
+    --notch: rgb(0 0 0);
     --bubble: rgb(124 156 255 / 0.3);
     --surface: rgb(255 255 255 / 0.07);
     --sunken: rgb(0 0 0 / 0.22);
@@ -227,6 +235,8 @@
   --glass: rgb(18 18 24 / 0.56);
   --glass-float: rgb(18 18 24 / 0.86);
   --glass-rim: rgb(255 255 255 / 0.2);
+  /* A Mac's notch, the same black in every scheme: the dock grows out of it as one object (D0035). */
+  --notch: rgb(0 0 0);
   --bubble: rgb(124 156 255 / 0.3);
   --surface: rgb(255 255 255 / 0.07);
   --sunken: rgb(0 0 0 / 0.22);
@@ -266,6 +276,8 @@
   --glass: rgb(250 250 253 / 0.62);
   --glass-float: rgb(250 250 253 / 0.88);
   --glass-rim: rgb(22 24 44 / 0.12);
+  /* A Mac's notch, the same black in every scheme: the dock grows out of it as one object (D0035). */
+  --notch: rgb(0 0 0);
   --bubble: rgb(75 99 230 / 0.13);
   --surface: rgb(255 255 255 / 0.55);
   --sunken: rgb(22 24 44 / 0.05);
@@ -299,6 +311,8 @@
   --glass: rgb(18 18 24 / 0.56);
   --glass-float: rgb(18 18 24 / 0.86);
   --glass-rim: rgb(255 255 255 / 0.2);
+  /* A Mac's notch, the same black in every scheme: the dock grows out of it as one object (D0035). */
+  --notch: rgb(0 0 0);
   --bubble: rgb(124 156 255 / 0.3);
   --surface: rgb(255 255 255 / 0.07);
   --sunken: rgb(0 0 0 / 0.22);
