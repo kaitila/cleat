@@ -50,7 +50,7 @@ export interface Notch { x: number; width: number; height: number }
  * Beside the notch, a wing on each side shows the idle pill's dot (left) and words (right): the
  * notch itself hides whatever is drawn under it. The same number as the page's (dock-state.js).
  */
-export const NOTCH_WING = 64;
+export const NOTCH_WING = 76;
 
 /**
  * The most the island covers in each state, with a notch or without one. With one, the island

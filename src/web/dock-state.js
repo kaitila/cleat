@@ -19,7 +19,7 @@ export const DOCK_SIZES = {
  * Beside a Mac's notch, a wing on each side shows the idle pill's dot (left) and words (right): the
  * notch hides what is drawn under it. The same number as the shell's NOTCH_WING.
  */
-export const NOTCH_WING = 64;
+export const NOTCH_WING = 76;
 
 /**
  * The notch the shell measured, from the page's query (`?notch=179x32`, in CSS pixels), or null: no

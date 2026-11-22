@@ -68,7 +68,10 @@ export function grounds(t: Map<string, string>): Grounds {
   const backdrop = fields.flatMap((c) => [c, ...grained(c, strength)]);
   const glass = backdrop.map((c) => over(tok("glass"), c));
   const desktops = [{ r: 0, g: 0, b: 0, a: 1 }, { r: 255, g: 255, b: 255, a: 1 }, { r: 128, g: 128, b: 128, a: 1 }];
-  const float = desktops.map((c) => over(tok("glass-float"), c));
+  // The floating grounds: the island's glass over any desktop, and, in a dark scheme (the dock is
+  // always dark), the notch's opaque black it is drawn in out of a Mac's notch (D0035).
+  const notch = luminance(bg) < 0.2 ? [tok("notch")] : [];
+  const float = [...desktops.map((c) => over(tok("glass-float"), c)), ...notch];
   const on = (name: string) => [...glass, ...float].map((c) => over(tok(name), c));
   return { backdrop, glass, float, surface: on("surface"), sunken: on("sunken"), hover: on("hover"), selected: on("selected"), bubble: on("bubble") };
 }

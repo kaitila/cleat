@@ -25,6 +25,8 @@ Small, clean and calm, and made of glass: a tool that lives in the tray. The loo
 | `--dur-fade`, `--dur-out`, `--dur-press`, `--rise`, `--pop`, `--blur-in`, `--lift`, `--squash`, `--stagger`, `--lag` | 120ms for a fade in, 110ms for the way out, 380ms for a button's lift and squash; how far a thing that springs in travels (10px), the scale it grows from (0.94) and the blur that clears as it fades in (6px); a button's lift (1px) and squash (0.92); rows 40ms apart; the island's width 40ms behind its height |
 | `--device-px`, `--snip-line`, `--snip-mark`, `--snip-mark-w`, `--snip-label`, `--snip-dim`, `--snip-edge` | The snip overlay, the same in both schemes (below) |
 | `--island-quiet` | How much of the dock's island shows (0.55) while nothing is going on |
+| `--notch` | A Mac's notch: opaque black in every scheme, the island's colour when it grows out of the notch |
+| `--notch-w`, `--notch-h`, `--wing` | The notch's size and the wing beside it, set by `dock.js` from `?notch=WxH`; 0 without a notch |
 | `--sidebar`, `--measure` | Chat view: the sidebar's width; the widest the stream gets |
 
 Light and dark each have their own values. The glass tokens are translucent, so `design.test.ts` checks every contrast on the colour a reader sees: `test/web/glass.ts` composites a token over each ground it can sit on (the backdrop, alone and under each field, at the darkest and lightest the grain makes it; the glass over those; the floating glass over a black, grey and white desktop) and takes the worst. `bun test/web/glass-report.ts` prints the table, for tuning.
@@ -100,6 +102,8 @@ The prompt box is centred on the selection, below it, above it when there is no 
 
 ## The dock
 One dark glass drop hanging from the top edge of the screen, the same in both schemes (`.dark`). It is drawn in `--glass-float`, dense enough to read as one object even over a white desktop. Its top corners are square, since it hangs from the edge. The bottom ones are as round as half its height allows, up to `--radius-l`: a pill when idle or peeking, a drop when open. They follow the spring with the shape. Its edge is the glass's rim (`--glass-rim`) on the three free sides. It has no drop shadow (its window is its size, so a shadow would be cut off) and no backdrop-filter: the frost is the OS's blur behind the see-through window, and a backdrop-filter under a clip that springs each frame would cost frames.
+
+**Out of a Mac's notch** ([D0035](decisions/D0035-dock-from-the-notch.md)), the island is opaque `--notch` black instead of glass, with no rim and no `--island-quiet` dimming, so the notch and the island read as one shape. With nothing going on it is the notch itself, so nothing shows. With something going on a 76px wing each side, at the notch's height, holds the dot (left) and the words (right), never under the notch. The peek's line and the panel start below `--notch-h`.
 
 It is subtle before anything else. Idle is a sliver at most 22px tall and as wide as its words: a dot alone, 16px tall and at `--island-quiet`, when nothing is going on; muted words when something runs; colour (`--warn`, `--danger`) only for "needs you" and "failed". A peek is one 40px line. Open is as tall as its content, at most 480px.
 
