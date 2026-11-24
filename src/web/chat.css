@@ -23,7 +23,9 @@
   justify-content: space-between;
   padding: var(--space-3) var(--space-2) var(--space-2) var(--space-4);
 }
-.brand { font-weight: var(--semibold); letter-spacing: var(--track-l); }
+.brand { display: inline-flex; align-items: center; gap: var(--space-1); font-weight: var(--semibold); letter-spacing: var(--track-l); }
+/* The Ledge beside the name, in the text's own colour: black on light, white on dark (D0044). */
+.brand .mark { width: var(--text-l); height: var(--text-l); flex: none; }
 /* "New task" and the settings gear, a square quiet button with a line icon in the button's colour (stroke="currentColor" in the markup). */
 .sidebar-actions { display: flex; align-items: center; gap: var(--space-1); }
 .settings-link { width: var(--control); padding: 0; }

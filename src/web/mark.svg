@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- The app icon and favicon (D0044): the Ledge in white on a black tile, the same as
+       tileBitmap() in shell/src/geometry.ts. A browser draws it outside any page, where base.css's
+       tokens can't reach, so its two colours are written here: black (SVG's default fill) and white. -->
+  <rect width="24" height="24" rx="5.4"/>
+  <g fill="#fff" transform="translate(2.4 1.6) scale(0.8)">
+    <circle cx="16.5" cy="10" r="4.5"/>
+    <rect x="2" y="16.5" width="20" height="4" rx="2"/>
+  </g>
+</svg>
