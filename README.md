@@ -13,37 +13,30 @@ There is also a snip key: the screen freezes, you drag a box around something, a
 
 Holm runs the agents with the [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) you already have, logged in as you, with your own settings and permissions. It is not a hosted service: nothing leaves your machine except what Claude Code itself sends.
 
-## Requirements
-On every platform:
-- [git](https://git-scm.com/)
-- [bun](https://bun.sh/) 1.3 or newer
-- [Node.js](https://nodejs.org/) with npm: used once, to download Electron for the tray app
-- [Claude Code](https://docs.claude.com/en/docs/claude-code/setup), installed and logged in (run `claude` once and follow its login)
-
-Per platform:
-
-| Platform | Where things run | Also needed |
-|---|---|---|
-| Windows 10 or 11 | The agents and the runner in WSL2, the tray app on Windows | WSL2 with a Linux distribution (Ubuntu is fine). Install everything above inside WSL, and run the install below in a WSL terminal |
-| macOS | Everything on the Mac | Nothing more |
-| Linux | Everything on the machine | A desktop with a system tray |
-
-The setup command checks each of these and prints a one-line fix for anything missing.
-
 ## Install
 In a terminal (on Windows, a WSL terminal):
 
 ```sh
-git clone https://github.com/kaitila/holm && cd holm && bun install && bun run setup
+curl -fsSL https://bun.sh/install | bash && export PATH="$HOME/.bun/bin:$PATH" && bun install -g github:kaitila/holm && holm setup
 ```
 
-`setup` walks you through it, then takes a fresh clone to a running app:
-1. **Requirements**: checks each one above, with the command that fixes anything missing;
+That is the whole of it. The line installs [bun](https://bun.sh/) (skip that part if you have it: `bun install -g github:kaitila/holm && holm setup`), then holm with everything it runs: Claude Code and Codex come with it, inside the agents' own SDKs, and the tray app's Electron is downloaded by setup. No git, Node or npm is needed. What is left is logging in to the agent you use: setup offers to run Claude Code's login (a page in your browser), or later `holm login` (`holm login codex` for [Codex](docs/agents.md)). Why it is done this way: [D0045](docs/decisions/D0045-install-with-bun-only.md).
+
+| Platform | Where things run | Before the line |
+|---|---|---|
+| macOS | Everything on the Mac | Nothing |
+| Linux | Everything on the machine | A desktop with a system tray, and `unzip` for bun's installer (`sudo apt install -y unzip`) |
+| Windows 10 or 11 | The agents and the runner in WSL 2, the tray app on Windows | WSL 2: `wsl --install` in a terminal run as administrator, restart, open Ubuntu and make its user; then `sudo apt install -y unzip`, and the line in that Ubuntu terminal |
+
+To work on holm itself, clone it instead: `git clone https://github.com/kaitila/holm && cd holm && bun install && bun run setup`.
+
+`setup` walks you through it, then takes a fresh install to a running app:
+1. **Requirements**: checks bun, Claude Code and its login (offering to log in), Codex, and git (optional), with the command that fixes anything missing;
 2. **Workspaces**: tick the folders sessions may run in (space to toggle, enter to confirm), from the git repositories and `CLAUDE.md` folders in your home, newest first, or add one by its path; then pick the one the pop-up offers first;
 3. **Hotkeys**: keep the platform's defaults (Ctrl+Alt+Space for a new task and Ctrl+Alt+S for the snip on Windows and Linux, Cmd+Shift+Space and Cmd+Shift+S on a Mac) or type others;
 4. **Permissions**: auto (recommended: routine tool calls run, the rest ask you) or ask for everything;
 5. **Start at login**: yes by default;
-6. then writes the config, puts the `holm` command on your PATH, installs the tray app (the first time, a download of about 130 MB), starts the runner and the tray app, and opens the pop-up, so you can send a first task. A step that fails says the command that retries it.
+6. then writes the config, puts the `holm` command on your PATH, installs the tray app (the first time, a download of Electron of about 110 MB, from its own release), starts the runner and the tray app, and opens the pop-up, so you can send a first task. A step that fails says the command that retries it.
 
 Esc or Ctrl+C at any question stops it with nothing written. For scripts: `bun run setup --yes` takes every default, and `--workspace [name=]<folder>` (repeatable), `--hotkey`, `--snip-hotkey`, `--permission-mode auto|default` and `--no-login` give the answers; without a terminal, setup needs `--yes` or all of them. Running `setup` again changes the answers; running plain `holm` before there is any configuration starts it too. `holm help` lists every command, and `holm doctor --json` is the check for scripts.
 
@@ -54,17 +47,17 @@ Then press the hotkey anywhere.
 
 ## Update
 ```sh
-cd holm && git pull && bun install && holm up
+holm update
 ```
 
-`holm up` restarts the runner and the tray app when they are older than the code. A runner with a session still running is kept until the session ends (`holm restart --force` to stop it anyway).
+It installs holm again from GitHub (or, in a clone, runs `git pull` and `bun install`), then `holm up`, which restarts the runner and the tray app when they are older than the code. A runner with a session still running is kept until the session ends (`holm restart --force` to stop it anyway).
 
 ## Uninstall
 ```sh
 holm uninstall
 ```
 
-It turns start at login off, quits and removes the tray app, stops the runner and takes the `holm` command off your PATH. Your configuration and your sessions stay, in case you come back; `holm uninstall --purge` removes them too. Then delete the cloned folder. Your Claude Code sessions stay where Claude Code keeps them.
+It turns start at login off, quits and removes the tray app, stops the runner and takes the `holm` command off your PATH. Your configuration and your sessions stay, in case you come back; `holm uninstall --purge` removes them too. Then `bun remove --global holm` removes the app itself (or delete the folder you cloned). Your Claude Code sessions stay where Claude Code keeps them.
 
 ## Where settings live
 | What | Where |
@@ -98,6 +91,8 @@ Sessions sync with Claude Code both ways ([D0015](docs/decisions/D0015-transcrip
 |---|---|
 | `holm setup [--yes]` | Check requirements, ask for workspaces and hotkeys, install and start everything |
 | `holm up`, or `holm` alone | Start the runner and the tray app, installing or updating the tray app if needed |
+| `holm login [claude\|codex]` | Log the agent in: Claude Code's own login, or Codex's |
+| `holm update` | Get the newest version, then `up` |
 | `holm start` / `stop` / `restart [--force]` | The runner alone |
 | `holm status` | Whether the runner runs (exit code 0 when it does, 1 when not) |
 | `holm logs` | The end of the runner's log |

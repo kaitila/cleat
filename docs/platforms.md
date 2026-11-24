@@ -12,12 +12,12 @@ The layout is detected: inside WSL (`WSL_DISTRO_NAME` set, or `microsoft` in `/p
 
 ## Setup, every layout
 ```sh
-git clone https://github.com/kaitila/holm && cd holm && bun install && bun run setup
+curl -fsSL https://bun.sh/install | bash && export PATH="$HOME/.bun/bin:$PATH" && bun install -g github:kaitila/holm && holm setup
 ```
 
-`bun run setup` is `bun src/cli.ts setup` (`src/cli/setup.ts`). It assumes nothing about the machine: the layout, the home folder, and for windows-wsl the WSL distribution (`WSL_DISTRO_NAME`) and the Windows user's folders (asked of `cmd.exe`) are all detected. In order:
+The line installs bun (its own installer, which on Linux needs `unzip`), then the app as a global bun package from GitHub (`~/.bun/install/global/node_modules/holm`, its command linked into `~/.bun/bin`; no git), with the Agent SDK's Claude Code and the Codex SDK's `codex` inside it ([D0045](decisions/D0045-install-with-bun-only.md)). A clone (`git clone … && bun install && bun run setup`) works the same: `bun run setup` is `bun src/cli.ts setup` (`src/cli/setup.ts`). It assumes nothing about the machine: the layout, the home folder, and for windows-wsl the WSL distribution (`WSL_DISTRO_NAME`) and the Windows user's folders (asked of `cmd.exe`) are all detected. In order:
 
-1. Checks git, bun, Node 22.12 or later with npm (Electron's installer needs it), Claude Code and its login, and Codex (optional), each under a spinner and each with a one-line fix, as `holm doctor` does. Missing git, Node or Claude Code stops it, with Check again or Quit on a terminal; a missing login is only warned about, with the command to run. Setup never installs or logs in for you.
+1. Checks bun, Claude Code (the Agent SDK's own, else `claude` on the PATH) and its login, Codex (optional) and git (optional: only a clone needs it, to update), each under a spinner and each with a one-line fix, as `holm doctor` does. No Node or npm: Electron comes from its release. A missing Claude Code stops it, with Check again or Quit on a terminal. A missing login is offered on a terminal ("Log in to Claude Code now?", which runs its `auth login`, then checks again) and otherwise warned about, with `holm login`. Setup never installs system packages, and never logs in without that yes.
 2. Asks for the workspaces: a list to tick of the folders one or two levels under the home folder that hold a `.git` or a `CLAUDE.md` (newest first, at most 12, the config's own ticked first), and "Add a folder…" for any other path; then which one is the default.
 3. Shows the two hotkeys, the layout's defaults (Control+Alt+Space and Control+Alt+S; Command+Shift+Space and Command+Shift+S on a Mac), to keep or change; a changed one must be an Electron accelerator.
 4. Asks for the permission mode: auto (recommended) or default (ask for everything).
@@ -28,7 +28,7 @@ Esc or Ctrl+C at any question ends it with nothing written (exit 130). `setup --
 
 `holm uninstall` undoes it: start at login off, the shell quit and its folders removed (the app folder and the shell's settings folder), the runner stopped, the link removed. The config and the data folder stay unless `--purge`.
 
-By hand, the same steps are `bun src/cli.ts link`, `holm doctor` (every ✗ line is something needed, with its fix on the line below; doctor exits 1 while one is there, and `--json` prints the checks for scripts), `holm up` (starts the runner, installs the shell with Electron for this OS, about 130 MB the first time, writes where the runner lives into the shell's settings and starts the shell) and `holm shell login on`.
+By hand, the same steps are `bun src/cli.ts link`, `holm doctor` (every ✗ line is something needed, with its fix on the line below; doctor exits 1 while one is there, and `--json` prints the checks for scripts), `holm up` (starts the runner, installs the shell with Electron for this OS, a download of about 110 MB the first time, writes where the runner lives into the shell's settings and starts the shell) and `holm shell login on`.
 
 `holm doctor` again should show only ✓ lines. The settings page's Setup section shows the same from the running app: the layout, the runner, the shell, start at login, the shortcuts and, on a Mac, Screen Recording, each with what to do when it is not ok. A – line is a part that is not up yet (the runner, the shell, start at login, a display), with the one command that brings it up. Those don't change the exit code.
 
@@ -36,7 +36,7 @@ By hand, the same steps are `bun src/cli.ts link`, `holm doctor` (every ✗ line
 The app had another name until 2026-11-24 ([D0043](decisions/D0043-rename-to-holm.md)). An install under that name moves once, by itself: the runner and every command move the config and data folders the first time they read the config, and `holm shell install` (or `up`, or `setup`) stops the old shell, moves it and its settings, and replaces its start-at-login item. Each move prints one line. After a `git pull`, `holm up` does all of it. The old names of the environment variables still work for one release.
 
 ## Windows with WSL
-As before this change; everything about it is in [the Windows shell](windows-shell.md). Electron is fetched for Windows x64 from WSL (`npm_config_platform=win32`), with WSL's npm and node. The shell's settings get `wsl: { distro, repo, bun }`, and nothing else is added. The shell on Windows starts the runner through `wsl.exe`. Start at login is the shell's Electron login item (the `Run` registry key).
+As before this change; everything about it is in [the Windows shell](windows-shell.md). Electron is fetched for Windows x64 from WSL: the `win32-x64` zip from Electron's release, checked and unpacked onto the Windows disk ([D0045](decisions/D0045-install-with-bun-only.md)). The shell's settings get `wsl: { distro, repo, bun }`, and nothing else is added. The shell on Windows starts the runner through `wsl.exe`. Start at login is the shell's Electron login item (the `Run` registry key).
 
 ## macOS
 - Electron is fetched for `darwin` and this Mac's architecture (`arm64` or `x64`), into `~/Library/Application Support/holm/shell`. The executable is `node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`.
@@ -94,6 +94,7 @@ CI runs it on `macos-latest` (job `macos`, after the unit tests) and on `ubuntu-
 | The shell's self-test, linux | WSLg, as root (`--no-sandbox`), X11 through XWayland | 2026-11-15 | Passed. Hotkeys, tray, clipboard text and image, the pop-up (placed again once shown: WSLg's window manager put it at 0,0), the dock (transparent), the snip's overlays and bridge, start on login read. The capture came back empty after about 3 s: skipped |
 | The shell's self-test, linux | WSLg's Xvfb (`xvfb-run`, no window manager), as root | 2026-11-15 | Passed, the dock opaque |
 | The shell's self-test, macos | a 14-inch MacBook Pro (notch 179x32 points, display 1470x956) | 2026-11-22 | Passed. The notch measured through AppKit, the dock's window at the very top edge centred on it, `/dock?notch=179x32` loaded. Seen by a person: not yet |
+| The bun-only install (D0045), macos | a MacBook Pro (darwin-arm64), a throwaway `HOME` and `BUN_INSTALL`, only bun and `/usr/sbin:/sbin` on the PATH (no git, Node or npm) | 2026-11-24 | `bun install -g` of the packed branch linked `holm` into `~/.bun/bin`; doctor showed Claude Code 2.1.322 as the Agent SDK's and codex 0.169.0; `shell install` fetched `electron-v45.3.1-darwin-arm64.zip` (121 MB, SHA-256 checked) and unpacked it byte for byte as `ditto` does; `setup --yes` (linux layout, no display) wrote the config, linked the command and started the runner |
 | The shell's self-test, linux | CI `linux-shell` (ubuntu-latest, Xvfb, sandbox on), PR #36 | 2026-11-15 | Passed. The renderer crash was not taken by `forcefullyCrashRenderer()` under the sandbox: the self-test kills it |
 | The shell's self-test, windows-wsl | this machine | 2026-11-15 | Passed, after the change: the same checks as before |
 | The shell's self-test with the materials (T-0050), windows-wsl | this machine, Windows build 26200 | 2026-11-15 | Passed. `materials (Windows 10.0.26200): pop-up acrylic, dock none, snip none, settings none` |
