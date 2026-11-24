@@ -59,14 +59,14 @@ export function settingsFile(): string {
 }
 
 export interface ShellPaths {
-  /** The shell's own folder: <LocalAppData>\intuition as a WSL path for windows-wsl; for the native layouts, ./platform's nativeHome. */
+  /** The shell's own folder: <LocalAppData>\holm as a WSL path for windows-wsl; for the native layouts, ./platform's nativeHome. */
   home: string;
   /** The installed app: main.cjs, package.json and node_modules/electron. */
   app: string;
   electronExe: string;
 }
 
-export function shellPaths(home = join(localAppData(), "intuition")): ShellPaths {
+export function shellPaths(home = join(localAppData(), "holm")): ShellPaths {
   const app = join(home, "shell");
   return { home, app, electronExe: join(app, "node_modules", "electron", "dist", "electron.exe") };
 }

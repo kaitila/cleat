@@ -15,13 +15,13 @@ import { startServer } from "../src/runner/server";
 const TIMEOUT_MS = 120_000;
 const PROMPT = "Reply with exactly: pong";
 
-const dir = mkdtempSync(join(tmpdir(), "intuition-smoke-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-smoke-"));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const configFile = join(dir, "config.json");
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace }] }));
-// Its own environment, so a INTUITION_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ INTUITION_CONFIG: configFile, INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" }));
+// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}`);
 
 // This runner has only the one session, so every message on /ws is about it.

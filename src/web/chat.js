@@ -915,7 +915,7 @@ function terminalMark() {
 function renderHead() {
   const session = selected ? sessions.get(selected) : undefined;
   els.head.hidden = !session;
-  document.title = session ? `${session.title || "Untitled"} · intuition` : "intuition";
+  document.title = session ? `${session.title || "Untitled"} · Holm` : "Holm";
   if (!session) return;
   els.title.textContent = session.title || "Untitled";
   els.dot.dataset.status = session.status;

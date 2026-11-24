@@ -212,7 +212,7 @@ describe("the contract with the shell", () => {
 
   test("the bridge is used for setState and onChat and nothing else, and the page works without it", () => {
     const js = noComments(source("dock.js"));
-    expect(js.match(/intuitionDock[?.\w]*/g)).toEqual(["intuitionDock?.setState", "intuitionDock?.onChat?."]);
+    expect(js.match(/holmDock[?.\w]*/g)).toEqual(["holmDock?.setState", "holmDock?.onChat?."]);
   });
 
   test("New task is a new window on /prompt; Open in chat grows the island into the chat, not a window (D0042)", () => {
@@ -301,9 +301,9 @@ describe("the chat: the island grown large (D0042)", () => {
 });
 
 describe("what the pill says", () => {
-  test("nothing going on: 'intuition', without a dot", () => {
-    expect(pillOf([])).toEqual({ tone: "none", text: "intuition", status: null, failed: false });
-    expect(pillOf([session("a", "idle")])).toEqual({ tone: "none", text: "intuition", status: null, failed: false });
+  test("nothing going on: 'holm', without a dot", () => {
+    expect(pillOf([])).toEqual({ tone: "none", text: "Holm", status: null, failed: false });
+    expect(pillOf([session("a", "idle")])).toEqual({ tone: "none", text: "Holm", status: null, failed: false });
   });
 
   test("running sessions are counted, with the running dot", () => {
@@ -500,7 +500,7 @@ describe("the open dock's hotkeys", () => {
     const now = Date.parse(at(0));
     const made = (minutesAgo: number, source?: string) => ({ createdAt: at(minutesAgo), ...(source ? { source } : {}) });
     expect(justStarted(made(0), false, now)).toBe(true);
-    expect(justStarted(made(0, "intuition"), false, now)).toBe(true);
+    expect(justStarted(made(0, "holm"), false, now)).toBe(true);
     expect(justStarted(made(0), true, now)).toBe(false);
     expect(justStarted(made(0, "terminal"), false, now)).toBe(false);
     expect(justStarted(made(1), false, now)).toBe(false);

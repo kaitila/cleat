@@ -128,7 +128,7 @@ describe("the Setup section", () => {
   test("no shell: it says how to start it, and what it would report is unknown, with no button", () => {
     const lines = byKey(setupLines(platform("macos"), true));
     expect(lines.shell!.tone).toBe("bad");
-    expect(lines.shell!.detail).toContain("intuition up");
+    expect(lines.shell!.detail).toContain("holm up");
     expect(lines.startOnLogin!.tone).toBe("unknown");
     expect(lines.screenRecording!.tone).toBe("unknown");
     expect(lines.screenRecording!.action).toBeUndefined();
@@ -148,10 +148,10 @@ describe("the Setup section", () => {
   test("start at login off, or unreadable: says how to turn it on, or how to find out why", () => {
     const off = byKey(setupLines(platform("linux", { connected: true, report: report({ os: "linux", startOnLogin: false }) }), true)).startOnLogin!;
     expect(off.tone).toBe("off");
-    expect(off.detail).toContain("intuition shell login on");
+    expect(off.detail).toContain("holm shell login on");
     const unread = byKey(setupLines(platform("linux", { connected: true, report: report({ os: "linux", startOnLogin: null }) }), true)).startOnLogin!;
     expect(unread.tone).toBe("bad");
-    expect(unread.detail).toContain("intuition shell login status");
+    expect(unread.detail).toContain("holm shell login status");
   });
 
   test("a hotkey not registered names it with its keys; an opaque dock gets a line", () => {
@@ -165,15 +165,15 @@ describe("the Setup section", () => {
   test("the runner not reachable, or no platform answer: the runner is bad and the rest unknown", () => {
     for (const lines of [byKey(setupLines(platform("macos", { connected: true, report: report() }), false)), byKey(setupLines(null, false))]) {
       expect(lines.runner!.tone).toBe("bad");
-      expect(lines.runner!.detail).toContain("intuition up");
+      expect(lines.runner!.detail).toContain("holm up");
       expect(lines.shell!.tone).toBe("unknown");
     }
   });
 
-  test("a layout the runner can't name says how to fix INTUITION_PLATFORM", () => {
+  test("a layout the runner can't name says how to fix HOLM_PLATFORM", () => {
     const line = byKey(setupLines(platform(null), true)).layout!;
     expect(line.tone).toBe("bad");
-    expect(line.detail).toContain("INTUITION_PLATFORM");
+    expect(line.detail).toContain("HOLM_PLATFORM");
   });
 
   test("every line that isn't ok says what to do", () => {

@@ -8,6 +8,7 @@ import type { LoginResult } from "../../shell/src/login";
 import { SNIP_PRELOAD } from "../../shell/src/snip";
 import { DEFAULT_SETTINGS, PID_FILE, withWsl } from "../../shell/src/settings";
 import type { WslSettings } from "../../shell/src/wsl";
+import { migrateShell } from "./legacy";
 import { REPO, SHELL_SRC, type ShellPaths } from "./paths";
 import { autostartEntry, autostartFile, currentPlatform, type LocalRunner, type Platform, platformFor, type RunnerLocation, windowsPidAlive } from "./platform";
 
@@ -67,7 +68,12 @@ function needPlatform(platform: Platform, starting: boolean): void {
 /** Copies the bundle and package.json into the shell's folder, and installs Electron there for the shell's OS unless the pinned version already is. */
 export async function install(paths?: ShellPaths, log: (line: string) => void = console.log, platform: Platform = currentPlatform()): Promise<void> {
   needPlatform(platform, false);
-  paths ??= platform.shellPaths();
+  const home = platform.shellPaths();
+  paths ??= home;
+  // Into the layout's own folder (not the self-test's): a shell installed under the old name moves first (legacy.ts).
+  if (paths.home === home.home) {
+    await migrateShell({ now: paths, userData: dirname(platform.settingsFile()), platform, log, stopOld: (old, pid) => stopAndWait(old, pid, undefined, platform) });
+  }
   mkdirSync(paths.app, { recursive: true });
   await buildShell(paths.app);
   copyFileSync(join(SHELL_SRC, "package.json"), join(paths.app, "package.json"));
@@ -104,7 +110,7 @@ function same(a: string, b: string): boolean {
  */
 export async function isCurrent(paths: ShellPaths): Promise<boolean> {
   if (!isInstalled(paths) || installedElectron(paths) !== wantedElectron()) return false;
-  const fresh = mkdtempSync(join(tmpdir(), "intuition-shell-bundle-"));
+  const fresh = mkdtempSync(join(tmpdir(), "holm-shell-bundle-"));
   try {
     await buildShell(fresh);
     copyFileSync(join(SHELL_SRC, "package.json"), join(fresh, "package.json"));
@@ -116,7 +122,7 @@ export async function isCurrent(paths: ShellPaths): Promise<boolean> {
 
 function needInstalled(paths: ShellPaths, platform: Platform): void {
   needPlatform(platform, true);
-  if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
+  if (!isInstalled(paths)) throw new Error("the shell is not installed: run `holm shell install`");
 }
 
 /** Where the runner lives in WSL, for the Windows shell to start it: this distribution, this repo and the bun running this command. */
@@ -253,7 +259,7 @@ export async function login(action: "on" | "off" | "status", paths?: ShellPaths,
   await shell.exited;
   clearTimeout(timer);
   try {
-    if (!existsSync(resultFile)) throw new Error("the shell wrote no answer: an older bundle may be installed (run `intuition shell install`)");
+    if (!existsSync(resultFile)) throw new Error("the shell wrote no answer: an older bundle may be installed (run `holm shell install`)");
     const result = JSON.parse(readFileSync(resultFile, "utf8")) as LoginResult;
     if (result.error || typeof result.openAtLogin !== "boolean") throw new Error(`the shell could not ${action === "status" ? "read" : "set"} start on login: ${result.error}`);
     return result;
@@ -268,7 +274,7 @@ export async function login(action: "on" | "off" | "status", paths?: ShellPaths,
  */
 export function autostart(action: "on" | "off" | "status", paths: ShellPaths, platform: Platform, file = autostartFile()): LoginResult {
   if (action === "on") {
-    if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
+    if (!isInstalled(paths)) throw new Error("the shell is not installed: run `holm shell install`");
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, autostartEntry(paths.electronExe, [...platform.electronFlags(), platform.appArg(paths.app)]));
   } else if (action === "off") {

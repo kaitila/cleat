@@ -155,7 +155,7 @@ export function pillOf(sessions) {
   const running = all.filter((s) => s.status === "running").length;
   if (running > 0) return { tone: "running", text: `${running} running`, status: "running", failed };
   if (failed) return { tone: "failed", text: "failed", status: "error", failed };
-  return { tone: "none", text: "intuition", status: null, failed };
+  return { tone: "none", text: "Holm", status: null, failed };
 }
 
 /** A notification from the WebSocket, or null when it isn't one the dock can show. */
@@ -258,7 +258,7 @@ export function recentEvents(events, max = RECENT_EVENTS) {
 }
 
 /** Where the open dock keeps the session it was last left on (localStorage), to open on it again. */
-export const SESSION_KEY = "intuition.dock.session";
+export const SESSION_KEY = "holm.dock.session";
 
 /** The session the dock was last left on, from `storage` (localStorage); null when there is none or it can't be read. */
 export function savedSession(storage) {
@@ -327,7 +327,7 @@ export function stepSession(ids, current, step) {
 }
 
 /** Where the open dock keeps the workspace it shows (localStorage): "" or absent for all of them. */
-export const WORKSPACE_KEY = "intuition.dock.workspace";
+export const WORKSPACE_KEY = "holm.dock.workspace";
 
 /** The workspace the dock was last left on, from `storage` (localStorage); "" for all, or when it can't be read. */
 export function savedWorkspace(storage) {

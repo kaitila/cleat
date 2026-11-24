@@ -57,9 +57,9 @@ export function chatSize(area: Pick<Area, "width" | "height">): Size {
 }
 
 /** The one message the bridge sends: the state the page asks for. */
-export const DOCK_CHANNEL = "intuition-dock:set-state";
+export const DOCK_CHANNEL = "holm-dock:set-state";
 /** The one message the shell sends the page: grow into the chat, on a session (its id) or on the page's own pick (null). */
-export const DOCK_CHAT_CHANNEL = "intuition-dock:chat";
+export const DOCK_CHAT_CHANNEL = "holm-dock:chat";
 /** The preload's bundle, beside main.cjs in the app folder. */
 export const DOCK_PRELOAD = "dock-preload.cjs";
 /** How often the shell asks whether the runner is there, to hide the dock or bring it back. */
@@ -71,8 +71,8 @@ export const DOCK_MISSES = 2;
  * the update that added the dock, or one older than the shell some other way.
  */
 export const DOCK_STALE_RUNNER = {
-  title: "intuition: the runner is older than the shell",
-  body: "The dock needs a newer runner: run intuition up in WSL. The dock appears by itself once it is restarted.",
+  title: "Holm: the runner is older than the shell",
+  body: "The dock needs a newer runner: run holm up in WSL. The dock appears by itself once it is restarted.",
 } as const;
 
 /**

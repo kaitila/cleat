@@ -1,5 +1,5 @@
 {
-  "name": "intuition-shell",
+  "name": "holm-shell",
   "version": "0.1.0",
   "private": true,
   "description": "The Windows shell. `bun src/cli.ts shell install` copies this file and the bundle of shell/src into a Windows folder and installs Electron there.",

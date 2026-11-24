@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { buildSite, SITE, WEB } from "../scripts/build-site";
 
-const out = mkdtempSync(join(tmpdir(), "intuition-site-test-"));
+const out = mkdtempSync(join(tmpdir(), "holm-site-test-"));
 const files = buildSite(out);
 afterAll(() => rmSync(out, { recursive: true, force: true }));
 const read = (file: string) => readFileSync(join(out, file), "utf8");
@@ -18,7 +18,7 @@ const base = readFileSync(join(WEB, "base.css"), "utf8");
 const noComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "");
 
 /** The repository: the one other place the page links to (links, not loads). */
-const REPO = "https://github.com/kaitila/intuition";
+const REPO = "https://github.com/kaitila/holm";
 /** The SVG namespace in base.css's grain: a name inside a data: URL, not a request. */
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -62,7 +62,7 @@ describe("it loads nothing from outside its own folder", () => {
     }
   });
 
-  test("every local reference is relative and is a file in the build, so the page works under /intuition/", () => {
+  test("every local reference is relative and is a file in the build, so the page works under /holm/", () => {
     const local = [
       ...[...noComments(html).matchAll(/\s(?:href|src|srcset)="([^"]*)"/g)].map((m) => ["index.html", m[1]!] as const),
       ...files.filter((f) => f.endsWith(".css")).flatMap((f) => [...noComments(read(f)).matchAll(/url\("?([^")]+)"?\)/g)].map((m) => [f, m[1]!] as const)),
@@ -170,7 +170,7 @@ describe("what it says", () => {
   });
 
   test("the install line is the README's, and Copy copies it", () => {
-    expect(html).toContain("git clone https://github.com/kaitila/intuition &amp;&amp; cd intuition &amp;&amp; bun install &amp;&amp; bun run setup");
+    expect(html).toContain("git clone https://github.com/kaitila/holm &amp;&amp; cd holm &amp;&amp; bun install &amp;&amp; bun run setup");
     expect(js).toContain("navigator.clipboard.writeText(text)");
   });
 });

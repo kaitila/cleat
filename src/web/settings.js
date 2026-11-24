@@ -3,7 +3,7 @@
 // at the field it names (docs/protocol.md, "Settings"). Other windows' changes arrive as
 // { type: "settings" } on /ws. The theme is applied by theme.js, at once on a choice here.
 // The Setup section is GET /api/platform, followed by { type: "platform" } on /ws ("Platform").
-// The Agents section's status lines are GET /api/agents (as `intuition doctor` checks them), asked
+// The Agents section's status lines are GET /api/agents (as `holm doctor` checks them), asked
 // again when the page comes back into view, so a login made meanwhile shows.
 import { agentSvg } from "./agent.js";
 import { MAC } from "./keys.js";
@@ -124,7 +124,7 @@ function adopt(stored) {
   const workspaces = Array.isArray(stored.workspaces) ? stored.workspaces.map((w) => ({ ...w })) : [];
   for (const [i, w] of drafts) workspaces.splice(Math.min(i, workspaces.length), 0, w);
   state = { theme: stored.theme, permissionMode: stored.permissionMode, agent: stored.agent, workspaces, shell: stored.shell ? { ...stored.shell } : null, port: stored.port };
-  window.intuitionTheme?.apply(state.theme);
+  window.holmTheme?.apply(state.theme);
   render();
 }
 
@@ -297,7 +297,7 @@ for (const input of document.querySelectorAll('input[name="theme"]')) {
     if (!state) return;
     state.theme = input.value;
     // The live preview is the page itself: it takes the theme before the runner answers.
-    window.intuitionTheme?.apply(state.theme);
+    window.holmTheme?.apply(state.theme);
     void save();
   });
 }
