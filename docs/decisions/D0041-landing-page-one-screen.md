@@ -21,7 +21,7 @@ The owner, on 2026-11-24: "make the landing page in the new style, super minimal
 - The open dock over the words, as the real one floats over windows: it hid the name for a third of every loop.
 
 ## Risk
-- A visitor without a notch on their computer may not read the black tab as one. The first line names it.
+- A visitor without a notch on their computer may not read the black tab as one. The first line names it, and both agents (Claude Code and Codex).
 - Without JavaScript the notch stays idle and the keys are a Mac's.
 
 ## Screenshots
