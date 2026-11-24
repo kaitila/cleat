@@ -23,7 +23,9 @@ import {
 } from "./chat-format.js";
 import { canStop, manage, menuItems, renameInline, sessionMenu, visible } from "./chat-manage.js";
 import { renderMarkdown } from "./markdown.js";
+import { answersList, questionDecidedLabel, questionForm, questionsOf } from "./questions.js";
 import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.js";
+import { commandLabel } from "./keys.js";
 import {
   CLOSE_MS,
   DOCK_SIZES,
@@ -33,11 +35,15 @@ import {
   RECENT_EVENTS,
   asPeek,
   dockKey,
+  dockOrder,
   dockSizes,
   dockWorkspaces,
   enqueue,
   inWorkspace,
   islandSize,
+  isLive,
+  liveOthers,
+  LIVE_MAX,
   mayClose,
   nextPeek,
   onIsland,
@@ -76,6 +82,11 @@ const els = {
   panel: $("panel"),
   connection: $("connection"),
   workspace: $("workspace"),
+  switcher: $("switcher"),
+  switcherDot: $("switcher-dot"),
+  live: $("live"),
+  find: $("find"),
+  sessionsList: $("sessions-list"),
   sessions: $("sessions"),
   sessionsEmpty: $("sessions-empty"),
   session: $("session"),
@@ -87,15 +98,87 @@ const els = {
   text: $("reply-text"),
   hint: $("reply-hint"),
 };
-/** Beside the title: the agent the session runs on, its glyph and name. */
-const headAgent = h("span", "session-agent muted small");
-/** Beside the title: "in terminal" while a turn arrives from a terminal, else nothing. */
+/** In the switch, before the title: the agent the session runs on, its glyph, its name as the tooltip. */
+const headAgent = h("span", "session-agent");
+headAgent.setAttribute("role", "img");
+els.title.before(headAgent);
+/** In the head: "in terminal" while a turn arrives from a terminal, or a refusal for a moment, else nothing. */
 const headStatus = h("span", "session-status muted small");
 /** While the runner runs a turn of the session shown: it stops it. */
 const stopButton = h("button", "stop quiet small", "Stop");
 stopButton.type = "button";
 stopButton.hidden = true;
-els.more.before(headAgent, headStatus, stopButton);
+els.more.before(headStatus, stopButton);
+
+/** True while the list of sessions is open under the head. Each opening of the dock starts with it closed. */
+let listOpen = false;
+/** The row Up, Down and Enter in the find field work on: the first that matches, until moved. */
+let activeRow = null;
+const COMMAND = commandLabel();
+els.switcher.title = `Switch session (${COMMAND}K)`;
+
+/**
+ * Opens or closes the switch under the head; the island follows its height. Open, the keyboard is in
+ * its find field, so typing narrows the rows at once; closed, the find is empty again.
+ */
+function showList(on) {
+  listOpen = on;
+  els.sessionsList.hidden = !on;
+  els.switcher.setAttribute("aria-expanded", String(on));
+  els.panel.toggleAttribute("data-list", on);
+  els.find.value = "";
+  activeRow = on ? selected : null;
+  renderList();
+  if (!on) return;
+  // The session shown is one of the rows in view.
+  if (selected) rows.get(selected)?.item.scrollIntoView({ block: "nearest" });
+  els.find.focus({ preventScroll: true });
+}
+els.switcher.addEventListener("click", () => {
+  showList(!listOpen);
+  // Closed again from its own button: the keyboard goes back to the reply.
+  if (!listOpen) focusReply(true);
+});
+
+/** Picks a session from the switch or the head: it is shown, the switch closes, typing goes to its reply. */
+function pick(id) {
+  select(id);
+  if (listOpen) showList(false);
+  focusReply(true);
+}
+
+/** The sessions of the switch as it shows them: the dock's order (dock-state.js), narrowed by the find while open. */
+function switchOrder() {
+  return dockOrder(visible(sessions.values(), { workspace, query: listOpen ? els.find.value : "" }));
+}
+
+els.find.addEventListener("input", () => {
+  activeRow = switchOrder()[0]?.id ?? null;
+  renderList();
+});
+els.find.addEventListener("keydown", (e) => {
+  if (e.isComposing) return;
+  const ids = switchOrder().map((s) => s.id);
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    activeRow = stepSession(ids, activeRow, e.key === "ArrowDown" ? 1 : -1);
+    renderList();
+    if (activeRow) rows.get(activeRow)?.item.scrollIntoView({ block: "nearest" });
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    const id = ids.includes(activeRow) ? activeRow : ids[0];
+    if (id) pick(id);
+  }
+});
+
+/** While the command key is held, the switch's first nine rows show the digit that picks them. */
+function commandHeld(on) {
+  els.panel.toggleAttribute("data-command", on);
+}
+document.addEventListener("keydown", (e) => commandHeld(e.key === (COMMAND === "⌘" ? "Meta" : "Control") && !e.altKey && !e.shiftKey));
+document.addEventListener("keyup", () => commandHeld(false));
+window.addEventListener("blur", () => commandHeld(false));
+
 /**
  * The list rows' right-click menu (Rename, Pin, Archive) and the head's "…" (Open in chat, Continue
  * in terminal, then the same three). It lives in the panel, inside the island.
@@ -343,7 +426,25 @@ function follow() {
 
 els.scroller.addEventListener("scroll", () => {
   stick = els.scroller.scrollHeight - els.scroller.scrollTop - els.scroller.clientHeight < 32;
+  edgesSoon();
 });
+
+let edgesQueued = false;
+
+/**
+ * Marks the stream's edges that have text past them (dock.css draws a hairline there): under the
+ * head when it is scrolled down, above the reply box when there is more below.
+ */
+function edgesSoon() {
+  if (edgesQueued) return;
+  edgesQueued = true;
+  requestAnimationFrame(() => {
+    edgesQueued = false;
+    const s = els.scroller;
+    s.toggleAttribute("data-above", s.scrollTop > 1);
+    s.toggleAttribute("data-below", s.scrollHeight - s.scrollTop - s.clientHeight > 1);
+  });
+}
 
 /**
  * What arrives together (a session's events as it is opened): null when events arrive one by one.
@@ -363,6 +464,7 @@ function add(el, still = false) {
   els.stream.insertBefore(el, streamedEl?.parentNode === els.stream ? streamedEl : null);
   while (els.stream.childElementCount > RECENT_EVENTS + 10) els.stream.firstElementChild.remove();
   follow();
+  edgesSoon();
   return el;
 }
 
@@ -394,6 +496,7 @@ function renderStreamed() {
   renderText(streamedEl, text, true);
   if (streamedEl.parentNode !== els.stream) els.stream.append(streamedEl);
   follow();
+  edgesSoon();
 }
 
 /** A tool call as one line: its name and what it works on. The chat view has its input and result. */
@@ -427,10 +530,12 @@ function approvalCard(event) {
   el.dataset.state = "open";
   el.setAttribute("aria-label", "Approval needed");
   const head = h("div", "approval-head");
-  const stateEl = h("span", "approval-state small", "Needs your approval");
-  head.append(h("span", "approval-tool", String(event.toolName ?? "Tool")), stateEl);
+  // An agent's questions: the card is a form to answer them, Answer and Skip (questions.js, D0039).
+  const questions = questionsOf(event.toolName, event.input);
+  const stateEl = h("span", "approval-state small", questions ? "Needs your answer" : "Needs your approval");
+  head.append(h("span", "approval-tool", questions ? "Question" : String(event.toolName ?? "Tool")), stateEl);
   el.append(head);
-  const view = approvalView(event.toolName, event.input);
+  const view = questions ? { path: "", text: "", full: "" } : approvalView(event.toolName, event.input);
   if (view.path) el.append(h("div", "approval-path mono", view.path));
   if (view.text) {
     const pre = h("pre", "approval-input well", view.text);
@@ -447,19 +552,27 @@ function approvalCard(event) {
   }
   if (typeof event.reason === "string" && event.reason) el.append(h("div", "approval-reason muted small", event.reason));
   const actions = h("div", "approval-actions");
-  const allow = h("button", "primary", "Allow");
-  const deny = h("button", "", "Deny");
+  const allow = h("button", "primary", questions ? "Answer" : "Allow");
+  const deny = h("button", "", questions ? "Skip" : "Deny");
+  const form = questions ? questionForm(questions, { onChange: () => (allow.disabled = !form.answers()), onSubmit: () => form.answers() && !allow.disabled && void answer("allow") }) : null;
+  if (form) {
+    el.append(form.el);
+    allow.disabled = true;
+  }
   const error = h("span", "approval-error muted small");
   error.setAttribute("role", "status");
   const buttons = [allow, deny];
   const answer = async (decision) => {
+    const answers = decision === "allow" && form ? form.answers() : null;
+    if (decision === "allow" && form && !answers) return;
     for (const b of buttons) b.disabled = true;
+    form?.setDisabled(true);
     error.textContent = "";
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(event.approvalId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify(answers ? { decision, answers } : { decision }),
       });
       if (res.status === 404) throw new Error("this approval is no longer open");
       if (!res.ok) throw new Error(await errorText(res));
@@ -467,6 +580,8 @@ function approvalCard(event) {
     } catch (e) {
       error.textContent = `Couldn't send: ${unreachable(e)}`;
       for (const b of buttons) b.disabled = false;
+      form?.setDisabled(false);
+      if (form) allow.disabled = !form.answers();
     }
   };
   allow.type = deny.type = "button";
@@ -474,18 +589,22 @@ function approvalCard(event) {
   deny.addEventListener("click", () => void answer("deny"));
   actions.append(allow, deny, error);
   el.append(actions);
-  approvals.set(event.approvalId, { el, actions, state: stateEl });
+  approvals.set(event.approvalId, { el, actions, state: stateEl, questions, form });
   // It arrives with a small bounce (dock.css, .approval.arrive).
   add(el);
 }
 
-/** The card after its answer: what was decided, and no buttons. `decision` undefined: nobody answered. */
-function approvalDecided(card, decision) {
+/**
+ * The card after its answer: what was decided, and no buttons. `decision` undefined: nobody answered.
+ * A question card shows each question with the answer given, in the place of its form.
+ */
+function approvalDecided(card, decision, answers) {
   if (card.el.dataset.state !== "open") return;
   card.el.dataset.state = decision === "allow" || decision === "deny" ? decision : "unanswered";
   card.el.removeAttribute("aria-label");
-  card.state.textContent = decidedLabel(decision);
+  card.state.textContent = card.questions ? questionDecidedLabel(decision) : decidedLabel(decision);
   card.actions.remove();
+  if (card.form) card.form.el.replaceWith(answersList(card.questions, decision === "allow" ? answers : null));
   card.el.querySelector(".show-all")?.remove();
   follow();
 }
@@ -520,7 +639,7 @@ function apply(event) {
       break;
     case "approval_resolved": {
       const card = approvals.get(event.approvalId);
-      if (card) approvalDecided(card, event.decision);
+      if (card) approvalDecided(card, event.decision, event.answers);
       break;
     }
     case "result":
@@ -598,7 +717,7 @@ function arrived(added) {
 const rows = new Map();
 
 function renderList() {
-  const ordered = visible(sessions.values(), { workspace });
+  const ordered = switchOrder();
   const ids = new Set(ordered.map((s) => s.id));
   for (const id of [...rows.keys()]) {
     if (!ids.has(id)) {
@@ -619,7 +738,8 @@ function renderList() {
       link.addEventListener("click", (e) => {
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
-        select(session.id);
+        // Picked: the list makes way for the session, and typing goes to its reply.
+        pick(session.id);
       });
       link.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -635,11 +755,12 @@ function renderList() {
         mark: h("span", "terminal-mark mono muted small", ">_"),
         workspace: h("span", "row-workspace muted small"),
         time: h("time", "row-time muted small"),
+        key: h("kbd", "row-key"),
       };
       row.mark.title = TERMINAL_MARK_TITLE;
       row.mark.setAttribute("aria-label", TERMINAL_MARK_TITLE);
       row.mark.setAttribute("role", "img");
-      link.append(row.dot, row.agent, row.title, row.mark, row.workspace, row.time);
+      link.append(row.dot, row.agent, row.title, row.mark, row.workspace, row.time, row.key);
       item.append(link);
       rows.set(session.id, row);
     }
@@ -654,15 +775,60 @@ function renderList() {
     row.workspace.hidden = workspace !== "";
     row.time.dateTime = session.updatedAt;
     row.time.textContent = relativeTime(session.updatedAt, now);
+    row.key.textContent = i < 9 ? `${COMMAND}${i + 1}` : "";
+    row.key.hidden = i >= 9;
+    row.link.toggleAttribute("data-active", listOpen && session.id === activeRow);
     if (session.id === selected) row.link.setAttribute("aria-current", "true");
     else row.link.removeAttribute("aria-current");
     // Moved only when the order changed, so a focused row keeps its focus.
     if (els.sessions.children[i] !== row.item) els.sessions.insertBefore(row.item, els.sessions.children[i] ?? null);
   });
-  els.sessionsEmpty.textContent = workspace && shown().length > 0 ? `No sessions in ${workspace}.` : "No sessions yet. Start one with New task.";
+  els.sessionsEmpty.textContent =
+    listOpen && els.find.value.trim() ? "No session matches that." : workspace && shown().length > 0 ? `No sessions in ${workspace}.` : "No sessions yet. Start one with New task.";
   els.sessionsEmpty.hidden = ordered.length > 0;
   els.sessions.hidden = ordered.length === 0;
   renderWorkspaces();
+  renderLive();
+}
+
+/** The waiting sessions the head has shown, so one that newly waits nudges its dot once. */
+let liveWaiting = new Set();
+
+/**
+ * Beside the switch: the other sessions at work (waiting for the person first, then running), a
+ * small chip each with its status's dot and the start of its title, the whole title and status the
+ * tooltip. A press shows it. More than fit say "+n", which opens the switch.
+ */
+function renderLive() {
+  const all = dockOrder(visible(sessions.values(), { workspace })).filter((s) => s.id !== selected && isLive(s));
+  const others = liveOthers(all, null);
+  const waiting = new Set(all.filter((s) => s.status === "waiting_approval").map((s) => s.id));
+  els.live.replaceChildren();
+  for (const session of others) {
+    const button = h("button", "live-session quiet");
+    button.type = "button";
+    const label = `${session.title || "Untitled"}: ${sessionStatus(session)}`;
+    button.title = label;
+    button.setAttribute("aria-label", label);
+    const dot = h("span", "dot");
+    dot.dataset.status = session.status;
+    if (waiting.has(session.id) && !liveWaiting.has(session.id) && state === "open") {
+      dot.dataset.nudge = "";
+      dot.addEventListener("animationend", () => delete dot.dataset.nudge, { once: true });
+    }
+    button.append(dot, h("span", "live-title", session.title || "Untitled"));
+    button.addEventListener("click", () => pick(session.id));
+    els.live.append(button);
+  }
+  if (all.length > LIVE_MAX) {
+    const more = h("button", "live-more quiet small", `+${all.length - LIVE_MAX}`);
+    more.type = "button";
+    more.title = `${all.length - LIVE_MAX} more at work`;
+    more.addEventListener("click", () => showList(true));
+    els.live.append(more);
+  }
+  liveWaiting = waiting;
+  els.live.hidden = all.length === 0;
 }
 
 /** The workspace switch: "All workspaces", then each workspace that has a session, and the one chosen. */
@@ -721,6 +887,8 @@ async function act(id, action) {
   else if (action === "rename") {
     const row = rows.get(id);
     if (!row) return;
+    // The title is edited in its row: the list opens for it.
+    showList(true);
     renaming = true;
     await renameInline(document, row.title, session.title || "", (title) => run("rename", id, "rename", { title }));
     renaming = false;
@@ -781,13 +949,30 @@ stopButton.addEventListener("click", async () => {
 function renderHead() {
   const session = selected ? sessions.get(selected) : undefined;
   els.session.hidden = !session;
-  if (!session) return;
+  // With no session at all there is nothing to switch to (the line under the head says so).
+  els.switcher.hidden = shown().length === 0;
+  els.more.hidden = !session;
+  if (!session) {
+    els.title.textContent = "Sessions";
+    els.title.title = "";
+    delete els.switcherDot.dataset.status;
+    headAgent.hidden = true;
+    headStatus.hidden = !manageError;
+    headStatus.textContent = manageError;
+    stopButton.hidden = true;
+    return;
+  }
   els.title.textContent = session.title || "Untitled";
   els.title.title = session.title || "";
+  els.switcherDot.dataset.status = session.status;
+  els.switcherDot.title = sessionStatus(session);
   const kind = agentOf(session);
+  headAgent.hidden = false;
   if (headAgent.dataset.agent !== kind) {
     headAgent.dataset.agent = kind;
-    headAgent.replaceChildren(agentSvg(document, kind), agentName(kind));
+    headAgent.replaceChildren(agentSvg(document, kind));
+    headAgent.title = agentName(kind);
+    headAgent.setAttribute("aria-label", agentName(kind));
   }
   const status = sessionStatus(session);
   headStatus.textContent = manageError || (status === "in terminal" ? status : "");
@@ -945,8 +1130,8 @@ function select(id) {
   saveSession(storage(), id);
   els.text.value = (id && typed.get(id)) || "";
   renderList();
-  // The list shows about four rows: the one shown is one of them.
-  if (id) rows.get(id)?.item.scrollIntoView({ block: "nearest" });
+  // The list, when open, shows about four rows: the one shown is one of them.
+  if (id && listOpen) rows.get(id)?.item.scrollIntoView({ block: "nearest" });
   renderHead();
   renderReply();
   grow();
@@ -1002,8 +1187,8 @@ function holds() {
   return {
     pointerInside: inside,
     pointerDown: down,
-    // A row's menu or its title being edited holds it open as a focused reply box does.
-    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || renaming || picking(),
+    // A row's menu, its title being edited, or a find being typed holds it open as a focused reply box does.
+    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || renaming || picking() || (document.hasFocus() && listOpen && els.find.value !== ""),
     // A draft holds it open only while the dock has the keyboard: once the person has gone to another
     // app, nothing they could press reaches the dock (not Esc, not a press beside it), so it closes
     // when the pointer is away, and the draft is kept for when it opens again.
@@ -1024,6 +1209,7 @@ function open() {
   peeking = null;
   queue = [];
   lastPeeked = null;
+  showList(false);
   go("open");
   renderList();
   // The rows rise in one after the other as the panel comes in; one added later rises on its own.
@@ -1086,27 +1272,41 @@ document.addEventListener("keydown", (e) => {
   // Esc in the workspace switch's open list closes the list, not the dock.
   if (e.key !== "Escape" || e.isComposing || state !== "open" || picking()) return;
   e.preventDefault();
+  // The list open: Esc puts the list away, and a second one the dock.
+  if (listOpen) {
+    showList(false);
+    focusReply(true);
+    return;
+  }
   close();
 });
 
-// Alt+Up and Alt+Down: the session above or below in the list. Alt+1..9: that workspace; Alt+0: all
-// of them. The keyboard stays in the reply box, as it was (dock-state.js, dockKey).
+// ⌘K: the switch, open or closed. ⌘1..9: the session in that row of the switch. Ctrl+Tab and
+// Alt+Down, Ctrl+Shift+Tab and Alt+Up: the next one or the one before (dock-state.js, dockKey, D0040).
+// Picked by a key, the keyboard goes to the reply box.
 document.addEventListener("keydown", (e) => {
   if (state !== "open" || picking() || menu.isOpen || renaming) return;
   const key = dockKey(e);
   if (!key) return;
   e.preventDefault();
-  const auto = document.activeElement !== els.text || autoFocused;
-  if ("step" in key) {
-    const next = stepSession(visible(sessions.values(), { workspace }).map((s) => s.id), selected, key.step);
-    if (!next || next === selected) return;
-    select(next);
-  } else {
-    const value = key.workspace === 0 ? "" : els.workspace.options[key.workspace]?.value;
-    if (value === undefined || value === workspace) return;
-    els.workspace.value = value;
-    els.workspace.dispatchEvent(new Event("change"));
+  if ("find" in key) {
+    showList(!listOpen);
+    if (!listOpen) focusReply(true);
+    return;
   }
+  const ids = switchOrder().map((s) => s.id);
+  const next = "nth" in key ? ids[key.nth - 1] : stepSession(ids, listOpen ? activeRow : selected, key.step);
+  if (!next) return;
+  if (listOpen && "step" in key) {
+    // In the open switch a step only moves the highlight, as Up and Down do in its find.
+    activeRow = next;
+    renderList();
+    rows.get(next)?.item.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  const auto = document.activeElement !== els.text || autoFocused;
+  if (next !== selected) select(next);
+  if (listOpen) showList(false);
   focusReply(auto);
 });
 

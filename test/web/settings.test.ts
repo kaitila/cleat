@@ -39,6 +39,13 @@ describe("recording a shortcut", () => {
     expect(keycaps("Alt+num4")).toEqual(["Alt", "Num 4"]);
     expect(keycaps("")).toEqual([]);
   });
+
+  test("keycaps on a Mac: ⌘ for Super, and the modifiers by their symbols, never Win", () => {
+    expect(keycaps("Super+Shift+Space", true)).toEqual(["⌘", "⇧", "Space"]);
+    expect(keycaps("Control+Alt+S", true)).toEqual(["⌃", "⌥", "S"]);
+    expect(keycaps("CommandOrControl+Return", true)).toEqual(["⌘", "Return"]);
+    expect(recordKey({ code: "KeyK" }, true)).toEqual({ invalid: "Use ⌘, ⌥ or ⌃ with the key" });
+  });
 });
 
 describe("saving", () => {

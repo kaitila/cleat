@@ -57,9 +57,10 @@ export function keyOf(code) {
  * What a key press means while a shortcut is being recorded:
  * { accelerator } when it is a whole shortcut (Electron's form, as the shell registers it),
  * { cancel: true } for Esc alone, { pending: true } while only modifiers are down, and
- * { invalid: why } for a key without Ctrl, Alt or Win (a global shortcut would take that key everywhere).
+ * { invalid: why } for a key without Ctrl, Alt or Win (⌃, ⌥ or ⌘ on a Mac: a global shortcut would
+ * take that key everywhere).
  */
-export function recordKey(event) {
+export function recordKey(event, mac = false) {
   const mods = [];
   if (event.ctrlKey) mods.push("Control");
   if (event.altKey) mods.push("Alt");
@@ -68,18 +69,24 @@ export function recordKey(event) {
   if (event.code === "Escape" && mods.length === 0) return { cancel: true };
   const key = keyOf(event.code);
   if (key === null) return { pending: true };
-  if (!event.ctrlKey && !event.altKey && !event.metaKey) return { invalid: "Use Ctrl, Alt or Win with the key" };
+  if (!event.ctrlKey && !event.altKey && !event.metaKey) return { invalid: mac ? "Use ⌘, ⌥ or ⌃ with the key" : "Use Ctrl, Alt or Win with the key" };
   return { accelerator: [...mods, key].join("+") };
 }
 
 const CAPS = { Control: "Ctrl", CommandOrControl: "Ctrl", CmdOrCtrl: "Ctrl", Ctrl: "Ctrl", Super: "Win", Meta: "Win", Command: "Win", Cmd: "Win", Alt: "Alt", Option: "Alt", AltGr: "AltGr", Shift: "Shift", Plus: "+", Return: "Enter", Esc: "Esc", Escape: "Esc", Up: "↑", Down: "↓", Left: "←", Right: "→" };
 
-/** An accelerator as the keycaps to draw, one per key: "Control+Alt+Space" is Ctrl, Alt, Space. */
-export function keycaps(accelerator) {
+/** A Mac's keycaps: its modifiers by their symbols, in the words on its keys (Super is ⌘ there). */
+const MAC_CAPS = { ...CAPS, Control: "⌃", Ctrl: "⌃", CommandOrControl: "⌘", CmdOrCtrl: "⌘", Super: "⌘", Meta: "⌘", Command: "⌘", Cmd: "⌘", Alt: "⌥", Option: "⌥", Shift: "⇧", Return: "Return" };
+
+/**
+ * An accelerator as the keycaps to draw, one per key: "Control+Alt+Space" is Ctrl, Alt, Space, and
+ * on a Mac (`mac`) ⌃, ⌥, Space.
+ */
+export function keycaps(accelerator, mac = false) {
   if (typeof accelerator !== "string" || accelerator === "") return [];
   // "+" itself is the key "Plus"; a trailing "++" is a plus key, too.
   const parts = accelerator.endsWith("++") ? [...accelerator.slice(0, -2).split("+"), "+"] : accelerator.split("+");
-  return parts.filter((p) => p !== "").map((p) => CAPS[p] ?? (/^num(\d)$/.test(p) ? `Num ${p.slice(3)}` : p.length === 1 ? p.toUpperCase() : p));
+  return parts.filter((p) => p !== "").map((p) => (mac ? MAC_CAPS : CAPS)[p] ?? (/^num(\d)$/.test(p) ? `Num ${p.slice(3)}` : p.length === 1 ? p.toUpperCase() : p));
 }
 
 /**

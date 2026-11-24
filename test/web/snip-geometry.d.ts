@@ -16,7 +16,7 @@ declare module "*/web/snip-geometry.js" {
   export function anchorLabel(sel: Rect, label: Size, viewport: Size, boxPlacement?: string): { x: number; y: number; inside: boolean };
   export function initialWorkspace(workspaces: Workspace[], lastUsed: string | null): string | null;
   export function stepWorkspace(workspaces: Workspace[], current: string | null, step: number): string | null;
-  export function altDigit(event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; code?: string; key?: string }): number | null;
+  export function workspaceDigit(event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; isComposing?: boolean; code?: string; key?: string }, mac?: boolean): number | null;
   export function errorText(status: number, body: unknown): string;
   export function sessionBody(workspace: string, prompt: string, imagePath: string, agent?: string | null): { workspace: string; prompt: string; imagePath: string; agent?: string };
 }

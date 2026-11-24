@@ -1,11 +1,12 @@
 // The pop-up prompt (/prompt): pick a workspace, type a task, Enter starts the session.
 // The shell opens it in a small window on the hotkey, so everything works from the keyboard:
-// Enter starts, Shift+Enter is a new line, Alt+1..9 picks a workspace, Alt+A flips the agent
+// Enter starts, Shift+Enter is a new line, ⌘1..9 (Ctrl+1..9 off a Mac) picks a workspace, Alt+A flips the agent
 // (Claude Code or Codex, the workspace's own until flipped), Esc closes.
 // The shell captures the clipboard as the window opens: the capture shows under the task box and
 // goes with the task, unless it is removed (its × or Alt+Backspace).
 // The API is docs/protocol.md; the types are src/shared/protocol.ts.
 import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
+import { commandAria, commandDigit, MAC } from "./keys.js";
 
 export const UNREACHABLE = "the runner is not reachable";
 
@@ -19,13 +20,12 @@ export function initialWorkspace(workspaces, lastUsed) {
 }
 
 /**
- * The position (from 0) that Alt+1..9 asks for, or null for any other key. It reads the physical
- * key first: with Alt held, some keyboard layouts report another character in `key`.
+ * The position (from 0) that ⌘1..9 asks for (Ctrl+1..9 off a Mac), or null for any other key. Never
+ * Alt+digit: on a Finnish or German Mac, Option+2 is @ (keys.js, D0040).
  */
-export function altDigit(event) {
-  if (!event.altKey || event.ctrlKey || event.metaKey) return null;
-  const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code ?? "")?.[1] ?? (/^[1-9]$/.test(event.key ?? "") ? event.key : null);
-  return digit ? Number(digit) - 1 : null;
+export function workspaceDigit(event, mac = MAC) {
+  const digit = commandDigit(event, mac);
+  return digit === null ? null : digit - 1;
 }
 
 /** The line shown for an answer that isn't a success: the runner's own error text if it sent one. */
@@ -144,7 +144,7 @@ function start() {
         if (i < 9) {
           const key = document.createElement("kbd");
           key.textContent = String(i + 1);
-          radio.setAttribute("aria-keyshortcuts", `Alt+${i + 1}`);
+          radio.setAttribute("aria-keyshortcuts", `${commandAria()}+${i + 1}`);
           chip.append(key);
         }
         chip.append(w.name);
@@ -351,7 +351,7 @@ function start() {
       if (!busy) flip();
       return;
     }
-    const position = altDigit(e);
+    const position = workspaceDigit(e);
     if (position === null) return;
     e.preventDefault();
     const radio = radios()[position];

@@ -1,7 +1,7 @@
 // The agent driver: what runs one turn of a session. Three implementations: Claude Code through the
 // Agent SDK (agent-claude.ts), OpenAI Codex through the Codex SDK (agent-codex.ts), and a scripted
 // fake for tests and CI (agent-fake.ts). docs/agents.md says what each supports.
-import type { AgentKind, ApprovalDecision, PermissionMode, SessionEvent } from "../shared/protocol";
+import type { AgentKind, ApprovalDecision, PermissionMode, QuestionAnswers, SessionEvent } from "../shared/protocol";
 import type { Config } from "./config";
 import { claudeDriver } from "./agent-claude";
 import { codexDriver } from "./agent-codex";
@@ -17,6 +17,8 @@ export interface ApprovalAsk {
   input: unknown;
   /** Why the call needs approval, when the agent says. */
   reason?: string;
+  /** An AskUserQuestion call: given the person's answers, before the call is allowed (D0039). */
+  answered?: (answers: QuestionAnswers) => void;
 }
 
 export interface TurnInput {

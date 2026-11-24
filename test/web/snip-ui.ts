@@ -304,10 +304,10 @@ try {
   check("Alt+A flips it to Claude Code, and nothing is typed", s.agent === "claude" && s.task === "What is in this area?\nBe brief.", JSON.stringify([s.agent, s.task]));
   await page.keyboard.press("Alt+A");
   check("Alt+A again turns it back to Codex", (await page.evaluate(state)).agent === "codex");
-  await page.keyboard.press("Alt+1");
-  check("Alt+1 can't pick the missing workspace", (await page.evaluate(state)).workspace === "beta");
-  await page.keyboard.press("Alt+2");
-  check("Alt+2 picks the second", (await page.evaluate(state)).workspace === "alpha");
+  await page.keyboard.press("ControlOrMeta+1");
+  check("⌘1 can't pick the missing workspace", (await page.evaluate(state)).workspace === "beta");
+  await page.keyboard.press("ControlOrMeta+2");
+  check("⌘2 picks the second", (await page.evaluate(state)).workspace === "alpha");
   await page.keyboard.press("Shift+Tab");
   check("Shift+Tab goes back round", (await page.evaluate(state)).workspace === "beta");
   await shot(page, "light-typed");

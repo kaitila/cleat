@@ -202,20 +202,20 @@ try {
   await Bun.sleep(200);
   check("Enter on an empty task does nothing", (await sessions()).length === 0 && (await page.evaluate(state)).status === "");
 
-  await page.keyboard.press("Alt+1");
-  check("Alt+1 can't pick the missing workspace", checkedOf(await page.evaluate(state)) === "alpha");
+  await page.keyboard.press("ControlOrMeta+1");
+  check("⌘1 can't pick the missing workspace", checkedOf(await page.evaluate(state)) === "alpha");
   let m = await page.evaluate(motion);
   check("the window's contents spring in on the gentle curve, with a fade", m.page === "page-in, fade-in" && m.pageEasing.startsWith("linear("), JSON.stringify(m));
   check("the chosen workspace's background is one mark behind the chips, on the chosen chip", m.markOnChip && m.markBehind, JSON.stringify(m));
-  await page.keyboard.press("Alt+3");
+  await page.keyboard.press("ControlOrMeta+3");
   await pauseAll(page as unknown as FramePage);
   m = await page.evaluate(motion);
   check("the mark moves on a transform only, on the bouncy spring", /^transform linear\(/.test(m.markTransition), m.markTransition);
   const markFrames = await frameStrip(page as unknown as FramePage, await blank(), { selector: ".workspace-mark", clip: { x: 0, y: 0, width: 280, height: 56 }, times: TIMES, path: join(shots, "strip-workspace-moving.png"), title: "The workspace mark sliding from alpha to beta (--ease-bouncy), at 2x", zoom: 2 });
   console.log(`screenshot: ${join(shots, "strip-workspace-moving.png")}`);
-  check("Alt+3 slides the mark (a transition was running)", markFrames === 1, String(markFrames));
+  check("⌘3 slides the mark (a transition was running)", markFrames === 1, String(markFrames));
   s = await page.evaluate(state);
-  check("Alt+3 picks the third workspace and typing stays in the task box", checkedOf(s) === "beta" && s.focus === "task");
+  check("⌘3 picks the third workspace and typing stays in the task box", checkedOf(s) === "beta" && s.focus === "task");
   check("and the mark ends on that chip", (await page.evaluate(motion)).markOnChip);
   s = await page.evaluate(state);
   check("on beta the switch follows its agent, Codex", s.agent === "codex" && s.agentText === "Codex" && s.placeholder === "What should Codex do?", JSON.stringify([s.agent, s.placeholder]));

@@ -1,6 +1,7 @@
 // The real agent: Claude Code through the Claude Agent SDK's query().
 // The SDK changes often: read node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts before changing this.
 import type { CanUseTool, Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { ASK_USER_QUESTION, type QuestionAnswers } from "../shared/protocol";
 import type { AgentDriver, AgentOutput, NewEvent, TurnInput } from "./agent";
 import { toolSummary } from "./notifications";
 
@@ -8,19 +9,36 @@ import { toolSummary } from "./notifications";
 export const MAX_TOOL_RESULT = 20_000;
 
 export const DENIED = "The user denied this tool call.";
+/** What Claude is told when the person skips its questions. */
+export const SKIPPED = "The user skipped these questions without answering. Ask in your reply instead, or go on without the answers.";
 
 /**
  * Every call that would prompt waits here for the person's Allow or Deny (input.approve). An allow
- * runs the call with its input unchanged. updatedPermissions is never returned: there is no
- * "always allow".
+ * runs the call with its input unchanged, except an AskUserQuestion's, which gets the person's
+ * answers as `answers`: that is how Claude Code's own prompt hands them to the tool (D0039).
+ * updatedPermissions is never returned: there is no "always allow".
  */
 export function canUseToolFor(input: TurnInput): CanUseTool {
   return async (toolName, toolInput, options) => {
+    let answers: QuestionAnswers | undefined;
     const decision = await input.approve(
-      { toolUseId: options.toolUseID, toolName, input: toolInput, ...(options.decisionReason ? { reason: options.decisionReason } : {}) },
+      {
+        toolUseId: options.toolUseID,
+        toolName,
+        input: toolInput,
+        ...(options.decisionReason ? { reason: options.decisionReason } : {}),
+        ...(toolName === ASK_USER_QUESTION
+          ? {
+              answered: (given: QuestionAnswers) => {
+                answers = given;
+              },
+            }
+          : {}),
+      },
       options.signal,
     );
-    return decision === "allow" ? { behavior: "allow", updatedInput: toolInput } : { behavior: "deny", message: DENIED };
+    if (decision !== "allow") return { behavior: "deny", message: toolName === ASK_USER_QUESTION ? SKIPPED : DENIED };
+    return { behavior: "allow", updatedInput: answers ? { ...toolInput, answers } : toolInput };
   };
 }
 

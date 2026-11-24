@@ -125,6 +125,15 @@ export function watchMs(win: Area, state: DockState | null, cursor: Spot, notch:
   return state !== null && islandDistance(win, state, cursor, notch) <= DOCK_NEAR ? DOCK_WATCH_NEAR_MS : DOCK_WATCH_FAR_MS;
 }
 
+/**
+ * Whether a display's change of metrics can move the dock, from Electron's changedMetrics: its
+ * bounds, scale or rotation. Not the work area alone: a menu bar or the Dock hiding and showing
+ * changes it (a full-screen app on a Mac), and the dock hangs from the display's edge (D0037).
+ */
+export function movesDock(changed: readonly string[]): boolean {
+  return changed.some((metric) => metric !== "workArea");
+}
+
 /** Only in "open" can the window take the keyboard. */
 export function dockFocusable(state: DockState): boolean {
   return state === "open";

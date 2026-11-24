@@ -11,7 +11,7 @@ The owner, on 2026-11-22, with a screenshot of the open dock on a 14-inch MacBoo
 - **The page gets the notch as `/dock?notch=WxH`.** The sizes then follow it, the same in `shell/src/dock.ts` and `src/web/dock-state.js` (`dockSizes`): idle is the notch and a 76-pixel wing each side, at the notch's height; peek is 380 wide and the notch's height plus 40 tall; open is unchanged. The window keeps its one size (D0010).
 - **The island is opaque black, `--notch`, the same in every scheme.** With nothing going on, idle is the notch itself, so nothing shows. With something going on, the dot is in the left wing and the words in the right one, never under the notch, which hides them. The peek's line and the panel start below the notch's band.
 - **In idle the notch alone is the handle.** The shell takes the mouse there, and the page counts the pointer on the island there. The wings lie over the menu bar and let every click through to it, so a menu beside the notch can still be opened.
-- **Without a notch nothing changes**: a Mac without one, an external display as the primary, or a measurement that failed. The dock hangs below the menu bar as glass.
+- **Without a notch nothing changes** (on a Mac, replaced by [D0037](D0037-stand-in-notch.md): a stand-in notch): a Mac without one, an external display as the primary, or a measurement that failed. The dock hangs below the menu bar as glass.
 
 ## Why
 - **AppKit through osascript, not a native module.** The project is TypeScript only and adds no dependencies. `osascript` ships with macOS, answers in about 100 ms, and needs no permission. `NSScreen` is the only source of the notch's real width, which differs between the 14- and 16-inch models and with the display's scaling.

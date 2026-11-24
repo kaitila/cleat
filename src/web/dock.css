@@ -78,7 +78,7 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 }
 /* Idle: the pill fades in as the shape gathers. */
 .pill.layer { animation: layer-fade var(--dur-fade) var(--ease) calc(var(--dur-soft) / 3) backwards; }
-.layer.leaving { animation: layer-out var(--dur-out) var(--ease) forwards; pointer-events: none; }
+.layer.leaving { transform-origin: 50% 0; animation: layer-out var(--dur-out) var(--ease) forwards; pointer-events: none; }
 /* The pill's running dot breathes (base.css); a new "needs you" on the pill nudges its dot once (dock.js). */
 .pill .dot[data-nudge] { animation: nudge var(--dur-bouncy) var(--ease-gentle); }
 
@@ -101,7 +101,9 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 @keyframes card-pop { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
 /* The fade in clears a blur as it goes: the content comes into focus. */
 @keyframes layer-fade { from { opacity: 0; filter: var(--blur-in); } }
-@keyframes layer-out { to { opacity: 0; } }
+/* Leaving, the content gathers towards the top as it fades and blurs, with the shape: it is not cut
+   off by the shrinking clip at its full size. */
+@keyframes layer-out { to { opacity: 0; transform: scale(var(--pop)); filter: var(--blur-in); } }
 /* Up a little and back: twice the drawn size at most, for a moment. */
 @keyframes nudge { 35% { transform: scale(1.7); } }
 /* Reduced motion: the shape changes at once and the content fades in, plainly: no stagger, no
@@ -111,7 +113,7 @@ body { display: flex; justify-content: center; align-items: flex-start; }
   .layer.leaving { animation: none !important; }
 }
 /* The dock's own chrome is not text to select: a drag that starts on it selects nothing. The stream is. */
-.pill, .peek, .panel-head, .sessions, .session-head { user-select: none; }
+.pill, .peek, .panel-head, .sessions-list { user-select: none; }
 
 /* Out of a Mac's notch (D0035; dock.js sets data-notch, --notch-w, --notch-h and --wing): the island
    is the notch's own black, opaque and without a rim, so the notch and the island read as one shape.
@@ -120,6 +122,12 @@ body { display: flex; justify-content: center; align-items: flex-start; }
    the notch. Peek's line and the panel start below the notch's band, which the hardware covers. */
 .island[data-notch], .island[data-notch] > .surface { background: var(--notch); }
 .island[data-notch][data-state="idle"][data-tone="none"] { opacity: 1; }
+/* Closing into the notch: it rises first and narrows a moment later, so it withdraws up into the
+   notch as one drop and never stands as a tall thin column on the way. */
+.island[data-notch][data-state="idle"],
+.island[data-notch][data-state="idle"] > .surface {
+  transition: --island-h var(--dur-soft) var(--ease-soft), --island-w var(--dur-soft) var(--ease-soft) calc(var(--lag) * 1.5), opacity var(--motion) var(--ease);
+}
 .island[data-notch] .pill { justify-content: flex-start; padding-inline: var(--space-3); }
 .island[data-notch] .pill-text { order: 2; margin-inline-start: auto; max-width: calc(var(--wing) - var(--space-3)); }
 .island[data-notch] .peek.layer { top: var(--notch-h); }
@@ -145,11 +153,35 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 /* Nothing in the panel scrolls sideways: a title is one line that ends in "…", and a long word or a
    URL in the stream wraps. Its scrollbars are base.css's thin quiet ones, on no track of their own. */
 .panel { display: flex; flex-direction: column; overflow: hidden; }
-/* The head: which workspace's sessions, and New task. The switch is the one quiet dropdown. */
-.panel-head { flex: none; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2) var(--space-2) var(--space-1); }
-.workspace { flex: 0 1 auto; min-width: 0; max-width: 60%; }
-.connection { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.panel-head .button { flex: none; margin-left: auto; }
+/* The head (D0038): the session shown, which is also the switch to the others; what applies to it
+   now (Stop, a refusal for a moment); its "…"; and New task. One line, the title the widest thing in it. */
+.panel-head { flex: none; display: flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-2) var(--space-1); }
+button.switcher { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: var(--space-2); padding-inline: var(--space-2); color: var(--text); font-weight: var(--medium); }
+.switcher-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-agent { flex: none; display: inline-flex; color: var(--muted); }
+.chevron { flex: none; width: var(--space-3); height: var(--space-3); fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+button.switcher[aria-expanded="true"] { background: var(--hover); }
+.switcher[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+.connection { flex: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-head .session-status { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-head .stop, .panel-head .more { flex: none; }
+/* New task at the far right, whatever else is in the head. */
+.panel-head .new-task { flex: none; margin-left: auto; }
+/* Beside the switch, the other sessions at work (D0040): a small chip each, waiting first, its dot and
+   the start of its title. A press shows it. One that newly waits nudges its dot once. The switch's
+   own title gives way first, then the chips. */
+.live { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: var(--space-1); }
+button.live-session { flex: 0 1 auto; min-width: var(--control-s); max-width: calc(var(--control) * 4); display: inline-flex; align-items: center; gap: var(--space-1); padding-inline: var(--space-2); color: var(--muted); font-size: var(--text-s); }
+.live-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-more { flex: none; min-width: 0; padding-inline: var(--space-1); color: var(--muted); }
+.live .dot[data-nudge] { animation: nudge var(--dur-bouncy) var(--ease-gentle); }
+/* The list of sessions, under the head only when asked for: the workspace filter, then the rows. */
+.sessions-list { flex: none; display: flex; flex-direction: column; min-height: 0; border-bottom: var(--hairline) solid var(--line); }
+/* The switch's top: a find field that has the keyboard while it is open, and the workspace filter. */
+.sessions-top { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2) var(--space-1); }
+.find { flex: 1; min-width: 0; min-height: var(--control-s); padding-block: 0; border-color: var(--line); background: var(--surface); }
+.find:focus-visible { border-color: var(--line-strong); outline-color: transparent; }
+.workspace { flex: 0 1 auto; min-width: 0; max-width: 40%; }
 /* About four rows, the rest scroll, so the stream below has the room. */
 .sessions {
   flex: none;
@@ -170,25 +202,28 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-workspace { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-time { flex: none; }
+/* The row Up, Down and Enter in the find work on. */
+.session-row[data-active] { background: var(--hover); }
+/* ⌘1..9: shown in place of the time while the command key is held. */
+.row-key { display: none; }
+.panel[data-command] .row-key:not([hidden]) { display: inline-flex; }
+.panel[data-command] .session-row:has(.row-key:not([hidden])) .row-time { display: none; }
 /* A session started in the terminal: a quiet glyph before its workspace. */
 .terminal-mark { flex: none; }
 /* The agent a session runs on: a quiet glyph after its dot, the agent's name as its tooltip. */
 .agent-mark { flex: none; display: inline-flex; color: var(--muted); }
 .empty { padding: var(--space-2) var(--space-4) var(--space-4); }
 
-.session { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: var(--hairline) solid var(--line); }
-/* The session's head: its title, then only what applies now (Stop while a turn runs) and a quiet "…"
-   for the rest (Open in chat, Continue in terminal, Rename, Pin, Archive). */
-.session-head { flex: none; display: flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-2) var(--space-1) var(--space-4); }
-.session-title { flex: 1; min-width: 0; font-size: var(--text-m); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-status { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-head .stop { flex: none; }
-.session-agent { flex: none; display: inline-flex; align-items: center; gap: var(--space-1); white-space: nowrap; }
+.session { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .more { flex: none; width: var(--control-s); padding: 0; color: var(--muted); letter-spacing: var(--track-l); }
 .more[aria-expanded="true"] { background: var(--hover); color: var(--text); }
 .send-anyway { margin-left: var(--space-1); }
-.scroller { flex: 0 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; }
-.stream { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-1) var(--space-4) var(--space-3); overflow-wrap: anywhere; }
+/* A hairline where text goes on past an edge: under the head, above the reply box (dock.js, edgesSoon).
+   With nothing past them the edges stay open. */
+.scroller { flex: 0 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; border-block: var(--hairline) solid transparent; }
+.scroller[data-above] { border-top-color: var(--line); }
+.scroller[data-below] { border-bottom-color: var(--line); }
+.stream { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-1) var(--space-4) var(--space-3); overflow-wrap: anywhere; }
 .stream > * { min-width: 0; max-width: 100%; }
 /* A code block wraps here too: the chat view is where it keeps its lines. */
 .stream .md pre.code-block { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
@@ -197,12 +232,16 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 
 .msg { min-width: 0; overflow-wrap: anywhere; }
 .msg.user { align-self: flex-end; max-width: 85%; padding: var(--space-1) var(--space-3); white-space: pre-wrap; }
-.msg.user:not(:first-child) { margin-top: var(--space-2); }
+/* A new turn starts with air above it: the person's message after the last one's end. */
+.msg.user:not(:first-child) { margin-top: var(--space-3); }
 /* Inline code on the dark glass: a little lighter than it. */
 .md :not(pre) > code { background: var(--surface); }
 .msg.streaming { color: var(--muted); }
-/* A tool call: one line, its name and what it works on. */
-.tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; min-height: var(--control-s); }
+/* A tool call: one line, its name and what it works on, small and muted so it reads as a step, not
+   as the agent's words. Calls in a row stay together as one block. */
+.tool-row { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; color: var(--muted); font-size: var(--text-s); line-height: var(--leading-tight); }
+.tool-row .tool-line { font-size: var(--text-s); }
+.tool-row + .tool-row { margin-top: calc(var(--space-2) - var(--space-3)); }
 .stream .approval-input { max-height: calc(var(--control) * 4); white-space: pre-wrap; overflow-wrap: anywhere; }
 .show-all { justify-self: start; }
 /* The end of a turn: quiet text, then a hairline to the edge. */
@@ -212,9 +251,11 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .error:not(.note) { padding: var(--space-1) var(--space-3); border: var(--hairline) solid var(--danger); border-radius: var(--radius); color: var(--danger); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* The reply box says what it is for in its placeholder; the line under it shows only when a reply
-   went wrong. */
-.reply { flex: none; padding: var(--space-2) var(--space-3) var(--space-2); border-top: var(--hairline) solid var(--line); }
-.reply textarea { max-height: calc(var(--control) * 4); overflow-x: hidden; }
+   went wrong. Calm, as the dock puts the keyboard in it on every opening: a faint field, no rule
+   above it and no accent ring; focused, only its edge firms up (D0038). */
+.reply { flex: none; padding: var(--space-1) var(--space-3) var(--space-3); }
+.reply textarea { max-height: calc(var(--control) * 4); overflow-x: hidden; border-color: var(--line); background: var(--surface); }
+.reply textarea:focus-visible { border-color: var(--line-strong); outline-color: transparent; }
 .reply textarea::placeholder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .reply-hint { margin-top: var(--space-1); padding-inline: var(--space-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

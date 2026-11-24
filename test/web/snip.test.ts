@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cropPlan, toPixels } from "../../shell/src/snip";
 import {
-  altDigit, anchorBox, anchorLabel, CLICK_SLOP, devicePixels, errorText, GAP, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, wholeDisplay,
+  workspaceDigit, anchorBox, anchorLabel, CLICK_SLOP, devicePixels, errorText, GAP, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, wholeDisplay,
 } from "../../src/web/snip-geometry.js";
 import { testRunner } from "../runner/helpers";
 
@@ -28,10 +28,11 @@ describe("the runner serves the snip page", () => {
 
   test("every module it imports is served, and the page needs nothing else from the runner", async () => {
     const imports = (file: string) => [...source(file).matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports("snip.js")).toEqual(["agent.js", "snip-geometry.js"]);
-    expect(imports("snip-geometry.js")).toEqual([]);
+    expect(imports("snip.js")).toEqual(["agent.js", "snip-geometry.js", "keys.js"]);
+    expect(imports("snip-geometry.js")).toEqual(["keys.js"]);
+    expect(imports("keys.js")).toEqual([]);
     expect(imports("agent.js")).toEqual([]);
-    for (const file of ["snip.js", "snip-geometry.js", "agent.js"]) {
+    for (const file of ["snip.js", "snip-geometry.js", "agent.js", "keys.js"]) {
       const res = await runner.get(`/assets/${file}`);
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toContain("javascript");
@@ -177,13 +178,14 @@ describe("the workspace chip and the keys", () => {
     expect(stepWorkspace([{ name: "gone", exists: false }], null, 1)).toBeNull();
   });
 
-  test("Alt+1..9 by the physical key", () => {
-    expect(altDigit({ altKey: true, code: "Digit3", key: "#" })).toBe(2);
-    expect(altDigit({ altKey: true, code: "Numpad1" })).toBe(0);
-    expect(altDigit({ altKey: true, key: "9" })).toBe(8);
-    expect(altDigit({ altKey: false, code: "Digit3" })).toBeNull();
-    expect(altDigit({ altKey: true, ctrlKey: true, code: "Digit3" })).toBeNull();
-    expect(altDigit({ altKey: true, code: "Digit0" })).toBeNull();
+  test("⌘1..9 (Ctrl+1..9 off a Mac) by the physical key; never Alt+digit, which types @ on a Finnish Mac", () => {
+    expect(workspaceDigit({ metaKey: true, code: "Digit3", key: "3" }, true)).toBe(2);
+    expect(workspaceDigit({ metaKey: true, code: "Numpad1" }, true)).toBe(0);
+    expect(workspaceDigit({ ctrlKey: true, key: "9" }, false)).toBe(8);
+    expect(workspaceDigit({ altKey: true, code: "Digit2", key: "@" }, true)).toBeNull();
+    expect(workspaceDigit({ ctrlKey: true, code: "Digit3" }, true)).toBeNull();
+    expect(workspaceDigit({ metaKey: true, code: "Digit3" }, false)).toBeNull();
+    expect(workspaceDigit({ metaKey: true, code: "Digit0" }, true)).toBeNull();
   });
 
   test("an error is the runner's own text, and the session body carries the snip's path", () => {

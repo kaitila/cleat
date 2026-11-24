@@ -693,6 +693,22 @@ kbd {
 .approval-input { max-height: 40vh; overflow: auto; }
 .approval-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
 .approval-error { min-width: 0; overflow-wrap: anywhere; }
+/* An agent's questions in the card (questions.js, D0039): each a group of options to pick, a row
+   each, the label over its description, then a line for the person's own words. Answered, each
+   question over its answer. */
+.questions { display: grid; gap: var(--space-3); min-width: 0; }
+.question { display: grid; gap: var(--hairline); min-width: 0; margin: 0; padding: 0; border: 0; }
+.question-text { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding: 0 0 var(--space-1); font-weight: var(--medium); overflow-wrap: anywhere; }
+.question-header { color: var(--muted); font-weight: var(--regular); }
+.option { display: flex; align-items: flex-start; gap: var(--space-2); min-width: 0; padding: var(--space-1) var(--space-2); border-radius: var(--radius-s); cursor: pointer; transition: background-color var(--motion) var(--ease); }
+.option:hover { background: var(--hover); }
+.option:has(input:checked) { background: var(--hover); }
+.option > input { flex: none; margin: calc((var(--text-m) * var(--leading) - var(--text-m)) / 2) 0 0; accent-color: var(--accent); }
+.option-words { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.option-own { margin-top: var(--space-1); }
+.question:disabled .option { cursor: default; opacity: 0.5; }
+.question-answers { display: grid; gap: var(--space-1); min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.question-answers dd { margin: 0 0 var(--space-1); }
 
 /* ---------- markdown: an assistant's message, drawn by markdown.js ---------- */
 /* Compact: a chat, not a document. Headings stay near the text size, lists are indented by about

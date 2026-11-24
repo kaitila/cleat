@@ -3,10 +3,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOCK_SIZES, dockBounds, dockSizes, islandRect, NOTCH_WING, takesMouse } from "../../shell/src/dock";
+import { DOCK_SIZES, dockBounds, dockSizes, islandRect, movesDock, NOTCH_WING, takesMouse } from "../../shell/src/dock";
 import { autostartEntry, autostartFile, LAUNCH_AGENT, launchAgentFile, launchAgentPlist } from "../../shell/src/login";
 import {
-  ACRYLIC_BUILD, CLEAR, defaultHotkeys, dockArea, NOTCH_PROBE, parseNotch, materialOptions, windowMaterial, windowsBuild, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
+  ACRYLIC_BUILD, CLEAR, defaultHotkeys, dockArea, dockNotchOf, NOTCH_PROBE, STAND_IN_NOTCH_HEIGHT, STAND_IN_NOTCH_WIDTH, parseNotch, materialOptions, windowMaterial, windowsBuild, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
   runnerDownHint, runnerSpawn, SCREEN_RECORDING_PANE, screenAllowed, shellOs,
 } from "../../shell/src/os";
 import { SHELL_DEFAULTS } from "../../shell/src/prefs";
@@ -95,6 +95,31 @@ describe("the dock per OS", () => {
     expect(dockBounds(dockArea("macos", { ...bounds, x: 1920 }, { ...workArea, x: 1920 }, { ...notch, x: 700 })).x).toBe(Math.round(1920 + 700 + 179 / 2 - 460 / 2));
     // Only a Mac has one.
     expect(dockArea("windows", bounds, workArea, notch)).toEqual(bounds);
+  });
+
+  test("a Mac display without a notch gets a fixed stand-in at its top centre (D0037)", () => {
+    const measured = { x: 666.5, width: 179, height: 38 };
+    // The display's own notch is kept.
+    expect(dockNotchOf(measured, bounds)).toEqual(measured);
+    // An external screen as the primary: 1920 wide.
+    const hp = { x: 0, y: 0, width: 1920, height: 1200 };
+    const standIn = dockNotchOf(null, hp);
+    expect(standIn).toEqual({ x: (1920 - STAND_IN_NOTCH_WIDTH) / 2, width: STAND_IN_NOTCH_WIDTH, height: STAND_IN_NOTCH_HEIGHT });
+    // The dock then hangs from the very top, centred on the display, whatever its menu bar does.
+    for (const top of [30, 0]) expect(dockBounds(dockArea("macos", hp, { ...hp, y: top, height: 1200 - top }, standIn))).toEqual({ x: 730, y: 0, width: 460, height: 480 });
+    // A display left of another (negative x) is centred on itself too.
+    expect(dockBounds(dockArea("macos", { ...hp, x: -1920 }, workArea, dockNotchOf(null, { ...hp, x: -1920 }))).x).toBe(-1920 + 730);
+    // A sensible notch for the page too: dockUrl's ?notch=WxH passes its parseNotch.
+    expect(standIn.width).toBeGreaterThanOrEqual(40);
+    expect(standIn.width).toBeLessThanOrEqual(400);
+    expect(standIn.height).toBeGreaterThanOrEqual(16);
+  });
+
+  test("only a change of a display's bounds, scale or rotation moves the dock, not its work area alone", () => {
+    // A full-screen app or a menu bar that hides itself: the work area alone. Nothing to do.
+    expect(movesDock(["workArea"])).toBe(false);
+    expect(movesDock([])).toBe(false);
+    for (const changed of [["bounds"], ["scaleFactor"], ["rotation"], ["bounds", "workArea"]]) expect(movesDock(changed)).toBe(true);
   });
 
   test("the notch is measured by osascript with an argument array, and read only when it is a sensible notch on this display", () => {

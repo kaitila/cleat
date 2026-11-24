@@ -1,6 +1,6 @@
 # D0032: The open dock is calmer: a workspace switch in its head, the session's actions in a "…", and nothing scrolls sideways
 
-Date: 2026-11-15. Status: active. Task: T-0047. Builds on [D0010](D0010-dock-fixed-window.md), [D0017](D0017-lively-dock-and-chat-motion.md), [D0020](D0020-session-management.md) and [D0027](D0027-custom-select.md).
+Date: 2026-11-15. Status: active; the head and the list are changed by [D0038](D0038-dock-session-switch.md). Task: T-0047. Builds on [D0010](D0010-dock-fixed-window.md), [D0017](D0017-lively-dock-and-chat-motion.md), [D0020](D0020-session-management.md) and [D0027](D0027-custom-select.md).
 
 ## Context
 The owner, on the open dock: "make this a whole lot simpler, remove the horizontal scroll and super clean, easy to switch workspace". A title with a URL pushed its row wider than the panel and the list scrolled sideways; the panel stacked the brand, New task, the list, the session's head with "Continue in terminal" and "Open in chat", the stream, the reply box and a key-hint line; and there was no way to see one workspace alone.

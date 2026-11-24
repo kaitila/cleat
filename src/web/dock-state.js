@@ -1,6 +1,7 @@
 // Pure logic for the dock: no DOM, no network, so it is unit tested with bun (test/web/dock.test.ts).
 // dock.js draws what these return. The contract with the shell is docs/protocol.md, "Dock".
 import { byActivity } from "./chat-format.js";
+import { commandDigit, commandK, MAC } from "./keys.js";
 
 /** The shell's window, in CSS pixels: one size for the dock's whole life. The same numbers as the shell's DOCK_WINDOW. */
 export const DOCK_WINDOW = { width: 460, height: 480 };
@@ -230,18 +231,42 @@ export function saveSession(storage, id) {
 }
 
 /**
- * What a key does in the open dock, or null: Alt+Up and Alt+Down step to the session above or below
- * in the list ({ step: -1 | 1 }); Alt+1..9 picks that workspace in the switch and Alt+0 all of them
- * ({ workspace: 0..9 }), as Alt+digit picks a workspace in the pop-up. The physical key is read
- * first: with Alt held some layouts report another character in `key`.
+ * What a key does in the open dock, or null (D0040). ⌘K (Ctrl+K off a Mac) opens or closes the
+ * switch ({ find: true }); ⌘1..9 shows the session in that row of the switch ({ nth: 1..9 });
+ * Ctrl+Tab and Ctrl+Shift+Tab, and Alt+Down and Alt+Up, the next or the one before ({ step }).
+ * Never Alt with a digit: on a Finnish or German Mac, Option+2 is @.
  */
-export function dockKey(event) {
-  if (!event?.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) return null;
+export function dockKey(event, mac = MAC) {
+  if (!event || event.isComposing) return null;
+  if (commandK(event, mac)) return { find: true };
+  const nth = commandDigit(event, mac);
+  if (nth !== null) return { nth };
+  if (event.key === "Tab" && event.ctrlKey && !event.altKey && !event.metaKey) return { step: event.shiftKey ? -1 : 1 };
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
   if (event.key === "ArrowUp") return { step: -1 };
   if (event.key === "ArrowDown") return { step: 1 };
-  const digit = /^(?:Digit|Numpad)([0-9])$/.exec(event.code ?? "")?.[1] ?? (/^[0-9]$/.test(event.key ?? "") ? event.key : null);
-  return digit === null ? null : { workspace: Number(digit) };
+  return null;
 }
+
+/** A session at work: running a turn, or waiting for the person. */
+export const isLive = (session) => session?.status === "waiting_approval" || session?.status === "running";
+
+/**
+ * The open dock's order of sessions (its switch, ⌘1..9, the steps): the ones that wait for the
+ * person first, then the running ones, then the rest as they come (`list` is already pinned first,
+ * then the newest: chat-manage.js, visible). So what needs a look is always at the top.
+ */
+export function dockOrder(list) {
+  const rank = (s) => (s.status === "waiting_approval" ? 0 : s.status === "running" ? 1 : 2);
+  return [...list].map((s, i) => [s, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([s]) => s);
+}
+
+/** The head's other sessions at work, beside the one shown: in the dock's order, at most `max`. */
+export function liveOthers(order, selected, max = LIVE_MAX) {
+  return order.filter((s) => s.id !== selected && isLive(s)).slice(0, max);
+}
+/** The head shows this many other sessions at work at most, as chips; the switch shows them all. */
+export const LIVE_MAX = 2;
 
 /** The session `step` rows from `current` in the list `ids`, stopping at either end; from outside the list, the first (down) or the last (up). */
 export function stepSession(ids, current, step) {

@@ -11,6 +11,9 @@
 //      asks for approval and waits for the answer, as a real call that would prompt does. Allowed,
 //      its `tool_result` is "fake: written" (nothing is written); denied, it is the real driver's
 //      denial message, as an error.
+//   3b. A prompt containing "ask me" gets an AskUserQuestion call (FAKE_QUESTIONS: one question to pick
+//      one option of, one to pick several) that waits for the person's answers. Answered, the reply
+//      is `You answered: <question> <answer>; ...`; skipped, `You skipped the questions.`
 //   4. It answers `You said: <prompt>`, streamed as three deltas, then stored as one `assistant_text`.
 //      It remembers each conversation's prompts by that session id, so a prompt containing
 //      "what did I say first" is answered with `You said first: <the conversation's first prompt>`:
@@ -47,6 +50,36 @@ export const AUTO_DENY = "auto deny";
 export const COUNT_SLOWLY = "count slowly";
 export const FAKE_CLASSIFIER = "the fake classifier blocks deletions";
 export const FAKE_REASON = "the fake agent asks before it writes";
+
+export const ASK_ME = "ask me";
+/** The fake's AskUserQuestion input: the SDK's shape (AskUserQuestionInput). */
+export const FAKE_QUESTIONS = {
+  questions: [
+    {
+      question: "Which colour should the button be?",
+      header: "Colour",
+      multiSelect: false,
+      options: [
+        { label: "Blue", description: "The accent, as the rest of the app" },
+        { label: "Green", description: "Stands out more" },
+      ],
+    },
+    {
+      question: "Which pages should get it?",
+      header: "Pages",
+      multiSelect: true,
+      options: [
+        { label: "Chat", description: "The chat view" },
+        { label: "Dock", description: "The open dock" },
+        { label: "Settings", description: "The settings page" },
+      ],
+    },
+  ],
+};
+
+export function fakeAnswered(answers: Record<string, string> | undefined): string {
+  return answers ? `You answered: ${Object.entries(answers).map(([q, a]) => `${q} ${a}`).join("; ")}` : "You skipped the questions.";
+}
 
 export function fakeDecided(decision: ApprovalDecision): string {
   return `The tool call was ${decision === "allow" ? "allowed" : "denied"}.`;
@@ -103,6 +136,28 @@ export function fakeDriver(stepMs = 5): AgentDriver {
         const allowed = decision === "allow";
         steps.push({ type: "event", event: { kind: "tool_result", toolUseId, content: allowed ? "fake: written" : DENIED, isError: !allowed } });
         text = fakeDecided(decision);
+      }
+      if (input.prompt.includes(ASK_ME)) {
+        const toolUseId = `fake-tool-${crypto.randomUUID()}`;
+        steps.push({ type: "event", event: { kind: "tool_use", toolUseId, name: "AskUserQuestion", input: FAKE_QUESTIONS } });
+        for (const step of steps.splice(0)) {
+          await Bun.sleep(stepMs);
+          if (cut()) return;
+          yield step;
+        }
+        let answers: Record<string, string> | undefined;
+        const decision = await input.approve({
+          toolUseId,
+          toolName: "AskUserQuestion",
+          input: FAKE_QUESTIONS,
+          answered: (given) => {
+            answers = given;
+          },
+        });
+        if (cut()) return;
+        if (decision !== "allow") answers = undefined;
+        text = fakeAnswered(answers);
+        steps.push({ type: "event", event: { kind: "tool_result", toolUseId, content: text, isError: !answers } });
       }
       if (input.prompt.toLowerCase().includes(COUNT_SLOWLY)) {
         for (const step of steps.splice(0)) {

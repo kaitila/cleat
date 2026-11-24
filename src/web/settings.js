@@ -6,6 +6,7 @@
 // The Agents section's status lines are GET /api/agents (as `intuition doctor` checks them), asked
 // again when the page comes back into view, so a login made meanwhile shows.
 import { agentSvg } from "./agent.js";
+import { MAC } from "./keys.js";
 import { agentLines, fieldKeys, isDraft, keycaps, move, putBody, recordKey, setupLines, usedAgents } from "./settings-model.js";
 
 const $ = (id) => document.getElementById(id);
@@ -270,7 +271,7 @@ function renderShell() {
     button.dataset.recording = String(recording === key);
     const caps = button.querySelector(".keycaps");
     if (recording === key) caps.replaceChildren(Object.assign(document.createElement("span"), { className: "muted", textContent: "Press the keys…" }));
-    else drawCaps(caps, shell ? keycaps(shell[key]) : []);
+    else drawCaps(caps, shell ? keycaps(shell[key], MAC) : []);
   }
   for (const input of document.querySelectorAll("[data-switch]")) {
     input.disabled = !shell;
@@ -278,7 +279,7 @@ function renderShell() {
   }
   const missing = $("shell-missing");
   missing.hidden = Boolean(shell);
-  missing.textContent = "The Windows shell hasn't connected yet. Start it once, and its shortcuts, dock and startup settings appear here.";
+  missing.textContent = "The desktop app hasn't connected yet. Start it once, and its shortcuts, dock and startup settings appear here.";
 }
 
 function drawCaps(into, caps) {
@@ -404,7 +405,7 @@ for (const button of document.querySelectorAll("[data-shortcut]")) {
     // Every key goes to the recording, Tab and Enter too; Esc alone keeps the old shortcut.
     e.preventDefault();
     e.stopPropagation();
-    const got = recordKey(e);
+    const got = recordKey(e, MAC);
     if (got.cancel) return stopRecording();
     if (got.pending) return;
     if (got.invalid) {

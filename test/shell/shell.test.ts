@@ -139,10 +139,11 @@ describe("bundle", () => {
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
     expect(main).toContain("sandbox: true, contextIsolation: true, nodeIntegration: false");
-    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(5);
-    // The pop-up, the chat and the Settings window: no preload. The dock and the snip overlays: the same preferences, plus their preload.
-    expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(3);
-    expect(main.match(/webPreferences:/g)).toHaveLength(5);
+    expect(main.match(/new BrowserWindow\(/g)).toHaveLength(6);
+    // The pop-up, the chat, the Settings window and the dock's keyboard sink (a Mac's, it loads nothing): no preload.
+    // The dock and the snip overlays: the same preferences, plus their preload.
+    expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(4);
+    expect(main.match(/webPreferences:/g)).toHaveLength(6);
     expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) }");
     expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) }");
     expect(main.match(/preload\s*:/g)).toHaveLength(2);
@@ -649,14 +650,22 @@ describe("the dock", () => {
     // Shown without activating. Focused once, in setDockState, and only when the state lets it take the keyboard ("open").
     expect(dockCode).toContain("win.showInactive();");
     expect(dockCode).not.toMatch(/\.show\(\)/);
-    expect(dockCode.match(/\.focus\(\)/g)).toHaveLength(1);
+    // The other: the Mac's keyboard sink, which takes the keyboard from the dock for a moment to give it back.
+    expect(dockCode.match(/\.focus\(\)/g)).toEqual([".focus()", ".focus()"]);
+    expect(dockCode).toContain("sink.focus();\n  sink.blur();");
+    expect(dockCode).toContain("if (giveBack && OS === \"macos\") giveKeyboardBack(win);");
     expect(dockCode).toContain("if (focusable && !win.isFocused()) win.focus();");
     // From the primary display, through dockArea: its bounds on Windows and Linux, from the work area's top on a Mac, or from its notch.
     expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch));");
-    // Once for the place, once for the bounds the notch's measurement is checked against.
-    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(2);
-    // A change of display places the dock again and measures the notch again.
-    for (const event of ["display-metrics-changed", "display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", displays);`);
+    // Once for the place, once for the bounds the notch's measurement is checked against, and twice to
+    // see whether the primary display changed while it was measured (then it is measured again); and
+    // once for the corner the Mac's keyboard sink sits in.
+    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(5);
+    expect(dockCode).toContain("if (screen.getPrimaryDisplay().id === primary || tries >= 2) return notch;");
+    // A change of display places the dock again and measures the notch again; a change of the work
+    // area alone (a full-screen app, a menu bar hiding) does not (D0037).
+    for (const event of ["display-added", "display-removed"]) expect(dockCode).toContain(`screen.on("${event}", displays);`);
+    expect(dockCode).toContain("if (movesDock(changed)) displays();");
     expect(dockCode).toContain('spawn("osascript", [...NOTCH_PROBE], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 5000 })');
     // Over the menu bar from a notch: a frameless window goes there only with enableLargerThanScreen, at the status level.
     expect(create).toContain('enableLargerThanScreen: OS === "macos"');
@@ -806,7 +815,10 @@ describe("the snip", () => {
     // One write, by name from the clock, in <temp>\intuition. Nothing the page sends names a file.
     expect(section.match(/saveClip\(|writeFileSync\(|writeFile\(/g)).toEqual(["saveClip("]);
     expect(section).toContain('saveClip(join(app.getPath("temp"), "intuition"), cut.toPNG(), new Date(), "snip")');
-    expect(main).toContain('activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, () => void snip());');
+    expect(main).toContain('activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, unlessSettings(() => void snip()));');
+    // Pressed while Settings has the keyboard (recording a shortcut), neither hotkey opens anything.
+    expect(main).toContain('activeHotkey = one("hotkey", activeHotkey, prefs.hotkey, unlessSettings(newTask));');
+    expect(main).toContain("if (settingsWindow && !settingsWindow.isDestroyed() && settingsWindow.isFocused()) return;");
     expect(main).toContain('{ label: "Snip", click: () => void snip() }');
   });
 

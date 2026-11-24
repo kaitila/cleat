@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, takesMouse, watchMs } from "./dock";
+import { acceptedState, DOCK_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, takesMouse, watchMs } from "./dock";
 import { centred, iconBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
@@ -21,7 +21,7 @@ import { REPORT_PATH, type ShellReport, shellAction, shellReport, shellSocketUrl
 import type { SelfTestResult } from "./result";
 import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Settings } from "./settings";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
-import { dockArea, dockTransparent, materialOptions, NOTCH_PROBE, parseNotch, windowMaterial, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
+import { dockArea, dockNotchOf, dockTransparent, materialOptions, NOTCH_PROBE, parseNotch, windowMaterial, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
 import { RUNNER_START_MS } from "./wsl";
 
 const POPUP = { width: 560, height: 380 };
@@ -769,7 +769,7 @@ let dockIgnoresMouse = true;
 let dockCursor = (): Electron.Point => screen.getCursorScreenPoint();
 let dockWatch: ReturnType<typeof setTimeout> | null = null;
 
-/** The primary display's notch, as last measured (a Mac's built-in display); null without one. */
+/** The notch the dock hangs from on the primary display, as last measured: its own or a stand-in (D0037). Null off a Mac. */
 let dockNotch: Notch | null = null;
 /** The first measurement, which every load of the dock waits for: its place and its page's address depend on it. */
 let notchMeasured: Promise<void> | null = null;
@@ -782,11 +782,26 @@ function firstNotch(): Promise<void> {
   return notchMeasured;
 }
 
-/** Measures the primary display's notch through AppKit (os.ts NOTCH_PROBE). Null off a Mac, without a notch, or when osascript fails. */
-function measureNotch(): Promise<Notch | null> {
-  if (OS !== "macos") return Promise.resolve(null);
-  const bounds = screen.getPrimaryDisplay().bounds;
-  return new Promise((resolve) => {
+/**
+ * Measures the primary display's notch through AppKit (os.ts NOTCH_PROBE). On a Mac there is always
+ * one: a display without a notch, or a measurement that failed, gets a stand-in (os.ts dockNotchOf,
+ * D0037). Null off a Mac.
+ */
+async function measureNotch(): Promise<Notch | null> {
+  if (OS !== "macos") return null;
+  // The primary display changed while osascript ran (a Space switching, a display waking): the
+  // answer may be another display's, so it is asked again, for the notch and the place to agree.
+  for (let tries = 0; ; tries++) {
+    const primary = screen.getPrimaryDisplay().id;
+    const notch = await measureNotchOnce();
+    if (screen.getPrimaryDisplay().id === primary || tries >= 2) return notch;
+  }
+}
+
+/** One measurement of the primary display's notch, or its stand-in. */
+function measureNotchOnce(): Promise<Notch | null> {
+  const { bounds } = screen.getPrimaryDisplay();
+  const resolved = new Promise<Notch | null>((resolve) => {
     let out = "";
     const child = spawn("osascript", [...NOTCH_PROBE], { stdio: ["ignore", "pipe", "ignore"], shell: false, timeout: 5000 });
     child.stdout?.on("data", (chunk: Buffer) => {
@@ -798,6 +813,7 @@ function measureNotch(): Promise<Notch | null> {
     });
     child.on("close", (code) => resolve(code === 0 ? parseNotch(out, bounds) : null));
   });
+  return resolved.then((measured) => dockNotchOf(measured, bounds));
 }
 
 /**
@@ -880,10 +896,50 @@ function forgetDockState(): void {
   if (!win || win.isDestroyed()) return;
   fitOpaqueDock();
   setDockMouse(win, false);
-  if (win.isFocused()) win.blur();
+  const giveBack = win.isFocused();
+  if (giveBack && OS !== "macos") win.blur();
   if (win.isFocusable()) {
     win.setFocusable(false);
     win.setSkipTaskbar(true);
+  }
+  if (giveBack && OS === "macos") giveKeyboardBack(win);
+}
+
+/**
+ * On a Mac, a window of no size and no colour that takes the keyboard from the dock for a moment
+ * and lets it go (giveKeyboardBack). Made the first time it is needed.
+ */
+let keyboardSink: BrowserWindow | null = null;
+
+/**
+ * Gives the keyboard back from the dock to the app the person was in. Electron's blur() on a Mac
+ * takes the window off the screen and puts it back (orderOut, orderBack), and any window put back
+ * fades in for about 230 ms: the island vanished for that long after every close. So the keyboard
+ * goes to the sink first, a non-activating panel too, and the sink is blurred: what fades is
+ * nothing. The dock itself is not moved. If the dock somehow still has it, blur() as before.
+ */
+function giveKeyboardBack(win: BrowserWindow): void {
+  if (OS !== "macos") {
+    win.blur();
+    return;
+  }
+  if (!keyboardSink || keyboardSink.isDestroyed()) {
+    const { x, y, height } = screen.getPrimaryDisplay().bounds;
+    keyboardSink = new BrowserWindow({ x, y: y + height - 1, width: 1, height: 1, type: "panel", show: false, frame: false, transparent: true, hasShadow: false, opacity: 0, focusable: false, skipTaskbar: true, title: "intuition keyboard", webPreferences: WEB_PREFERENCES });
+    keyboardSink.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    keyboardSink.setIgnoreMouseEvents(true);
+  }
+  const sink = keyboardSink;
+  sink.setFocusable(true);
+  sink.showInactive();
+  sink.focus();
+  sink.blur();
+  sink.setFocusable(false);
+  sink.hide();
+  if (win.isFocused()) {
+    win.blur();
+    // blur() also sends the window to the back of its level, behind the menu bar's own windows.
+    win.moveTop();
   }
 }
 
@@ -893,13 +949,16 @@ function setDockState(state: DockState): void {
   if (!win || win.isDestroyed()) return;
   dockState = state;
   const focusable = dockFocusable(state);
-  // Closing with the keyboard in it: the focus goes back to the window below.
-  if (!focusable && win.isFocused()) win.blur();
+  // Closing with the keyboard in it: the keyboard goes back to the window below. On a Mac once the
+  // dock can't take it any more, through the sink (giveKeyboardBack), so the island stays on the screen.
+  const giveBack = !focusable && win.isFocused();
+  if (giveBack && OS !== "macos") win.blur();
   if (win.isFocusable() !== focusable) {
     win.setFocusable(focusable);
     // On Windows, making a window focusable puts it back in the taskbar.
     win.setSkipTaskbar(true);
   }
+  if (giveBack && OS === "macos") giveKeyboardBack(win);
   // Open, the keyboard is the dock's, so the person types straight into its reply box (the page puts
   // it there). On a Mac the window is a non-activating panel: the app the person was in stays the
   // active one and has the keyboard back when the dock closes.
@@ -1051,11 +1110,21 @@ function dockEvents(): void {
   watchDockMouseLoop();
   // A display added or removed, a new resolution or scale: centred again on the primary display,
   // and its notch measured again (another display became the primary, or the lid closed).
-  const displays = () => void remeasureNotch().catch((e) => console.error("placing the dock failed", e));
-  screen.on("display-metrics-changed", displays);
+  // One at a time, in order: a burst of changes (a Space switching, a display waking) ends measured once more.
+  const displays = () => {
+    remeasuring = remeasuring.then(remeasureNotch).catch((e) => console.error("placing the dock failed", e));
+  };
+  // Only a change that can move the dock: not the work area alone, which a menu bar or the Dock
+  // hiding and showing changes (a full-screen app, D0037). The dock hangs from the display's edge.
+  screen.on("display-metrics-changed", (_event, _display, changed) => {
+    if (movesDock(changed)) displays();
+  });
   screen.on("display-added", displays);
   screen.on("display-removed", displays);
 }
+
+/** The chain of remeasureNotch calls, so two never interleave. */
+let remeasuring: Promise<void> = Promise.resolve();
 
 /** Measures the notch again and puts the dock in its place; a notch that came, went or changed loads the page again, for its shape. */
 async function remeasureNotch(): Promise<void> {
@@ -1133,6 +1202,17 @@ let activeSnipHotkey: string | null = null;
 /** The last hotkey of each that could not be registered and was said: said once, not at every settings message. */
 const hotkeySaid: Record<"hotkey" | "snip hotkey", string | null> = { hotkey: null, "snip hotkey": null };
 
+/**
+ * A hotkey's press, except while the Settings window has the keyboard: there the person records
+ * shortcuts, and pressing the one they have now must not open the pop-up or the snip over the page.
+ */
+function unlessSettings(press: () => void): () => void {
+  return () => {
+    if (settingsWindow && !settingsWindow.isDestroyed() && settingsWindow.isFocused()) return;
+    press();
+  };
+}
+
 /** Registers the two hotkeys of `prefs`. A change moves the shortcut; one that cannot be registered keeps the old one working, and a notification names it. */
 function registerHotkeys(): void {
   const ops = (press: () => void) => ({
@@ -1155,8 +1235,8 @@ function registerHotkeys(): void {
     for (const held of [activeHotkey, activeSnipHotkey]) if (held) globalShortcut.unregister(held);
     activeHotkey = activeSnipHotkey = null;
   }
-  activeHotkey = one("hotkey", activeHotkey, prefs.hotkey, newTask);
-  activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, () => void snip());
+  activeHotkey = one("hotkey", activeHotkey, prefs.hotkey, unlessSettings(newTask));
+  activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, unlessSettings(() => void snip()));
 }
 
 /** Takes the shell's part of the settings: the hotkeys, the dock, start on login, and the tray drawn again. */
