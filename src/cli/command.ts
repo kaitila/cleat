@@ -1,6 +1,6 @@
 // Which command a line of words names. Kept apart from src/cli.ts, which runs on import.
 
-/** What `intuition` alone does. */
+/** What `holm` alone does. */
 export const DEFAULT_COMMAND = "up";
 const HELP_WORDS = ["help", "--help", "-h"];
 

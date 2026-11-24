@@ -15,17 +15,17 @@ afterAll(async () => {
   for (const r of runners) rmSync(r.dir, { recursive: true, force: true });
 });
 
-/** A runner whose layout is `layout`, as INTUITION_PLATFORM says when it starts. */
+/** A runner whose layout is `layout`, as HOLM_PLATFORM says when it starts. */
 function runner(layout = "macos"): TestRunner {
-  const before = process.env.INTUITION_PLATFORM;
-  process.env.INTUITION_PLATFORM = layout;
+  const before = process.env.HOLM_PLATFORM;
+  process.env.HOLM_PLATFORM = layout;
   try {
     const r = testRunner();
     runners.push(r);
     return r;
   } finally {
-    if (before === undefined) delete process.env.INTUITION_PLATFORM;
-    else process.env.INTUITION_PLATFORM = before;
+    if (before === undefined) delete process.env.HOLM_PLATFORM;
+    else process.env.HOLM_PLATFORM = before;
   }
 }
 
@@ -57,8 +57,8 @@ describe("GET /api/platform", () => {
   });
 
   test("the layout is detectLayout's; one it can't name is null and the runner still answers", () => {
-    expect(layoutOrNull({ INTUITION_PLATFORM: "windows-wsl" })).toBe("windows-wsl");
-    expect(layoutOrNull({ INTUITION_PLATFORM: "amiga" })).toBeNull();
+    expect(layoutOrNull({ HOLM_PLATFORM: "windows-wsl" })).toBe("windows-wsl");
+    expect(layoutOrNull({ HOLM_PLATFORM: "amiga" })).toBeNull();
     // The contract's Layout and the command line's are the same three: this fails to typecheck otherwise.
     type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
     const same: Same<ContractLayout, DetectedLayout> = true;

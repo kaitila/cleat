@@ -101,17 +101,17 @@ function windowsTemp(): string | null {
     const users = "/mnt/c/Users";
     const temp = readdirSync(users).map((u) => join(users, u, "AppData", "Local", "Temp")).find((t) => existsSync(t));
     if (!temp) return null;
-    mkdirSync(join(temp, "intuition"), { recursive: true });
-    return mkdtempSync(join(temp, "intuition", "snip-ui-"));
+    mkdirSync(join(temp, "holm"), { recursive: true });
+    return mkdtempSync(join(temp, "holm", "snip-ui-"));
   } catch {
     return null;
   }
 }
 
-const dir = mkdtempSync(join(tmpdir(), "intuition-snip-ui-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-snip-ui-"));
 for (const name of ["alpha", "beta"]) mkdirSync(join(dir, name));
-const env = { INTUITION_CONFIG: join(dir, "config.json"), INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0", INTUITION_FAKE_AGENT: "1" };
-writeFileSync(env.INTUITION_CONFIG, JSON.stringify({ workspaces: ["gone", "alpha", "beta"].map((name) => ({ name, path: join(dir, name), ...(name === "beta" ? { agent: "codex" } : {}) })) }));
+const env = { HOLM_CONFIG: join(dir, "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0", HOLM_FAKE_AGENT: "1" };
+writeFileSync(env.HOLM_CONFIG, JSON.stringify({ workspaces: ["gone", "alpha", "beta"].map((name) => ({ name, path: join(dir, name), ...(name === "beta" ? { agent: "codex" } : {}) })) }));
 const runner = startServer(loadConfig(env));
 const shots = join(dir, "screenshots");
 mkdirSync(shots);
@@ -146,7 +146,7 @@ async function open(colorScheme: "light" | "dark", bridge = true, reducedMotion:
     }) as never);
     await page.addInitScript((url: string) => {
       const w = window as unknown as Record<string, unknown> & { __snipCrop(r: unknown): Promise<string>; __snipClose(): void };
-      w.intuitionSnip = { getCapture: async () => url, crop: (r: unknown) => w.__snipCrop(r), close: () => void w.__snipClose() };
+      w.holmSnip = { getCapture: async () => url, crop: (r: unknown) => w.__snipCrop(r), close: () => void w.__snipClose() };
     }, capture);
   }
   await page.goto(`${runner.url}/assets/snip.html`);

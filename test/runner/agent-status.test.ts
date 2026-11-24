@@ -27,7 +27,10 @@ describe("an agent's status, as doctor checks it", () => {
     const ok = table({ "claude --version": "2.1.0 (Claude Code)", "claude auth status": '{"loggedIn": true, "authMethod": "claude.ai"}' });
     expect(await claudeStatus(ok.output)).toEqual({ agent: "claude", installed: true, version: "2.1.0 (Claude Code)", loggedIn: true, detail: "2.1.0 (Claude Code), logged in", fix: "" });
     const out = table({ "claude --version": "2.1.0 (Claude Code)", "claude auth status": '{"loggedIn": false}' });
-    expect(await claudeStatus(out.output)).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: claude auth login" });
+    expect(await claudeStatus(out.output)).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: holm login" });
+    // The Agent SDK's own Claude Code, when it is there: the same checks, asked of it.
+    const sdk = table({ "/sdk/claude --version": "2.1.322 (Claude Code)", "/sdk/claude auth status": '{"loggedIn": true}' });
+    expect(await claudeStatus(sdk.output, "/sdk/claude")).toMatchObject({ installed: true, version: "2.1.322 (Claude Code)", loggedIn: true });
     const none = table({});
     expect(await claudeStatus(none.output)).toMatchObject({ installed: false, version: null, loggedIn: false });
     // Not installed: the login isn't asked.
@@ -38,7 +41,7 @@ describe("an agent's status, as doctor checks it", () => {
     const ok = table({ "/x/codex --version": "codex-cli 0.169.0", "/x/codex login status": "Logged in using ChatGPT" });
     expect(await codexStatus(ok.output, "/x/codex")).toEqual({ agent: "codex", installed: true, version: "codex-cli 0.169.0", loggedIn: true, detail: "codex-cli 0.169.0, logged in using ChatGPT", fix: "" });
     const out = table({ "/x/codex --version": "codex-cli 0.169.0", "/x/codex login status": "Not logged in" });
-    expect(await codexStatus(out.output, "/x/codex")).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: codex login" });
+    expect(await codexStatus(out.output, "/x/codex")).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: holm login codex" });
     const none = table({});
     expect(await codexStatus(none.output, null)).toMatchObject({ installed: false, loggedIn: false });
     expect(none.calls).toEqual([]);
@@ -47,7 +50,7 @@ describe("an agent's status, as doctor checks it", () => {
   test("the answer is kept for STATUS_TTL_MS, then asked again", async () => {
     const t = table({ "claude --version": "2.1.0" });
     let now = 1_000_000;
-    const status = machineStatus(t.output, () => null, () => now);
+    const status = machineStatus(t.output, () => null, () => now, () => null);
     const first = await status();
     expect(first.agents.map((a) => a.agent)).toEqual(["claude", "codex"]);
     await status();

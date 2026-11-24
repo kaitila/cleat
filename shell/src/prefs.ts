@@ -167,7 +167,7 @@ export function hotkeyNotice(which: "hotkey" | "snip hotkey" | "chat hotkey", fa
   // Under Wayland a shortcut can fail although nobody holds it: the tray has both actions.
   const tray = wayland ? " Under Wayland global shortcuts may not register at all: the tray's New task, Snip and Open chat do the same." : "";
   return {
-    title: `intuition: the ${which} could not be set`,
+    title: `Holm: the ${which} could not be set`,
     body: `${failed} could not be registered: another program holds it, another of the shell's hotkeys is the same, or it is not a valid shortcut. ${still} Choose another in Settings.${tray}`,
   };
 }

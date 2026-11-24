@@ -1,6 +1,6 @@
 // Runs the shell's self-test on this machine's layout: `bun src/shell/selftest-run.ts`.
 // windows-wsl: the Windows shell from WSL (needs /mnt/c). macos and linux: the shell on this machine (Linux
-// needs a display; INTUITION_PLATFORM=linux runs it under WSLg). Skipped when CI is set: a CI job that has
+// needs a display; HOLM_PLATFORM=linux runs it under WSLg). Skipped when CI is set: a CI job that has
 // a desktop runs it with `env -u CI`.
 // It installs the shell, starts a stub runner, runs Electron with --self-test and checks every field it wrote.
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -29,15 +29,15 @@ export function pngSize(data: Uint8Array): { width: number; height: number } | n
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   return { width: view.getUint32(16), height: view.getUint32(20) };
 }
-const PAGE = "<!doctype html><meta charset=utf-8><title>intuition self-test</title><p>self-test</p>";
+const PAGE = "<!doctype html><meta charset=utf-8><title>Holm self-test</title><p>self-test</p>";
 
 /**
  * The stub's dock page: clear, and it calls setState as the real page does. In a browser the bridge is
  * absent and the call is skipped. The self-test asks for the other states through the same function.
  */
-const DOCK_PAGE = `<!doctype html><meta charset=utf-8><title>intuition self-test dock</title>
+const DOCK_PAGE = `<!doctype html><meta charset=utf-8><title>Holm self-test dock</title>
 <style>html, body { margin: 0; background: transparent; }</style>
-<script>window.intuitionDock?.setState("idle");</script>`;
+<script>window.holmDock?.setState("idle");</script>`;
 const SILENT_DOCK_PAGE = DOCK_PAGE.replace(/<script>.*<\/script>/, "");
 
 /** The session the dock's link opens in the self-test. The shell's self-test names the same one. */
@@ -128,9 +128,9 @@ export function expectedExternal(runnerUrl: string): string[] {
   return [foreign, foreign, "mailto:someone@example.invalid", "https://example.invalid/"].sort();
 }
 
-/** A saved clip's or snip's path on a layout: <temp>\\intuition\\<kind>-<time>.png on Windows, <temp>/intuition/<kind>-<time>.png elsewhere. */
+/** A saved clip's or snip's path on a layout: <temp>\\holm\\<kind>-<time>.png on Windows, <temp>/holm/<kind>-<time>.png elsewhere. */
 export function savedPathPattern(layout: Layout, kind: "clip" | "snip"): RegExp {
-  return layout === "windows-wsl" ? new RegExp(`^[A-Za-z]:\\\\.*\\\\intuition\\\\${kind}-[\\d-]+\\.png$`) : new RegExp(`^/.*/intuition/${kind}-[\\d-]+\\.png$`);
+  return layout === "windows-wsl" ? new RegExp(`^[A-Za-z]:\\\\.*\\\\holm\\\\${kind}-[\\d-]+\\.png$`) : new RegExp(`^/.*/holm/${kind}-[\\d-]+\\.png$`);
 }
 
 /** The OS the shell runs on in a layout, as the result's `os` names it. */
@@ -186,14 +186,14 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
     if (!ok) bad.push(what);
   };
   const windows = layout === "windows-wsl";
-  const temp = windows ? "<temp>\\intuition\\" : "<temp>/intuition/";
+  const temp = windows ? "<temp>\\holm\\" : "<temp>/holm/";
   need(r.os === OS_OF[layout], `the shell ran on ${r.os}, not ${OS_OF[layout]}`);
   need(layout === "macos" || r.screenAccess === "granted", `the shell said Screen Recording is ${JSON.stringify(r.screenAccess)}, which only macOS asks for`);
   need(r.hotkeyRegistered, "the global hotkey did not register");
   need(r.trayCreated, "the tray icon was not created");
   need(r.textCaptured, "the text clipboard was not captured");
   need(r.textPosted, "the text capture was not posted");
-  need(posts.some((p) => typeof p.text === "string" && p.text.startsWith("intuition self-test ") && p.imagePath === undefined), "the stub runner did not receive the text");
+  need(posts.some((p) => typeof p.text === "string" && p.text.startsWith("holm self-test ") && p.imagePath === undefined), "the stub runner did not receive the text");
   need(r.imageCaptured, "the image clipboard was not captured");
   need(r.imagePosted, "the image capture was not posted");
   need(r.imagePath && posts.some((p) => p.imagePath === r.imagePath && p.text === undefined), "the stub runner did not receive the image's path");
@@ -229,7 +229,7 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   const notch: Notch | null = r.dockNotch ?? null;
   need(notch === null || (OS_OF[layout] === "macos" && notch.width >= 40 && notch.height >= 16), `the shell measured a notch ${JSON.stringify(r.dockNotch)} on ${layout}`);
   need(r.dockVisible, "the dock was not shown");
-  need(r.dockBridge === "object:setState,onChat,onChatKey:undefined:undefined", `the page sees more or less than intuitionDock.setState, onChat and onChatKey: ${r.dockBridge}`);
+  need(r.dockBridge === "object:setState,onChat,onChatKey:undefined:undefined", `the page sees more or less than holmDock.setState, onChat and onChatKey: ${r.dockBridge}`);
   // The same pure function the shell uses, run here on the display the shell reported.
   const display = isArea(r.primaryDisplay) && r.primaryDisplay.width > 0 && r.primaryDisplay.height > 0 ? r.primaryDisplay : null;
   need(display, `the primary display's bounds are ${JSON.stringify(r.primaryDisplay)}`);
@@ -317,7 +317,7 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   need(r.snipOverlaysShown, "the snip's overlays were not all shown on top");
   need(r.snipUrl === `${runnerUrl}/assets/snip.html`, `the snip overlay loaded ${r.snipUrl}, not ${runnerUrl}/assets/snip.html`);
   need(withheld || (typeof r.snipMs === "number" && r.snipMs > 0 && r.snipMs < SNIP_SLOW_MS), `the snip took ${r.snipMs} ms to show (more than ${SNIP_SLOW_MS} ms is broken, not slow)`);
-  need(r.snipBridge === "object:close,crop,getCapture:undefined:undefined", `the snip page sees more or less than intuitionSnip.getCapture, crop and close: ${r.snipBridge}`);
+  need(r.snipBridge === "object:close,crop,getCapture:undefined:undefined", `the snip page sees more or less than holmSnip.getCapture, crop and close: ${r.snipBridge}`);
   const phases = r.snipPhases;
   need(phases && typeof phases === "object" && ["captured", "drawn"].every((k) => k in phases) && Object.values(phases).every((n) => Number.isFinite(n)), `the snip's phases are ${JSON.stringify(phases)}`);
   need(JSON.stringify(r.snipCropRect) === JSON.stringify(SELF_TEST_CROP), `the snip cropped ${JSON.stringify(r.snipCropRect)}, not ${JSON.stringify(SELF_TEST_CROP)}`);

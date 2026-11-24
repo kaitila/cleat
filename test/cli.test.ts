@@ -57,10 +57,10 @@ describe("the ui", () => {
     }, () => ({ state: "ok" }));
     expect(out).toBe("✗ Step: broke\n");
     out = "";
-    ui.intro("intuition setup");
+    ui.intro("holm setup");
     ui.step(1, "Requirements");
     ui.outro("done");
-    expect(out).toBe("intuition setup\n\n\n1. Requirements\n\ndone\n");
+    expect(out).toBe("holm setup\n\n\n1. Requirements\n\ndone\n");
   });
 
   test("on a terminal a spinner redraws one line, hides the cursor and shows it again, and fits the width", async () => {
@@ -106,8 +106,8 @@ describe("hotkeys", () => {
 
 describe("every command into a pipe", () => {
   function env() {
-    const dir = mkdtempSync(join(tmpdir(), "intuition-cli-"));
-    return { ...process.env, INTUITION_CONFIG: join(dir, "config.json"), INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0", INTUITION_PLATFORM: "linux", XDG_DATA_HOME: join(dir, "share"), XDG_CONFIG_HOME: join(dir, "xdg"), HOME: join(dir, "home"), DISPLAY: "", WAYLAND_DISPLAY: "" };
+    const dir = mkdtempSync(join(tmpdir(), "holm-cli-"));
+    return { ...process.env, HOLM_CONFIG: join(dir, "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0", HOLM_PLATFORM: "linux", XDG_DATA_HOME: join(dir, "share"), XDG_CONFIG_HOME: join(dir, "xdg"), HOME: join(dir, "home"), DISPLAY: "", WAYLAND_DISPLAY: "" };
   }
   const run = (words: string[], extra: Record<string, string | undefined> = {}) => {
     const p = Bun.spawnSync([process.execPath, CLI, ...words], { cwd: REPO, env: { ...env(), ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -140,7 +140,7 @@ describe("every command into a pipe", () => {
     const report = JSON.parse(out);
     expect(report.layout).toBe("linux");
     expect(typeof report.ok).toBe("boolean");
-    expect(report.checks.map((c: { name: string }) => c.name)).toContain("node and npm");
+    expect(report.checks.map((c: { name: string }) => c.name)).not.toContain("node and npm");
     for (const c of report.checks) expect(Object.keys(c).sort()).toEqual(["detail", "fix", "name", "needed", "ok"]);
   });
 
@@ -150,6 +150,6 @@ describe("every command into a pipe", () => {
     expect(p.exitCode).toBe(2);
     expect(p.stdout.toString()).toContain("pass --yes to take every default");
     expect(p.stdout.toString()).not.toContain("\x1b");
-    expect(existsSync(e.INTUITION_CONFIG)).toBe(false);
+    expect(existsSync(e.HOLM_CONFIG)).toBe(false);
   });
 });

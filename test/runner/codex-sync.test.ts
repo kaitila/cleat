@@ -15,7 +15,7 @@ import { connect, settled, testRunner, type Socket, type TestRunner } from "./he
 
 /** A temp CODEX_HOME, and rollout files in it written line by line as Codex writes them. */
 class CodexHome {
-  readonly home = mkdtempSync(join(tmpdir(), "intuition-codex-home-"));
+  readonly home = mkdtempSync(join(tmpdir(), "holm-codex-home-"));
   private readonly paths = new Map<string, string>();
   private ordinal = 0;
 
@@ -252,7 +252,7 @@ describe("reading rollouts", () => {
   });
 
   test("no sessions folder at all is no threads", async () => {
-    const threads = codexThreads(join(tmpdir(), "intuition-no-codex-home-" + crypto.randomUUID()));
+    const threads = codexThreads(join(tmpdir(), "holm-no-codex-home-" + crypto.randomUUID()));
     expect(await threads.list("/w", 50)).toEqual([]);
     expect(await threads.info("x", "/w")).toBeUndefined();
   });
@@ -309,7 +309,7 @@ describe("Codex threads from the terminal", () => {
     await Bun.sleep(150);
     const sessions = await sessionsOf(r);
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]).toMatchObject({ id: session.id, source: "intuition", status: "idle", lastSeq: 3 });
+    expect(sessions[0]).toMatchObject({ id: session.id, source: "holm", status: "idle", lastSeq: 3 });
     expect(kinds(await eventsFrom(r, session.id))).toEqual(["user", "assistant_text", "result"]);
   });
 
@@ -373,10 +373,10 @@ describe("Codex threads from the terminal", () => {
     c.start("thread-1", workPath(r));
     c.turn("thread-1", "hello", "hi");
     const session = await terminalSession(r);
-    const refused = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from intuition" });
+    const refused = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from holm" });
     expect(refused.status).toBe(409);
     expect(((await refused.json()) as { error: string }).error).toBe(OPEN_IN_TERMINAL);
-    const forced = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from intuition", force: true });
+    const forced = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from holm", force: true });
     expect(forced.status).toBe(202);
     await idle(r, session.id);
     // The runner's own turn is no other process: the next reply needs no force, and nothing was stored twice.

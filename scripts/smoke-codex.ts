@@ -41,13 +41,13 @@ const FIRST = "Reply with exactly: pong";
 const SECOND = "Which word did you just reply with? Answer with that one word.";
 const THIRD = "Create a file named proof.txt in the current folder whose whole content is the two letters hi (no punctuation). Then reply with the word done.";
 
-const dir = mkdtempSync(join(tmpdir(), "intuition-smoke-codex-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-smoke-codex-"));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const configFile = join(dir, "config.json");
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace, agent: "codex" }] }));
-// Its own environment, so a INTUITION_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ INTUITION_CONFIG: configFile, INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" }));
+// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}, codex ${statusText}`);
 
 const seen: Record<string, unknown> = {};

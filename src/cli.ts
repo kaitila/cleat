@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The app's own commands: `intuition <command>` once `bun src/cli.ts link` has put it on the PATH, or `bun src/cli.ts <command>`.
+// The app's own commands: `holm <command>` once `bun src/cli.ts link` has put it on the PATH, or `bun src/cli.ts <command>`.
 // Every command prints through src/cli/ui.ts: the same marks, colours and spinners, and plain lines without a terminal.
 import { join } from "node:path";
 import { pick } from "./cli/command";
@@ -11,9 +11,14 @@ import { doctor, machineProbes, parseDoctorArgs } from "./cli/doctor";
 import { clackAsk, DEFAULTS, firstRun, parseSetupArgs, setup } from "./cli/setup";
 import { parseUninstallArgs, uninstall } from "./cli/uninstall";
 import { installCurrentShell } from "./cli/up";
+import { agentLogin, installKind, packageName, parseLoginAgent, update } from "./cli/update";
 import { errorText, makeUi, promptOutput, termOf, type State } from "./cli/ui";
 import { install, isInstalled, login, pidFile, prompt, removeShell, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
 import { currentPlatform } from "./shell/platform";
+import { adoptLegacyEnv } from "./shared/legacy";
+
+// The environment variables' names from before the rename, for one release (D0043, shared/legacy.ts). Before anything reads the environment.
+adoptLegacyEnv();
 
 const term = termOf();
 const ui = makeUi({ term });
@@ -23,17 +28,19 @@ const { c } = ui;
 function usage(): string {
   const h = (s: string) => c.bold(s);
   const rows = (list: [string, string][]) => list.map(([name, what]) => `  ${name.padEnd(32)}${what}`).join("\n");
-  return `intuition: fire tasks at Claude Code from a hotkey, a pop-up and a chat.
+  return `Holm: fire tasks at Claude Code from a hotkey, a pop-up and a chat.
 
 ${h("USAGE")}
-  intuition <command> [flags]
-  intuition                       up, or setup while there is no config yet
+  holm <command> [flags]
+  holm                       up, or setup while there is no config yet
 
 ${h("GET STARTED")}
 ${rows([
-  ["setup", "from a fresh clone to a running app"],
+  ["setup", "from a fresh install to a running app"],
   ["up", "start the runner, install and start the shell"],
+  ["login [claude|codex]", "log the agent in (Claude Code's own login)"],
   ["doctor [--json]", "check what it needs, with a fix for each"],
+  ["update", "get the newest version, then up"],
 ])}
 
 ${h("RUNNER")}
@@ -57,7 +64,7 @@ ${rows([
 
 ${h("MORE")}
 ${rows([
-  ["link [dir]", "put intuition on the PATH (default: bun's)"],
+  ["link [dir]", "put holm on the PATH (default: bun's)"],
   ["unlink [dir]", "remove that link"],
   ["uninstall [--purge]", "undo setup (--purge: config and sessions too)"],
   ["help", "print this"],
@@ -76,9 +83,9 @@ ${rows([
 ])}
 
 ${h("EXAMPLES")}
-  $ intuition setup
-  $ intuition setup --yes --workspace web=~/code/web --no-login
-  $ intuition doctor --json
+  $ holm setup
+  $ holm setup --yes --workspace web=~/code/web --no-login
+  $ holm doctor --json
 
 ${h("LEARN MORE")}
   README.md and docs/platforms.md. Colour follows NO_COLOR and FORCE_COLOR.`;
@@ -177,6 +184,7 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
         runnerUrl: () => runner.runnerUrl(),
         startShell: (open) => (open ? prompt(undefined, platform) : start(undefined, platform)),
         login: async (on) => (await login(on ? "on" : "off", undefined, platform)).openAtLogin === true,
+        agentLogin: (agent) => agentLogin(agent),
       },
       ask,
       { ui: makeUi({ term, guide: true }), probes: machineProbes(platform), version },
@@ -202,6 +210,10 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
       removeShell: () => removeShell(undefined, platform),
       stopRunner: () => runner.stop(),
       unlink: (dir) => unlink(dir),
+    }).then((code) => {
+      // Installed by `bun install -g`: the package itself is bun's to remove.
+      if (installKind() === "package") ui.line(`  the app itself: ${c.cyan(`bun remove --global ${packageName()}`)}`);
+      return code;
     });
   },
   "shell install": () =>
@@ -225,6 +237,12 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
     const { openAtLogin } = await login(action);
     ui.line(`${ui.mark(openAtLogin ? "ok" : "skip")} start on login is ${openAtLogin ? "on" : "off"}`);
   },
+  login: (rest) => {
+    const agent = parseLoginAgent(rest);
+    if (!agent) usageError(`login takes claude or codex, not ${rest.join(" ")}`);
+    return agentLogin(agent);
+  },
+  update: () => update((l) => ui.line(`${ui.mark("ok")} ${l}`)),
   link: (rest) => link(rest[0]),
   unlink: (rest) => unlink(rest[0]),
   help: () => console.log(usage()),
@@ -234,12 +252,12 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
 };
 
 const words = process.argv.slice(2);
-// The first plain `intuition`, before there is a config: setup.
+// The first plain `holm`, before there is a config: setup.
 const picked = words.length === 0 && firstRun() ? { name: "setup", rest: [] } : pick(words, Object.keys(commands));
 if (!picked) usageError(`unknown command: ${words.join(" ")}`);
 const { name, rest } = picked;
 /** How many words each command takes after its name; the others take none. */
-const takes: Record<string, number> = { setup: Infinity, uninstall: Infinity, start: 1, restart: 1, resume: 1, doctor: 1, "shell login": 1, link: 1, unlink: 1 };
+const takes: Record<string, number> = { setup: Infinity, uninstall: Infinity, login: 1, start: 1, restart: 1, resume: 1, doctor: 1, "shell login": 1, link: 1, unlink: 1 };
 if (rest.length > (takes[name] ?? 0)) usageError(`${name} does not take ${rest.join(" ")}`);
 try {
   const code = await commands[name]!(rest);

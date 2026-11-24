@@ -4,6 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ElectronTarget } from "./electron-fetch";
 import { autostartEntry, autostartFile as shellAutostartFile } from "../../shell/src/login";
 import { type LocalRunner, parseLocalRunner } from "../../shell/src/os";
 import { SETTINGS_FILE } from "../../shell/src/settings";
@@ -16,19 +17,19 @@ export const LAYOUTS: readonly Layout[] = ["windows-wsl", "macos", "linux"];
 type Env = Record<string, string | undefined>;
 
 /**
- * The layout: INTUITION_PLATFORM when it names one (tests, and trying the linux layout under WSLg), else
+ * The layout: HOLM_PLATFORM when it names one (tests, and trying the linux layout under WSLg), else
  * windows-wsl inside WSL (WSL_DISTRO_NAME, or "microsoft" in /proc/version), else from process.platform.
- * Throws for an INTUITION_PLATFORM that names none, and for a platform intuition has no layout for.
+ * Throws for an HOLM_PLATFORM that names none, and for a platform holm has no layout for.
  */
 export function detectLayout(env: Env = process.env, platform: string = process.platform, procVersion: () => string = readProcVersion): Layout {
-  const forced = env.INTUITION_PLATFORM;
+  const forced = env.HOLM_PLATFORM;
   if (forced !== undefined && forced !== "") {
     if ((LAYOUTS as readonly string[]).includes(forced)) return forced as Layout;
-    throw new Error(`INTUITION_PLATFORM is ${JSON.stringify(forced)}: it must be one of ${LAYOUTS.join(", ")}`);
+    throw new Error(`HOLM_PLATFORM is ${JSON.stringify(forced)}: it must be one of ${LAYOUTS.join(", ")}`);
   }
   if (platform === "darwin") return "macos";
   if (platform === "linux") return env.WSL_DISTRO_NAME || /microsoft/i.test(procVersion()) ? "windows-wsl" : "linux";
-  throw new Error(`intuition has no layout for ${platform}: on Windows, run it inside WSL`);
+  throw new Error(`holm has no layout for ${platform}: on Windows, run it inside WSL`);
 }
 
 function readProcVersion(): string {
@@ -59,8 +60,8 @@ export interface Platform {
   shellPaths(): ShellPaths;
   /** The shell's settings file: Electron's user data folder is <appData>/<the name in shell/package.json>. */
   settingsFile(): string;
-  /** npm's environment for fetching Electron for the shell's OS and architecture. */
-  electronEnv: Record<string, string>;
+  /** The Electron release zip the shell's OS and architecture need (./electron-fetch). */
+  electronTarget: ElectronTarget;
   /** The app folder as the Electron executable is given it (a Windows path for windows-wsl). */
   appArg(app: string): string;
   /** Extra Electron arguments before the shell's own. */
@@ -101,8 +102,8 @@ export function windowsPidAlive(pid: number): boolean {
   return p.exitCode === 0 && new RegExp(`\\s${pid}\\s`).test(p.stdout.toString());
 }
 
-/** npm's names for the architectures Electron ships. */
-function npmArch(arch: string = process.arch): string {
+/** Electron's names for the architectures it ships. */
+function electronArch(arch: string = process.arch): ElectronTarget["arch"] {
   return arch === "arm64" ? "arm64" : arch === "arm" ? "armv7l" : "x64";
 }
 
@@ -117,8 +118,8 @@ const windowsWsl: Platform = {
   unavailable: () => (hasWindows() ? null : "the Windows shell needs WSL with the Windows disk at /mnt/c"),
   shellPaths: () => windowsShellPaths(),
   settingsFile: () => windowsSettingsFile(),
-  // Electron is fetched for Windows although npm and node run in WSL.
-  electronEnv: { npm_config_platform: "win32", npm_config_arch: "x64" },
+  // Electron is fetched for Windows although the command runs in WSL.
+  electronTarget: { platform: "win32", arch: "x64" },
   appArg: (app) => toWindows(app),
   electronFlags: () => [],
   runnerLocation: (env = process.env, repo = REPO, bun = process.execPath) => {
@@ -140,7 +141,7 @@ function native(layout: "macos" | "linux", home: () => string): Platform {
     unavailable: (env = process.env) => (layout === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY ? "the Linux shell needs a display: neither DISPLAY nor WAYLAND_DISPLAY is set" : null),
     shellPaths: () => nativePaths(home()),
     settingsFile: () => join(appData(layout), shellName(), SETTINGS_FILE),
-    electronEnv: { npm_config_platform: layout === "macos" ? "darwin" : "linux", npm_config_arch: npmArch() },
+    electronTarget: { platform: layout === "macos" ? "darwin" : "linux", arch: electronArch() },
     appArg: (app) => app,
     // Chromium will not start as root with its sandbox (WSL's default user is root): the one case it is turned off.
     electronFlags: () => (layout === "linux" && isRoot() ? ["--no-sandbox"] : []),
@@ -158,8 +159,8 @@ function appData(layout: "macos" | "linux", env: Env = process.env): string {
 
 /** Where the shell is installed on a native layout: <home>/shell beneath it. */
 export function nativeHome(layout: "macos" | "linux", env: Env = process.env): string {
-  if (layout === "macos") return join(homedir(), "Library", "Application Support", "intuition");
-  return join(env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "intuition");
+  if (layout === "macos") return join(homedir(), "Library", "Application Support", "holm");
+  return join(env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "holm");
 }
 
 const PLATFORMS: Record<Layout, Platform> = {

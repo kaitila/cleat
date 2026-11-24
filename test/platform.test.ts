@@ -1,11 +1,11 @@
 // The platform layer: which layout this is, each layout's paths and commands, the settings `shell install`
-// writes, start at login through an XDG autostart file, and `intuition doctor`. Nothing here installs or starts a shell.
+// writes, start at login through an XDG autostart file, and `holm doctor`. Nothing here installs or starts a shell.
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_SETTINGS } from "../shell/src/settings";
-import { checks, doctor, nodeIsNew, type Probes, report } from "../src/cli/doctor";
+import { checks, doctor, type Probes, report } from "../src/cli/doctor";
 import { makeUi } from "../src/cli/ui";
 import { autostart, BUNDLE, withLocalRunner, writeRunnerLocation } from "../src/shell/install";
 import type { ShellPaths } from "../src/shell/paths";
@@ -13,25 +13,25 @@ import { autostartEntry, detectLayout, electronExe, LAYOUTS, nativeHome, parseLo
 
 const REPO = join(import.meta.dir, "..");
 const CLI = join(REPO, "src", "cli.ts");
-const dir = mkdtempSync(join(tmpdir(), "intuition-platform-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-platform-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("which layout", () => {
   const noProc = () => "";
 
-  test("INTUITION_PLATFORM names it, whatever the machine", () => {
+  test("HOLM_PLATFORM names it, whatever the machine", () => {
     for (const layout of LAYOUTS) {
-      expect(detectLayout({ INTUITION_PLATFORM: layout }, "linux", noProc)).toBe(layout);
-      expect(detectLayout({ INTUITION_PLATFORM: layout, WSL_DISTRO_NAME: "Ubuntu" }, "darwin", noProc)).toBe(layout);
+      expect(detectLayout({ HOLM_PLATFORM: layout }, "linux", noProc)).toBe(layout);
+      expect(detectLayout({ HOLM_PLATFORM: layout, WSL_DISTRO_NAME: "Ubuntu" }, "darwin", noProc)).toBe(layout);
     }
-    for (const bad of ["windows", "Linux", "mac"]) expect(() => detectLayout({ INTUITION_PLATFORM: bad }, "linux", noProc)).toThrow("INTUITION_PLATFORM");
+    for (const bad of ["windows", "Linux", "mac"]) expect(() => detectLayout({ HOLM_PLATFORM: bad }, "linux", noProc)).toThrow("HOLM_PLATFORM");
   });
 
   test("WSL is windows-wsl, by WSL_DISTRO_NAME or /proc/version; other Linux is linux; darwin is macos", () => {
     expect(detectLayout({ WSL_DISTRO_NAME: "Ubuntu" }, "linux", noProc)).toBe("windows-wsl");
     expect(detectLayout({}, "linux", () => "Linux version 5.15.167.4-microsoft-standard-WSL2")).toBe("windows-wsl");
     expect(detectLayout({}, "linux", () => "Linux version 6.8.0-49-generic (buildd@lcy02-amd64)")).toBe("linux");
-    expect(detectLayout({ INTUITION_PLATFORM: "" }, "linux", noProc)).toBe("linux");
+    expect(detectLayout({ HOLM_PLATFORM: "" }, "linux", noProc)).toBe("linux");
     expect(detectLayout({}, "darwin", noProc)).toBe("macos");
     expect(() => detectLayout({}, "win32", noProc)).toThrow("inside WSL");
   });
@@ -39,9 +39,9 @@ describe("which layout", () => {
 
 describe("each layout's paths and commands", () => {
   test("where the shell is installed on the native layouts", () => {
-    expect(nativeHome("linux", {})).toBe(join(homedir(), ".local", "share", "intuition"));
-    expect(nativeHome("linux", { XDG_DATA_HOME: "/data" })).toBe("/data/intuition");
-    expect(nativeHome("macos", { XDG_DATA_HOME: "/data" })).toBe(join(homedir(), "Library", "Application Support", "intuition"));
+    expect(nativeHome("linux", {})).toBe(join(homedir(), ".local", "share", "holm"));
+    expect(nativeHome("linux", { XDG_DATA_HOME: "/data" })).toBe("/data/holm");
+    expect(nativeHome("macos", { XDG_DATA_HOME: "/data" })).toBe(join(homedir(), "Library", "Application Support", "holm"));
     const linux = platformFor("linux").shellPaths();
     expect(linux.app).toBe(join(linux.home, "shell"));
     expect(linux.electronExe).toBe(join(linux.app, "node_modules", "electron", "dist", "electron"));
@@ -54,10 +54,10 @@ describe("each layout's paths and commands", () => {
   });
 
   test("Electron is fetched for the shell's OS: Windows x64 from WSL, as before; this machine's OS otherwise", () => {
-    expect(platformFor("windows-wsl").electronEnv).toEqual({ npm_config_platform: "win32", npm_config_arch: "x64" });
-    expect(platformFor("linux").electronEnv.npm_config_platform).toBe("linux");
-    expect(platformFor("macos").electronEnv.npm_config_platform).toBe("darwin");
-    for (const layout of ["linux", "macos"] as const) expect(["x64", "arm64", "armv7l"]).toContain(platformFor(layout).electronEnv.npm_config_arch!);
+    expect(platformFor("windows-wsl").electronTarget).toEqual({ platform: "win32", arch: "x64" });
+    expect(platformFor("linux").electronTarget.platform).toBe("linux");
+    expect(platformFor("macos").electronTarget.platform).toBe("darwin");
+    for (const layout of ["linux", "macos"] as const) expect(["x64", "arm64", "armv7l"]).toContain(platformFor(layout).electronTarget.arch);
   });
 
   test("the native layouts hand Electron the app folder as it is; only Linux as root turns Chromium's sandbox off", () => {
@@ -105,7 +105,7 @@ describe("where the runner lives, in the shell's settings", () => {
   });
 
   test("`shell install` on a native layout writes `runner`, keeping the rest of the file", () => {
-    const file = join(dir, "config", "intuition-shell", "settings.json");
+    const file = join(dir, "config", "holm-shell", "settings.json");
     const runner = { kind: "local", repo: "/r", bun: "/b" } as const;
     const lines: string[] = [];
     expect(writeRunnerLocation(file, runner, (l) => lines.push(l), platformFor("linux"))).toBe(true);
@@ -144,7 +144,7 @@ describe("start at login on Linux: an XDG autostart file", () => {
   test("on writes the entry that starts the installed Electron on the app folder, status reads it, off removes it", () => {
     const paths = fakeInstall();
     const linux = platformFor("linux");
-    const file = join(dir, "autostart", "intuition.desktop");
+    const file = join(dir, "autostart", "holm.desktop");
     expect(autostart("status", paths, linux, file)).toEqual({ openAtLogin: false, error: null });
     expect(autostart("on", paths, linux, file)).toEqual({ openAtLogin: true, error: null });
     const text = readFileSync(file, "utf8");
@@ -158,7 +158,7 @@ describe("start at login on Linux: an XDG autostart file", () => {
 
   test("on refuses when the shell is not installed", () => {
     const paths = { home: join(dir, "none"), app: join(dir, "none", "shell"), electronExe: join(dir, "none", "e") };
-    expect(() => autostart("on", paths, platformFor("linux"), join(dir, "a2", "intuition.desktop"))).toThrow("intuition shell install");
+    expect(() => autostart("on", paths, platformFor("linux"), join(dir, "a2", "holm.desktop"))).toThrow("holm shell install");
   });
 
   test("the Exec line quotes each argument and escapes what the format reads", () => {
@@ -166,7 +166,7 @@ describe("start at login on Linux: an XDG autostart file", () => {
   });
 });
 
-describe("intuition doctor", () => {
+describe("holm doctor", () => {
   const all = (over: Partial<Probes> = {}): Probes => ({
     output: (cmd) =>
       ({ git: "git version 2.43.0", node: "v22.12.0", npm: "10.9.0", claude: cmd[1] === "auth" ? '{ "loggedIn": true }' : "2.1.0 (Claude Code)", "/c/codex": cmd[1] === "login" ? "Logged in using ChatGPT" : "codex-cli 0.169.0" })[cmd[0]!] ?? null,
@@ -183,9 +183,14 @@ describe("intuition doctor", () => {
   const ui = makeUi({ term: { interactive: false, color: false, unicode: true, columns: 80 }, write: () => {} });
   const has = (lines: string[], mark: string, name: string) => lines.findIndex((l) => new RegExp(`^${mark} ${name.replace(/[()]/g, "\\$&")} +\\S`).test(l));
 
-  test("Node 22.12 or later", () => {
-    for (const v of ["v22.12.0", "v22.23.0", "v23.0.0", "24.1.0"]) expect(nodeIsNew(v)).toBe(true);
-    for (const v of ["v22.11.9", "v20.18.0", "v8.0.0", "nope"]) expect(nodeIsNew(v)).toBe(false);
+  test("git, Node and npm are not needed (D0045): git missing is a dash with its fix, exit 0; Node is never run", async () => {
+    const lines: string[] = [];
+    const ran: string[] = [];
+    const probes = all({ output: (cmd) => (ran.push(cmd[0]!), cmd[0] === "git" ? null : all().output(cmd)) });
+    expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), probes, {}, ui)).toBe(0);
+    expect(has(lines, "–", "git")).toBeGreaterThan(0);
+    expect(ran).not.toContain("node");
+    expect(ran).not.toContain("npm");
   });
 
   test("everything there: exit 0, the layout first, no fixes", async () => {
@@ -194,16 +199,13 @@ describe("intuition doctor", () => {
     expect(lines[0]).toBe("layout: linux (the runner and the shell on this machine)");
     expect(lines.join("\n")).not.toContain("fix:");
     expect(lines.at(-1)).toBe("✓ everything needed is there");
-    for (const name of ["git", "bun", "node and npm", "Claude Code", "Claude Code login", "config", "display", "runner", "shell installed", "shell running", "start at login", "Codex", "Codex login"]) {
+    for (const name of ["git", "bun", "Claude Code", "Claude Code login", "config", "display", "runner", "shell installed", "shell running", "start at login", "Codex", "Codex login"]) {
       expect(`${name}: ${has(lines, "✓", name) > 0}`).toBe(`${name}: true`);
     }
   });
 
   test("a needed prerequisite missing: exit 1, with its fix on the next line", async () => {
     for (const [what, probes, name] of [
-      ["no git", all({ output: (cmd) => (cmd[0] === "git" ? null : all().output(cmd)) }), "git"],
-      ["old node", all({ output: (cmd) => (cmd[0] === "node" ? "v20.18.0" : all().output(cmd)) }), "node and npm"],
-      ["no npm", all({ output: (cmd) => (cmd[0] === "npm" ? null : all().output(cmd)) }), "node and npm"],
       ["no claude", all({ output: (cmd) => (cmd[0] === "claude" ? null : all().output(cmd)) }), "Claude Code"],
       ["logged out", all({ output: (cmd) => (cmd[1] === "auth" ? '{ "loggedIn": false }' : all().output(cmd)) }), "Claude Code login"],
       ["broken config", all({ config: () => ({ ok: false, error: "/c/config.json is not valid JSON" }) }), "config"],
@@ -222,7 +224,7 @@ describe("intuition doctor", () => {
     const probes = all({ runner: async () => null, shellInstalled: () => false, shellPid: () => 42, login: async () => true });
     expect(await doctor({}, (l) => lines.push(l), platformFor("linux"), probes, {}, ui)).toBe(0);
     const text = lines.join("\n");
-    for (const [name, fix] of [["display", "desktop session"], ["runner", "intuition start"], ["shell installed", "intuition shell install"], ["shell running", "intuition shell start"], ["start at login", "intuition shell login on"]]) {
+    for (const [name, fix] of [["display", "desktop session"], ["runner", "holm start"], ["shell installed", "holm shell install"], ["shell running", "holm shell start"], ["start at login", "holm shell login on"]]) {
       expect(text).toMatch(new RegExp(`– ${name} +.*\\n +fix: .*${fix}`));
     }
     // Not installed: neither its pid nor its login item is asked for.
@@ -238,7 +240,7 @@ describe("intuition doctor", () => {
     expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), out, {}, ui)).toBe(0);
     const at = lines.findIndex((l) => /^– Codex login +not logged in/.test(l));
     expect(at).toBeGreaterThan(0);
-    expect(lines[at + 1]).toContain("codex login");
+    expect(lines[at + 1]).toContain("holm login codex");
   });
 
   test("windows-wsl checks the Windows disk, and needs it; macOS has no display check", async () => {
@@ -253,9 +255,9 @@ describe("intuition doctor", () => {
     expect(report(platformFor("macos"), mac, ui)[0]).toBe("layout: macos (the runner and the shell on this Mac)");
   });
 
-  test("the command: a layout line first, and a fix under every line that is not ok; a wrong INTUITION_PLATFORM is refused", () => {
-    const env = { ...process.env, INTUITION_CONFIG: join(dir, "doctor", "config.json"), INTUITION_DATA_DIR: join(dir, "doctor", "data"), INTUITION_PORT: "0", XDG_DATA_HOME: join(dir, "doctor", "share"), XDG_CONFIG_HOME: join(dir, "doctor", "xdg") };
-    const p = Bun.spawnSync([process.execPath, CLI, "doctor"], { cwd: REPO, env: { ...env, INTUITION_PLATFORM: "linux" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  test("the command: a layout line first, and a fix under every line that is not ok; a wrong HOLM_PLATFORM is refused", () => {
+    const env = { ...process.env, HOLM_CONFIG: join(dir, "doctor", "config.json"), HOLM_DATA_DIR: join(dir, "doctor", "data"), HOLM_PORT: "0", XDG_DATA_HOME: join(dir, "doctor", "share"), XDG_CONFIG_HOME: join(dir, "doctor", "xdg") };
+    const p = Bun.spawnSync([process.execPath, CLI, "doctor"], { cwd: REPO, env: { ...env, HOLM_PLATFORM: "linux" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const lines = p.stdout.toString().trim().split("\n");
     expect(lines[0]).toBe("layout: linux (the runner and the shell on this machine)");
     expect(lines.some((l) => /^– shell installed +not in /.test(l))).toBe(true);
@@ -264,8 +266,8 @@ describe("intuition doctor", () => {
     });
     expect(p.exitCode).toBe(lines.some((l) => l.startsWith("✗ missing")) ? 1 : 0);
 
-    const bad = Bun.spawnSync([process.execPath, CLI, "doctor"], { cwd: REPO, env: { ...env, INTUITION_PLATFORM: "beos" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const bad = Bun.spawnSync([process.execPath, CLI, "doctor"], { cwd: REPO, env: { ...env, HOLM_PLATFORM: "beos" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     expect(bad.exitCode).toBe(1);
-    expect(bad.stderr.toString()).toContain("INTUITION_PLATFORM");
+    expect(bad.stderr.toString()).toContain("HOLM_PLATFORM");
   });
 });

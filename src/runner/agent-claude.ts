@@ -1,9 +1,38 @@
 // The real agent: Claude Code through the Claude Agent SDK's query().
 // The SDK changes often: read node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts before changing this.
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import type { CanUseTool, Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ASK_USER_QUESTION, type QuestionAnswers } from "../shared/protocol";
 import type { AgentDriver, AgentOutput, NewEvent, TurnInput } from "./agent";
 import { toolSummary } from "./notifications";
+
+/**
+ * The Claude Code the SDK runs: the native CLI its platform package brings (@anthropic-ai/claude-agent-sdk-<os>-<arch>,
+ * or the -musl one on such a Linux), found as the SDK finds it. Null when it isn't installed. It is the whole
+ * Claude Code, so doctor asks it for its version and login, and `holm login` runs its `auth login` (D0045):
+ * no separate Claude Code install is needed.
+ */
+export function claudeBinary(): string | null {
+  try {
+    const sdk = createRequire(createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk/package.json"));
+    const name = process.platform === "win32" ? "claude.exe" : "claude";
+    // A musl Linux (Alpine) has no glibc runtime in Node's report: its package first, as the SDK picks it.
+    const musl = process.platform === "linux" && !(process.report?.getReport() as { header?: { glibcVersionRuntime?: string } } | undefined)?.header?.glibcVersionRuntime;
+    for (const suffix of musl ? ["-musl", ""] : ["", "-musl"]) {
+      try {
+        const dir = dirname(sdk.resolve(`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}${suffix}/package.json`));
+        if (existsSync(join(dir, name))) return join(dir, name);
+      } catch {
+        // Not this one.
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 /** tool_result content is cut to this many characters before it is stored. */
 export const MAX_TOOL_RESULT = 20_000;
@@ -48,7 +77,7 @@ export function canUseToolFor(input: TurnInput): CanUseTool {
  * hides every transcript that starts with one of those. Any other name keeps the session in the
  * picker; "cli" itself can't be used, as Claude Code turns it into "sdk-cli" when it runs headless.
  */
-export const ENTRYPOINT = "intuition";
+export const ENTRYPOINT = "holm";
 
 /** The environment Claude Code runs in: the runner's, with ENTRYPOINT. */
 export function claudeEnv(env: Record<string, string | undefined> = process.env): Record<string, string | undefined> {

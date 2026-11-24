@@ -1,4 +1,4 @@
-// `intuition setup` and `intuition uninstall`: their flow with the machine's steps faked and the questions
+// `holm setup` and `holm uninstall`: their flow with the machine's steps faked and the questions
 // scripted, against a temp config, data folder and HOME, and the pieces they are built from.
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
@@ -14,13 +14,13 @@ const REPO = join(import.meta.dir, "..", "..");
 const CLI = join(REPO, "src", "cli.ts");
 
 function temp(): string {
-  return mkdtempSync(join(tmpdir(), "intuition-setup-"));
+  return mkdtempSync(join(tmpdir(), "holm-setup-"));
 }
 
 /** A temp config, data folder and HOME with three project folders: alpha (newest), notes (a CLAUDE.md), projects/gamma (oldest). */
 function folders() {
   const dir = temp();
-  const env = { INTUITION_CONFIG: join(dir, "config", "config.json"), INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0", INTUITION_FAKE_AGENT: "1" };
+  const env = { HOLM_CONFIG: join(dir, "config", "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0", HOLM_FAKE_AGENT: "1" };
   const home = join(dir, "home");
   for (const p of ["alpha/.git", "notes", "projects/gamma/.git"]) mkdirSync(join(home, p), { recursive: true });
   writeFileSync(join(home, "notes", "CLAUDE.md"), "# notes\n");
@@ -38,8 +38,6 @@ function folders() {
 function probes(answers: Record<string, string | null> = {}) {
   const base: Record<string, string | null> = {
     "git --version": "git version 2.43.0",
-    "node --version": "v22.12.0",
-    "npm --version": "10.9.0",
     "claude --version": "2.1.0 (Claude Code)",
     "claude auth status": '{ "loggedIn": true }',
   };
@@ -53,7 +51,7 @@ function actions(overrides: Partial<Actions> = {}) {
   const a: Actions = {
     link: (dir) => (calls.push(`link ${dir ?? "default"}`), 0),
     installShell: async (log) => (calls.push("installShell"), log("installing Electron 39 for linux")),
-    startRunner: async (log) => (calls.push("startRunner"), log("intuition runner on http://127.0.0.1:4999 (pid 1, log x)"), 0),
+    startRunner: async (log) => (calls.push("startRunner"), log("holm runner on http://127.0.0.1:4999 (pid 1, log x)"), 0),
     runnerUrl: async () => "http://127.0.0.1:4999",
     startShell: (prompt) => void calls.push(`startShell ${prompt ? "prompt" : "quiet"}`),
     login: async (on) => (calls.push(`login ${on ? "on" : "off"}`), on),
@@ -100,12 +98,12 @@ function plain() {
   return { ui, text: () => text };
 }
 
-function config(env: { INTUITION_CONFIG: string }) {
-  return JSON.parse(readFileSync(env.INTUITION_CONFIG, "utf8"));
+function config(env: { HOLM_CONFIG: string }) {
+  return JSON.parse(readFileSync(env.HOLM_CONFIG, "utf8"));
 }
 
 /** Runs setup with a plain ui; `interactive` says whether a scripted Ask may be asked. */
-async function run(options: Partial<SetupOptions>, ask: Ask = DEFAULTS, over: { platform?: Platform; actions?: Actions; probes?: ReturnType<typeof probes>; f?: ReturnType<typeof folders>; interactive?: boolean } = {}) {
+async function run(options: Partial<SetupOptions>, ask: Ask = DEFAULTS, over: { platform?: Platform; actions?: Actions; probes?: ReturnType<typeof probes> & { claude?: () => string | null }; f?: ReturnType<typeof folders>; interactive?: boolean } = {}) {
   const f = over.f ?? folders();
   const out = plain();
   const fake = actions();
@@ -169,11 +167,11 @@ describe("setup's flags", () => {
     }
   });
 
-  test("plain intuition runs setup only while there is no config", () => {
+  test("plain holm runs setup only while there is no config", () => {
     const { env } = folders();
     expect(firstRun(env)).toBe(true);
-    mkdirSync(join(env.INTUITION_CONFIG, ".."), { recursive: true });
-    writeFileSync(env.INTUITION_CONFIG, "{}");
+    mkdirSync(join(env.HOLM_CONFIG, ".."), { recursive: true });
+    writeFileSync(env.HOLM_CONFIG, "{}");
     expect(firstRun(env)).toBe(false);
   });
 });
@@ -238,7 +236,7 @@ describe("setup", () => {
     for (const done of ["config written", "command linked", "shell installed", "runner started", "shell started", "login item set"]) expect(text).toContain(`✓ ${done}`);
     expect(text).toContain("[Ctrl] [Alt] [Space]  a new task");
     expect(text).toContain("http://127.0.0.1:4999/settings");
-    expect(text).toContain("intuition doctor");
+    expect(text).toContain("holm doctor");
   });
 
   test("--yes on a Mac takes the Command hotkeys, and without workspaces keeps none", async () => {
@@ -254,7 +252,7 @@ describe("setup", () => {
     expect(r.code).toBe(NO_TERMINAL);
     expect(ask.asked).toEqual([]);
     expect(r.calls).toEqual([]);
-    expect(existsSync(r.env.INTUITION_CONFIG)).toBe(false);
+    expect(existsSync(r.env.HOLM_CONFIG)).toBe(false);
     expect(r.text).toContain("pass --yes to take every default, or answer them with --workspace, --hotkey");
   });
 
@@ -306,8 +304,8 @@ describe("setup", () => {
 
   test("the folder list offers the config's workspaces first, ticked, then the suggestions, then Add a folder…", async () => {
     const f = folders();
-    mkdirSync(join(f.env.INTUITION_CONFIG, ".."), { recursive: true });
-    writeFileSync(f.env.INTUITION_CONFIG, JSON.stringify({ port: 4999, theme: "dark", extra: 1, workspaces: [{ name: "n", path: join(f.home, "notes"), permissionMode: "default" }] }));
+    mkdirSync(join(f.env.HOLM_CONFIG, ".."), { recursive: true });
+    writeFileSync(f.env.HOLM_CONFIG, JSON.stringify({ port: 4999, theme: "dark", extra: 1, workspaces: [{ name: "n", path: join(f.home, "notes"), permissionMode: "default" }] }));
     let offered: string[] = [];
     let initial: unknown[] = [];
     const ask = scripted([]);
@@ -337,7 +335,7 @@ describe("setup", () => {
       const r = await run({}, scripted([...answers, CANCEL]), { f });
       expect(`${at}: ${r.code}`).toBe(`${at}: ${CANCELLED}`);
       expect(r.calls).toEqual([]);
-      expect(existsSync(f.env.INTUITION_CONFIG)).toBe(false);
+      expect(existsSync(f.env.HOLM_CONFIG)).toBe(false);
       expect(r.text).toContain("cancelled: nothing was written");
     }
     // In the middle of adding a folder, and in the hotkey's text.
@@ -345,39 +343,76 @@ describe("setup", () => {
       const f = folders();
       const r = await run({}, scripted([...answers, CANCEL]), { f });
       expect(r.code).toBe(CANCELLED);
-      expect(existsSync(f.env.INTUITION_CONFIG)).toBe(false);
+      expect(existsSync(f.env.HOLM_CONFIG)).toBe(false);
     }
   });
 
   test("a missing requirement stops it before any question, with its fix; asked, it offers to check again", async () => {
     const f = folders();
-    const r = await run({ yes: true }, DEFAULTS, { f, probes: probes({ "node --version": "v20.1.0" }), interactive: false });
+    const r = await run({ yes: true }, DEFAULTS, { f, probes: probes({ "claude --version": null }), interactive: false });
     expect(r.code).toBe(1);
     expect(r.calls).toEqual([]);
-    expect(existsSync(f.env.INTUITION_CONFIG)).toBe(false);
-    expect(r.text).toContain("✗ node and npm       node v20.1.0 is older than 22.12");
-    expect(r.text).toContain("fix: install Node 22.12");
-    expect(r.text).toContain("missing: node and npm");
+    expect(existsSync(f.env.HOLM_CONFIG)).toBe(false);
+    expect(r.text).toContain("✗ Claude Code        not found");
+    expect(r.text).toContain("fix: `holm update` installs it again");
+    expect(r.text).toContain("missing: Claude Code");
 
     // Asked: fixed in another terminal, then Check again goes on.
-    let node = "v20.1.0";
-    const p = { ...probes(), output: (cmd: string[]) => (cmd.join(" ") === "node --version" ? node : probes().output(cmd)) };
+    let claude: string | null = null;
+    const p = { ...probes(), output: (cmd: string[]) => (cmd.join(" ") === "claude --version" ? claude : probes().output(cmd)) };
     const ask = scripted([]);
-    const again: Ask = { ...ask, select: async (o) => (o.message === "Once they are fixed" ? ((node = "v22.12.0"), true) : o.initial) as never };
+    const again: Ask = { ...ask, select: async (o) => (o.message === "Once they are fixed" ? ((claude = "2.1.0 (Claude Code)"), true) : o.initial) as never };
     const fixed = await run({}, again, { probes: p });
     expect(fixed.code).toBe(0);
-    expect(fixed.text).toContain("✓ node and npm       node v22.12.0");
+    expect(fixed.text).toContain("✓ Claude Code        2.1.0 (Claude Code)");
 
     const quit = await run({}, { ...ask, select: async (o) => (o.message === "Once they are fixed" ? false : o.initial) as never }, { probes: probes({ "claude --version": null }) });
     expect(quit.code).toBe(1);
-    expect(quit.text).toContain("fix: install Claude Code");
   });
 
-  test("not logged in to Claude Code: it never logs in for you; it warns with the command and goes on", async () => {
+  test("no git, Node or npm is needed: git missing is a dash, and Node is not asked about (D0045)", async () => {
+    const asked: string[] = [];
+    const p = probes({ "git --version": null });
+    const r = await run({ yes: true }, DEFAULTS, { probes: { ...p, output: (cmd: string[]) => (asked.push(cmd[0]!), p.output(cmd)) }, interactive: false });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("– git");
+    expect(r.text).toContain("needed only to update a git checkout");
+    expect(asked).not.toContain("node");
+    expect(asked).not.toContain("npm");
+  });
+
+  test("Claude Code is the Agent SDK's own when the probe names it: its version and login are asked of that binary", async () => {
+    const p = probes({ "/sdk/claude --version": "2.1.322 (Claude Code)", "/sdk/claude auth status": '{ "loggedIn": true }', "claude --version": null });
+    const r = await run({ yes: true }, DEFAULTS, { probes: { ...p, claude: () => "/sdk/claude" }, interactive: false });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("✓ Claude Code        2.1.322 (Claude Code), the Agent SDK's");
+    expect(r.text).toContain("✓ Claude Code login  logged in");
+  });
+
+  test("not logged in to Claude Code: --yes never logs in for you; it warns with the command and goes on", async () => {
     const r = await run({ yes: true }, DEFAULTS, { probes: probes({ "claude auth status": '{ "loggedIn": false }' }), interactive: false });
     expect(r.code).toBe(0);
     expect(r.text).toContain("✗ Claude Code login  not logged in");
-    expect(r.text).toContain("sessions fail until you log in: run claude auth login");
+    expect(r.text).toContain("sessions fail until you log in: run holm login");
+  });
+
+  test("not logged in, on a terminal: it asks, and a yes runs the agent's login, then checks again", async () => {
+    let loggedIn = false;
+    const p = { ...probes(), output: (cmd: string[]) => (cmd.join(" ") === "claude auth status" ? `{ "loggedIn": ${loggedIn} }` : probes().output(cmd)) };
+    const logins: string[] = [];
+    const { a } = actions({ agentLogin: async (agent) => (logins.push(agent), (loggedIn = true), 0) });
+    const ask = scripted([]);
+    const r = await run({}, ask, { probes: p, actions: a });
+    expect(ask.asked).toContain("Log in to Claude Code now? (it opens a page in your browser)");
+    expect(logins).toEqual(["claude"]);
+    expect(r.text).not.toContain("sessions fail until you log in");
+
+    // A no: nothing is run, and the warning says the command.
+    logins.length = 0;
+    loggedIn = false;
+    const no = await run({}, { ...scripted([]), confirm: async (o) => (o.message.startsWith("Log in") ? false : o.initial) as never }, { probes: p, actions: a });
+    expect(logins).toEqual([]);
+    expect(no.text).toContain("sessions fail until you log in: run holm login");
   });
 
   test("Codex is shown as optional: a dash when it is missing, a tick when it is there", async () => {
@@ -402,14 +437,14 @@ describe("setup", () => {
         throw new Error("npm failed");
       },
       startRunner: async (log) => (log("the runner exited with code 1"), 1),
-      link: (_d, log) => (log("/bin/intuition is a folder: not replaced"), 1),
+      link: (_d, log) => (log("/bin/holm is a folder: not replaced"), 1),
     });
     const r = await run({ yes: true }, DEFAULTS, { actions: a, interactive: false });
     expect(r.code).toBe(1);
     expect(r.text).toContain("✗ shell not installed: npm failed");
-    expect(r.text).toContain("retry: intuition shell install");
+    expect(r.text).toContain("retry: holm shell install");
     expect(r.text).toContain("✗ runner not started");
-    expect(r.text).toContain("retry: intuition start");
+    expect(r.text).toContain("retry: holm start");
     expect(r.text).toContain("retry: bun src/cli.ts link");
     expect(calls).not.toContain("startShell quiet");
   });
@@ -429,13 +464,13 @@ describe("setup", () => {
     const b = await run({ yes: true, login: false }, DEFAULTS, { actions: broken.a, interactive: false });
     expect(b.code).toBe(1);
     expect(b.text).toContain("start at login not changed: no login items");
-    expect(b.text).toContain("retry: intuition shell login off");
+    expect(b.text).toContain("retry: holm shell login off");
   });
 
   test("a config it cannot write ends it at once: nothing else is done", async () => {
     const f = folders();
     // A folder where the config's own folder should be.
-    writeFileSync(join(f.env.INTUITION_CONFIG, ".."), "");
+    writeFileSync(join(f.env.HOLM_CONFIG, ".."), "");
     const r = await run({ yes: true }, DEFAULTS, { f, interactive: false });
     expect(r.code).toBe(1);
     expect(r.calls).toEqual([]);
@@ -446,7 +481,7 @@ describe("setup", () => {
     const r = await run({ yes: true, workspaces: [{ path: join(f.home, "alpha") }] }, DEFAULTS, { f, interactive: false });
     expect(r.text).not.toContain("\x1b");
     expect(r.text).not.toContain("\r");
-    expect(r.text.split("\n")[0]).toBe("intuition 0.1.0 setup");
+    expect(r.text.split("\n")[0]).toBe("holm 0.1.0 setup");
     expect(r.text).toContain("\n1. Requirements\n");
     expect(r.text).toContain("\n6. Setting up\n");
   });
@@ -468,28 +503,28 @@ describe("uninstall", () => {
 
   test("start at login off, the shell stopped and removed, the runner stopped, the link removed; config and data kept", async () => {
     const { env } = folders();
-    mkdirSync(join(env.INTUITION_CONFIG, ".."), { recursive: true });
-    writeFileSync(env.INTUITION_CONFIG, "{}");
-    mkdirSync(env.INTUITION_DATA_DIR, { recursive: true });
+    mkdirSync(join(env.HOLM_CONFIG, ".."), { recursive: true });
+    writeFileSync(env.HOLM_CONFIG, "{}");
+    mkdirSync(env.HOLM_DATA_DIR, { recursive: true });
     const { calls, a } = fake();
     const lines: string[] = [];
     expect(await uninstall({ purge: false }, linux, a, env, (l) => lines.push(l))).toBe(0);
     expect(calls).toEqual(["loginOff", "stopShell", "removeShell", "stopRunner", "unlink default"]);
-    expect(existsSync(env.INTUITION_CONFIG)).toBe(true);
-    expect(existsSync(env.INTUITION_DATA_DIR)).toBe(true);
-    expect(lines.join("\n")).toContain("`intuition uninstall --purge` removes them too");
+    expect(existsSync(env.HOLM_CONFIG)).toBe(true);
+    expect(existsSync(env.HOLM_DATA_DIR)).toBe(true);
+    expect(lines.join("\n")).toContain("`holm uninstall --purge` removes them too");
   });
 
   test("--purge removes the config and the data folder", async () => {
     const { env } = folders();
-    mkdirSync(join(env.INTUITION_CONFIG, ".."), { recursive: true });
-    writeFileSync(env.INTUITION_CONFIG, '{ "workspaces": [] }');
-    mkdirSync(join(env.INTUITION_DATA_DIR, "sessions"), { recursive: true });
+    mkdirSync(join(env.HOLM_CONFIG, ".."), { recursive: true });
+    writeFileSync(env.HOLM_CONFIG, '{ "workspaces": [] }');
+    mkdirSync(join(env.HOLM_DATA_DIR, "sessions"), { recursive: true });
     const { a } = fake();
     expect(await uninstall({ purge: true, linkDir: "/b" }, linux, a, env, () => {})).toBe(0);
-    expect(existsSync(env.INTUITION_CONFIG)).toBe(false);
-    expect(existsSync(join(env.INTUITION_CONFIG, ".."))).toBe(false);
-    expect(existsSync(env.INTUITION_DATA_DIR)).toBe(false);
+    expect(existsSync(env.HOLM_CONFIG)).toBe(false);
+    expect(existsSync(join(env.HOLM_CONFIG, ".."))).toBe(false);
+    expect(existsSync(env.HOLM_DATA_DIR)).toBe(false);
   });
 
   test("a shell not installed is not stopped; on a Mac its login item is then left; a failing step is said and the rest still run", async () => {
@@ -519,13 +554,13 @@ describe("uninstall", () => {
     const dir = temp();
     const home = join(dir, "home");
     const paths = { home, app: join(home, "shell"), electronExe: join(home, "shell", "electron") };
-    const settings = join(dir, "config", "intuition-shell", "settings.json");
+    const settings = join(dir, "config", "holm-shell", "settings.json");
     const platform: Platform = { ...platformFor("linux"), settingsFile: () => settings };
     mkdirSync(join(paths.app, "node_modules"), { recursive: true });
     mkdirSync(join(settings, ".."), { recursive: true });
     writeFileSync(settings, "{}");
     mkdirSync(join(home, "sessions"));
-    expect(removeShell(paths, platform)).toEqual([paths.app, join(dir, "config", "intuition-shell")]);
+    expect(removeShell(paths, platform)).toEqual([paths.app, join(dir, "config", "holm-shell")]);
     expect(existsSync(join(home, "sessions"))).toBe(true);
     expect(existsSync(join(dir, "config"))).toBe(true);
 

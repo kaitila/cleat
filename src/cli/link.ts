@@ -1,9 +1,10 @@
-// `intuition link` and `unlink`: a symlink named intuition, in a folder on the PATH, to src/cli.ts.
+// `holm link` and `unlink`: a symlink named holm, in a folder on the PATH, to src/cli.ts.
 // bun runs a linked script from its real path, so the command finds the repo from any folder.
 import { existsSync, lstatSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { OLD_NAME } from "../shared/legacy";
 
-export const LINK_NAME = "intuition";
+export const LINK_NAME = "holm";
 /** The script the link points to: this checkout's src/cli.ts. */
 export const CLI = join(import.meta.dir, "..", "cli.ts");
 
@@ -43,6 +44,14 @@ export function onPath(dir: string, env: Env = process.env): boolean {
   return (env.PATH ?? "").split(delimiter).some((p) => p !== "" && (real(p) ?? resolve(p)) === want);
 }
 
+/** Removes the link under the command's name from before the rename (D0043), when it is ours: one command, not two. */
+function dropOldLink(folder: string, log: Log): void {
+  const old = join(folder, OLD_NAME);
+  if (found(old).kind !== "ours") return;
+  rmSync(old);
+  log(`removed ${old}: the command is ${LINK_NAME} now`);
+}
+
 /** Makes the link in `dir`. Returns the exit code: 1 when something that is not ours is in its place. */
 export function link(dir = defaultDir(), env: Env = process.env, log: Log = console.log): number {
   const folder = resolve(dir);
@@ -59,6 +68,7 @@ export function link(dir = defaultDir(), env: Env = process.env, log: Log = cons
   if (there.kind === "ours") rmSync(path);
   symlinkSync(CLI, path);
   log(`${path} -> ${CLI}`);
+  dropOldLink(folder, log);
   log(
     onPath(folder, env)
       ? `${folder} is on the PATH: type \`${LINK_NAME}\` in any folder`
@@ -69,6 +79,7 @@ export function link(dir = defaultDir(), env: Env = process.env, log: Log = cons
 
 /** Removes the link in `dir` if it is ours. Returns the exit code: 1 when something else is in its place. */
 export function unlink(dir = defaultDir(), log: Log = console.log): number {
+  dropOldLink(resolve(dir), log);
   const path = join(resolve(dir), LINK_NAME);
   const there = found(path);
   if (there.kind === "nothing") {

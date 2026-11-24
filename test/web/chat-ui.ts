@@ -1,7 +1,7 @@
 // Drives the chat view in headless Chromium: `bun test/web/chat-ui.ts`.
 // This machine only: it needs the playwright that is installed globally for bun and its browser,
 // and prints a "skipped" line and exits 0 where there is none (and in CI).
-// The runner is real, on a free port with temp folders, with the fake agent (INTUITION_FAKE_AGENT=1).
+// The runner is real, on a free port with temp folders, with the fake agent (HOLM_FAKE_AGENT=1).
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,7 +55,7 @@ function seed(dataDir: string): string {
   const at = new Date(Date.now() - 3 * 3_600_000).toISOString();
   store.create({ id, claudeSessionId: null, workspace: "work", cwd: "/nowhere", title: HOSTILE, status: "idle", createdAt: at, updatedAt: at, lastSeq: 0 });
   const long = [HOSTILE, ...Array.from({ length: 120 }, (_, i) => `line ${i + 1}`), "the last line"].join("\n");
-  store.append(id, { kind: "user", text: `${HOSTILE}\nsecond line`, imagePath: "/mnt/c/Users/x/AppData/Local/Temp/intuition/clip-1.png" });
+  store.append(id, { kind: "user", text: `${HOSTILE}\nsecond line`, imagePath: "/mnt/c/Users/x/AppData/Local/Temp/holm/clip-1.png" });
   store.append(id, { kind: "tool_use", toolUseId: "t1", name: "Read", input: { file_path: `/tmp/${HOSTILE}.txt` } });
   store.append(id, { kind: "tool_result", toolUseId: "t1", content: long, isError: true });
   store.append(id, { kind: "approval_request", approvalId: "a1", toolName: "Write", input: { file_path: "/tmp/x" } });
@@ -76,8 +76,8 @@ function seed(dataDir: string): string {
 let markdownId = "";
 
 const browser = await launch();
-const dir = mkdtempSync(join(tmpdir(), "intuition-chat-ui-"));
-const shots = mkdtempSync(join(tmpdir(), "intuition-chat-shots-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-chat-ui-"));
+const shots = mkdtempSync(join(tmpdir(), "holm-chat-shots-"));
 
 /**
  * The controls on the page that a person can't tell apart without a name or a tooltip: every visible
@@ -234,7 +234,7 @@ try {
   await other.goto(`${runner.url}/assets/base.css`);
   for (const [forced, scheme, want] of [["light", "dark", LIGHT], ["dark", "light", DARK]] as const) {
     await page.emulateMedia({ colorScheme: scheme });
-    await other.evaluate((t: string) => localStorage.setItem("intuition.theme", t), forced);
+    await other.evaluate((t: string) => localStorage.setItem("holm.theme", t), forced);
     await page.waitForFunction((t: string) => document.documentElement.getAttribute("data-theme") === t, forced);
     await page.waitForTimeout(250);
     const c = await colours();
@@ -256,7 +256,7 @@ try {
   await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
   check(true, "and then follows the runner's setting (system)");
   await page.unroute("**/api/settings");
-  await other.evaluate(() => localStorage.setItem("intuition.theme", "system"));
+  await other.evaluate(() => localStorage.setItem("holm.theme", "system"));
   await page.waitForFunction(() => !document.documentElement.hasAttribute("data-theme"));
   await page.emulateMedia({ colorScheme: "light" });
   await page.waitForTimeout(250);
@@ -345,7 +345,7 @@ try {
       check(!(await page.locator("#reply-text").isDisabled()) && (await page.locator("#reply-hint").textContent()) !== "Working. You can reply when this turn ends.", "the reply box stays on, without the usual running hint");
       await shot("chat-terminal-turn-light");
       const replyBox = page.locator("#reply-text");
-      const here = "and this from intuition";
+      const here = "and this from holm";
       await replyBox.fill(here);
       await replyBox.press("Enter");
       const anyway = page.locator("#reply-hint button", { hasText: "Send anyway" });
@@ -445,7 +445,7 @@ try {
   check((await bad.locator(".tool-result").textContent())?.startsWith(`${HOSTILE}\nline 1\n`), "a tool result containing <img onerror> is shown as text");
   check((await text(".msg.user .user-text"))[0] === `${HOSTILE}\nsecond line`, "so is the user's text");
   check((await text(".msg.assistant p"))[0] === `Markup stays text: ${HOSTILE}`, "and the assistant's");
-  check((await text(".msg.user .attachment"))[0] === "/mnt/c/Users/x/AppData/Local/Temp/intuition/clip-1.png", "an imagePath is shown as its path");
+  check((await text(".msg.user .attachment"))[0] === "/mnt/c/Users/x/AppData/Local/Temp/holm/clip-1.png", "an imagePath is shown as its path");
   check((await text(".msg.assistant p code"))[0] === "bun test", "inline code is rendered");
   check((await text(".msg.assistant pre.code-block"))[0] === `const html = '${HOSTILE}';`, "a fenced code block is rendered");
   // ---- every markdown construct, in light and dark ----
@@ -524,12 +524,12 @@ try {
 
   // ---- managing sessions: search, filter, menu, rename, pin, fork, archive with undo, delete, stop ----
   {
-    const mdir = mkdtempSync(join(tmpdir(), "intuition-chat-manage-"));
+    const mdir = mkdtempSync(join(tmpdir(), "holm-chat-manage-"));
     {
       // A session in another workspace, for the filter.
       const store = new Store(join(mdir, "data"));
       const when = new Date(Date.now() - 60 * 60_000).toISOString();
-      store.create({ id: crypto.randomUUID(), claudeSessionId: "fake-gamma", workspace: "elsewhere", cwd: "/nowhere", title: "gamma notes", status: "idle", createdAt: when, updatedAt: when, lastSeq: 0, source: "intuition" });
+      store.create({ id: crypto.randomUUID(), claudeSessionId: "fake-gamma", workspace: "elsewhere", cwd: "/nowhere", title: "gamma notes", status: "idle", createdAt: when, updatedAt: when, lastSeq: 0, source: "holm" });
     }
     const transcripts = new MemoryTranscripts();
     const m = testRunner({ dir: mdir, driver: fakeDriver(5), sync: { transcripts, pollMs: 50, idleMs: 400 } });
@@ -856,7 +856,7 @@ try {
 
   // ---- long titles in the sidebar: ellipsized, the time kept, nothing scrolls sideways (T-0058) ----
   {
-    const ldir = mkdtempSync(join(tmpdir(), "intuition-chat-long-"));
+    const ldir = mkdtempSync(join(tmpdir(), "holm-chat-long-"));
     const longTitles: [string, string] = ["Tighten the hero copy on the pricing page", "Summarise the notes from Tuesday's planning call and send them round"];
     {
       const store = new Store(join(ldir, "data"));

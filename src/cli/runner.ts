@@ -1,5 +1,5 @@
 // The runner as a background process: start, stop, status and logs.
-// Its pid, its URL and its log live in the data folder, so INTUITION_DATA_DIR moves all three.
+// Its pid, its URL and its log live in the data folder, so HOLM_DATA_DIR moves all three.
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, join } from "node:path";
@@ -164,12 +164,12 @@ export interface StartOptions {
 
 /** Starts the runner detached, waits for /health and prints the URL. Returns the exit code. */
 export async function start(env: Env = process.env, log: Log = console.log, options: StartOptions = {}): Promise<number> {
-  const f = files(env);
+  let f = files(env);
   const want = buildId(f.config.buildId);
   const running = recorded(f);
   if (running) {
     if (!(await waitFor(() => answers(running.url), START_MS))) {
-      log(`pid ${running.pid} is a runner but nothing answers at ${running.url}: run \`intuition stop\`, then start again`);
+      log(`pid ${running.pid} is a runner but nothing answers at ${running.url}: run \`holm stop\`, then start again`);
       return 1;
     }
     if ((await buildOf(running.url)) === want) {
@@ -181,12 +181,14 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
       log(
         `the runner at ${running.url} (pid ${running.pid}) runs older code than this repo's, and was kept: restarting it would cut off\n` +
           `${describeSessions(blocked)}\n` +
-          "run `intuition restart` once they are done, or `intuition restart --force` now",
+          "run `holm restart` once they are done, or `holm restart --force` now",
       );
       return KEPT;
     }
     log(`the runner at ${running.url} (pid ${running.pid}) runs older code than this repo's: restarting it`);
     await kill(f, running.pid);
+    // A runner from before the rename ran from the old folders, which move now that it has stopped (runner/legacy.ts).
+    f = files(env);
   } else {
     const configured = configuredUrl(f.config);
     const build = configured ? await buildOf(configured) : null;
@@ -206,7 +208,7 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
   try {
     child = Bun.spawn(runnerCommand(Boolean(options.loginEnv)), {
       cwd: REPO,
-      env: { ...env, INTUITION_PORT: String(port) },
+      env: { ...env, HOLM_PORT: String(port) },
       stdin: "ignore",
       stdout: out,
       stderr: out,
@@ -233,7 +235,7 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
   }
   writeFileSync(f.pid, `${child.pid}\n`);
   writeFileSync(f.url, `${url}\n`);
-  log(`intuition runner on ${url} (pid ${child.pid}, log ${f.log})`);
+  log(`holm runner on ${url} (pid ${child.pid}, log ${f.log})`);
   return 0;
 }
 
@@ -284,7 +286,7 @@ export async function restart(env: Env = process.env, log: Log = console.log, op
       log(
         `the runner at ${running.url} (pid ${running.pid}) was kept: restarting it would cut off\n` +
           `${describeSessions(blocked)}\n` +
-          "run `intuition restart` once they are done, or `intuition restart --force` now",
+          "run `holm restart` once they are done, or `holm restart --force` now",
       );
       return KEPT;
     }

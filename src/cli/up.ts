@@ -1,4 +1,4 @@
-// `intuition up`'s shell half, shared with `setup`: install the shell when it is missing or older than the repo's.
+// `holm up`'s shell half, shared with `setup`: install the shell when it is missing or older than the repo's.
 import { install, isCurrent, isInstalled, pidFile, stopAndWait, writeRunnerLocation } from "../shell/install";
 import type { Platform } from "../shell/platform";
 

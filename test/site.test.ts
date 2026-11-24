@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { buildSite, SITE, WEB } from "../scripts/build-site";
 
-const out = mkdtempSync(join(tmpdir(), "intuition-site-test-"));
+const out = mkdtempSync(join(tmpdir(), "holm-site-test-"));
 const files = buildSite(out);
 afterAll(() => rmSync(out, { recursive: true, force: true }));
 const read = (file: string) => readFileSync(join(out, file), "utf8");
@@ -18,7 +18,9 @@ const base = readFileSync(join(WEB, "base.css"), "utf8");
 const noComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "");
 
 /** The repository: the one other place the page links to (links, not loads). */
-const REPO = "https://github.com/kaitila/intuition";
+const REPO = "https://github.com/kaitila/holm";
+/** bun's installer, named in the install line (D0045). */
+const BUN_INSTALLER = "https://bun.sh/install";
 /** The SVG namespace in base.css's grain: a name inside a data: URL, not a request. */
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -47,7 +49,8 @@ describe("it loads nothing from outside its own folder", () => {
   test("no http URL in the HTML, CSS or JS other than links to the repository", () => {
     for (const [file, text] of texts) {
       const urls = [...text.matchAll(/(?:https?:)?\/\/[a-z0-9.-]+\.[a-z]{2,}[^\s"'()<>]*/gi)].map((m) => m[0]);
-      const foreign = urls.filter((u) => !u.startsWith(REPO) && u !== SVG_NS && !u.startsWith(`${SVG_NS}`));
+      // bun's installer is text in the install line, to copy, not something the page loads.
+      const foreign = urls.filter((u) => !u.startsWith(REPO) && u !== SVG_NS && !u.startsWith(`${SVG_NS}`) && u !== BUN_INSTALLER);
       expect({ file, foreign }).toEqual({ file, foreign: [] });
     }
   });
@@ -62,7 +65,7 @@ describe("it loads nothing from outside its own folder", () => {
     }
   });
 
-  test("every local reference is relative and is a file in the build, so the page works under /intuition/", () => {
+  test("every local reference is relative and is a file in the build, so the page works under /holm/", () => {
     const local = [
       ...[...noComments(html).matchAll(/\s(?:href|src|srcset)="([^"]*)"/g)].map((m) => ["index.html", m[1]!] as const),
       ...files.filter((f) => f.endsWith(".css")).flatMap((f) => [...noComments(read(f)).matchAll(/url\("?([^")]+)"?\)/g)].map((m) => [f, m[1]!] as const)),
@@ -170,7 +173,12 @@ describe("what it says", () => {
   });
 
   test("the install line is the README's, and Copy copies it", () => {
-    expect(html).toContain("git clone https://github.com/kaitila/intuition &amp;&amp; cd intuition &amp;&amp; bun install &amp;&amp; bun run setup");
+    // The README's line: the first line of its first sh block, under "Install". It needs only bun's installer (D0045).
+    const readme = readFileSync(join(SITE, "..", "README.md"), "utf8");
+    const line = /## Install[\s\S]*?```sh\n([^\n]+)\n/.exec(readme)?.[1];
+    expect(line).toStartWith("curl -fsSL https://bun.sh/install | bash && ");
+    expect(line).not.toContain("git clone");
+    expect(html).toContain(`<code id="install-line" class="install-line">${line!.replace(/&/g, "&amp;")}</code>`);
     expect(js).toContain("navigator.clipboard.writeText(text)");
   });
 });

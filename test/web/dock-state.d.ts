@@ -38,6 +38,8 @@ declare module "*/web/dock-state.js" {
   export function dockOrder<T extends { status: string }>(list: T[]): T[];
   export function liveOthers<T extends { id: string; status: string }>(order: T[], selected: string | null, max?: number): T[];
   export function isLive(session: unknown): boolean;
+  export const STARTED_MS: number;
+  export function justStarted(session: { source?: string; createdAt?: string } | null, known: boolean, now: number): boolean;
   export const LIVE_MAX: number;
   export function stepSession(ids: string[], current: string | null, step: number): string | null;
   export function recentEvents<T>(events: T[], max?: number): T[];

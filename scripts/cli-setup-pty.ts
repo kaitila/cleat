@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// `intuition setup` for real, in a pseudo-terminal: util-linux `script` gives it a TTY, this script types the
+// `holm setup` for real, in a pseudo-terminal: util-linux `script` gives it a TTY, this script types the
 // keystrokes, and a small screen emulator renders what the person would see, at 80 and at 120 columns.
 // Everything runs in a temp HOME, config and data folder, with a fake `claude` on the PATH (logged in), no
 // display (so no Electron is downloaded or started) and the fake agent. The runner it starts is stopped at the end.
@@ -79,7 +79,7 @@ export function render(raw: string, cols: number): string {
 }
 
 function sandbox() {
-  const dir = mkdtempSync(join(tmpdir(), "intuition-pty-"));
+  const dir = mkdtempSync(join(tmpdir(), "holm-pty-"));
   const home = join(dir, "home");
   const at = (p: string, t: number) => utimesSync(join(home, p), t, t);
   for (const p of ["code/web/.git", "notes", "elsewhere/site"]) mkdirSync(join(home, p), { recursive: true });
@@ -100,11 +100,11 @@ function sandbox() {
     HOME: home,
     TERM: "xterm-256color",
     LANG: process.env.LANG || "C.UTF-8",
-    INTUITION_CONFIG: join(dir, "config", "config.json"),
-    INTUITION_DATA_DIR: join(dir, "data"),
-    INTUITION_PORT: "0",
-    INTUITION_FAKE_AGENT: "1",
-    INTUITION_PLATFORM: "linux",
+    HOLM_CONFIG: join(dir, "config", "config.json"),
+    HOLM_DATA_DIR: join(dir, "data"),
+    HOLM_PORT: "0",
+    HOLM_FAKE_AGENT: "1",
+    HOLM_PLATFORM: "linux",
     XDG_CONFIG_HOME: join(dir, "xdg-config"),
     XDG_DATA_HOME: join(dir, "xdg-data"),
   };
@@ -197,15 +197,15 @@ for (const cols of [80, 120]) {
     await s.type(KEY.enter);
     const r = await s.exited();
     if (out) writeFileSync(join(out, `setup-${cols}.txt`), r.screen);
-    console.log(`\n===== intuition setup, ${cols} columns =====\n${r.screen}`);
+    console.log(`\n===== holm setup, ${cols} columns =====\n${r.screen}`);
     check(r.code === 0, `${cols} columns: setup exits 0 (got ${r.code})`);
-    const config = JSON.parse(readFileSync(box.env.INTUITION_CONFIG!, "utf8"));
+    const config = JSON.parse(readFileSync(box.env.HOLM_CONFIG!, "utf8"));
     check(
       JSON.stringify(config.workspaces.map((w: { name: string }) => w.name)) === JSON.stringify(["notes", "web", "site"]),
       `${cols} columns: the workspaces picked, the default first (${config.workspaces.map((w: { name: string }) => w.name)})`,
     );
     check(config.shell.hotkey === "Control+Shift+K" && config.shell.snipHotkey === "Control+Alt+S" && config.shell.startOnLogin === true && config.permissionMode === "auto", `${cols} columns: the hotkeys, permission mode and start at login`);
-    check(existsSync(join(box.linkDir, "intuition")), `${cols} columns: the command was linked`);
+    check(existsSync(join(box.linkDir, "holm")), `${cols} columns: the command was linked`);
     const widest = Math.max(...r.screen.split("\n").map((l) => Bun.stringWidth(l)));
     check(widest <= cols, `${cols} columns: no line is wider than the terminal (widest ${widest})`);
   } finally {
@@ -225,7 +225,7 @@ for (const cols of [80, 120]) {
     const r = await c.exited();
     if (out) writeFileSync(join(out, `cancel-${name}-${cols}.txt`), r.screen);
     check(r.code === 130, `${cols} columns: ${name} at "${at}" exits 130 (got ${r.code})`);
-    check(!existsSync(b.env.INTUITION_CONFIG!), `${cols} columns: ${name} wrote no config`);
+    check(!existsSync(b.env.HOLM_CONFIG!), `${cols} columns: ${name} wrote no config`);
     check(r.screen.includes("cancelled: nothing was written"), `${cols} columns: ${name} says nothing was written`);
     if (cols === 80 && name === "Ctrl+C") console.log(`\n===== Ctrl+C, ${cols} columns =====\n${r.screen}`);
   }

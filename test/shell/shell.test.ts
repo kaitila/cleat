@@ -19,7 +19,7 @@ import { defaultHotkeys, dockArea, opaqueDockBounds, shellOs } from "../../shell
 import type { Area } from "../../shell/src/geometry";
 import { captureWithheld, expectedExternal, materials, notes, pngSize, problems, selfTestRun, skipped, type Where, SNIP_SLOW_MS, STUB_SESSION, stubRunner, stubSettings } from "../../src/shell/selftest-run";
 
-const dir = mkdtempSync(join(tmpdir(), "intuition-shell-test-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-shell-test-"));
 const RUNNER = "http://127.0.0.1:4777";
 
 describe("bundle", () => {
@@ -47,7 +47,7 @@ describe("bundle", () => {
 
     const src = readFileSync(join(REPO, "shell", "src", "dock-preload.ts"), "utf8");
     expect(src.match(/exposeInMainWorld\(/g)).toHaveLength(1);
-    expect(src).toContain('contextBridge.exposeInMainWorld("intuitionDock", {\n  setState: (state: unknown): void => {\n    ipcRenderer.send(DOCK_CHANNEL, state);\n  },\n');
+    expect(src).toContain('contextBridge.exposeInMainWorld("holmDock", {\n  setState: (state: unknown): void => {\n    ipcRenderer.send(DOCK_CHANNEL, state);\n  },\n');
     // One way out of the page: a send on the dock's channel. Two ways in: the chat's channel (D0042),
     // and what comes in is a session id or null, never the event or anything else the shell sent; and
     // the chat's hotkey (D0046), which hands the page nothing at all.
@@ -69,7 +69,7 @@ describe("bundle", () => {
 
     const src = readFileSync(join(REPO, "shell", "src", "snip-preload.ts"), "utf8");
     expect(src.match(/exposeInMainWorld\(/g)).toHaveLength(1);
-    expect(src).toContain('contextBridge.exposeInMainWorld("intuitionSnip", {');
+    expect(src).toContain('contextBridge.exposeInMainWorld("holmSnip", {');
     // Three keys, each one call on its own channel. The page hands over a value; it never names a channel.
     const bridge = src.slice(src.indexOf("exposeInMainWorld"));
     expect([...bridge.matchAll(/^  (\w+):/gm)].map((m) => m[1])).toEqual(["getCapture", "crop", "close"]);
@@ -326,10 +326,10 @@ describe("settings from the runner", () => {
 
   test("the notification names the hotkey that failed and the one that still works", () => {
     const n = hotkeyNotice("hotkey", "Control+Alt+T", "Alt+F9");
-    expect(n.title).toBe("intuition: the hotkey could not be set");
+    expect(n.title).toBe("Holm: the hotkey could not be set");
     expect(n.body).toContain("Control+Alt+T could not be registered");
     expect(n.body).toContain("Alt+F9 still works.");
-    expect(hotkeyNotice("snip hotkey", "X", null)).toEqual({ title: "intuition: the snip hotkey could not be set", body: expect.stringContaining("No snip hotkey works") });
+    expect(hotkeyNotice("snip hotkey", "X", null)).toEqual({ title: "Holm: the snip hotkey could not be set", body: expect.stringContaining("No snip hotkey works") });
   });
 
   test("main.ts: applied at start and at every message; the tray writes through PUT; the theme follows", () => {
@@ -411,7 +411,7 @@ describe("clips", () => {
   });
 
   test("a capture becomes the request body", () => {
-    expect(captureBody({ kind: "image", path: "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png" })).toEqual({ imagePath: "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png" });
+    expect(captureBody({ kind: "image", path: "C:\\Users\\x\\AppData\\Local\\Temp\\holm\\clip-1.png" })).toEqual({ imagePath: "C:\\Users\\x\\AppData\\Local\\Temp\\holm\\clip-1.png" });
     expect(captureBody({ kind: "text", text: "hello" })).toEqual({ text: "hello" });
     expect(captureBody({ kind: "text", text: "x".repeat(MAX_TEXT + 5) }).text).toHaveLength(20_000);
     expect(captureBody({ kind: "text", text: " \r\n" })).toEqual({});
@@ -744,7 +744,7 @@ describe("the dock", () => {
 
   test("main.ts: a runner that answers but has no dock is said once, and the check keeps loading the page", () => {
     expect(DOCK_STALE_RUNNER.title).toContain("the runner is older than the shell");
-    expect(DOCK_STALE_RUNNER.body).toContain("intuition up");
+    expect(DOCK_STALE_RUNNER.body).toContain("holm up");
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     const load = main.slice(main.indexOf("async function loadDock()"), main.indexOf("/** Loads the dock's page and shows it"));
     expect(load).toContain("if (!staleRunnerSaid && !args.selfTest && dockStatus >= 400 && (await runnerAnswers())) {");
@@ -858,9 +858,9 @@ describe("the snip", () => {
     expect(section).toContain("acceptedSender(");
     const crop = section.slice(section.indexOf("async function onSnipCrop("));
     expect(crop.slice(0, crop.indexOf("\n}\n"))).toContain("const rect = acceptedRect(value, bounds);");
-    // One write, by name from the clock, in <temp>\intuition. Nothing the page sends names a file.
+    // One write, by name from the clock, in <temp>\holm. Nothing the page sends names a file.
     expect(section.match(/saveClip\(|writeFileSync\(|writeFile\(/g)).toEqual(["saveClip("]);
-    expect(section).toContain('saveClip(join(app.getPath("temp"), "intuition"), cut.toPNG(), new Date(), "snip")');
+    expect(section).toContain('saveClip(join(app.getPath("temp"), "holm"), cut.toPNG(), new Date(), "snip")');
     expect(main).toContain('activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, unlessSettings(() => void snip()));');
     // Pressed while Settings has the keyboard (recording a shortcut), neither hotkey opens anything.
     expect(main).toContain('activeHotkey = one("hotkey", activeHotkey, prefs.hotkey, unlessSettings(newTask));');
@@ -899,13 +899,13 @@ describe("no toasts for sessions", () => {
     expect(main.match(/\bnotify\(/g)).toHaveLength(7);
     expect(main).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
     expect(main).toContain("notify(n.title, n.body);");
-    for (const title of ["intuition: the runner is not running", "intuition: the setting was not changed", "intuition: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
+    for (const title of ["Holm: the runner is not running", "Holm: the setting was not changed", "Holm: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);
     expect(main).toContain("app.setAppUserModelId(");
   });
 });
 
 describe("self-test runner", () => {
-  const imagePath = "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-20261112-090507-042.png";
+  const imagePath = "C:\\Users\\x\\AppData\\Local\\Temp\\holm\\clip-20261112-090507-042.png";
   const display = { x: 0, y: 0, width: 2560, height: 1440 };
   const good: SelfTestResult = {
     hotkeyRegistered: true, trayCreated: true, textCaptured: true, textPosted: true, imageCaptured: true, imagePosted: true, imagePath,
@@ -926,7 +926,7 @@ describe("self-test runner", () => {
     snipHotkeyRegistered: true, snipDisplays: [{ bounds: display, scaleFactor: 1.5 }, { bounds: { x: 2560, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }],
     snipOverlayBounds: [display, { x: 2560, y: 0, width: 1920, height: 1080 }], snipOverlaysShown: true, snipUrl: "http://127.0.0.1:5000/assets/snip.html",
     snipMs: 240, snipPhases: { warm: 1, captured: 150, drawn: 230 }, snipCaptured: true, snipBridge: "object:close,crop,getCapture:undefined:undefined",
-    snipCropRect: SELF_TEST_CROP, snipCropPath: "C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\snip-20261113-120000-000.png", snipBadRectsRefused: true,
+    snipCropRect: SELF_TEST_CROP, snipCropPath: "C:\\Users\\x\\AppData\\Local\\Temp\\holm\\snip-20261113-120000-000.png", snipBadRectsRefused: true,
     snipClosed: true, snipEscClosed: true,
     settingsFileKeys: ["runnerUrl"], settingsHotkeyRegistered: true, settingsHotkeyChanged: true, settingsInvalidHotkeyKept: true, settingsTakenHotkeyKept: true,
     settingsNotices: [
@@ -939,7 +939,7 @@ describe("self-test runner", () => {
     os: "windows", dockTransparent: true, primaryWorkArea: { ...display, height: 1400 }, screenAccess: "granted",
     windowsRelease: "10.0.22631", popupMaterial: "acrylic", dockMaterial: "none", snipMaterial: "none", settingsMaterial: "none",
   };
-  const posts = [{ text: "intuition self-test 1" }, { imagePath }];
+  const posts = [{ text: "holm self-test 1" }, { imagePath }];
   const base = stubSettings(5000);
   const migration = (startOnLogin: boolean) => withShell(base, { hotkey: SELF_TEST_PREFS.hotkey, snipHotkey: SELF_TEST_PREFS.snipHotkey, chatHotkey: SELF_TEST_PREFS.chatHotkey, dock: false, startOnLogin });
   const puts = (startOnLogin = false) => {
@@ -982,7 +982,7 @@ describe("self-test runner", () => {
     const macDisplay = { x: 0, y: 0, width: 1512, height: 982 };
     // A MacBook with a notch: the menu bar is 38 points tall.
     const macWork = { x: 0, y: 38, width: 1512, height: 944 };
-    const native = "/var/folders/xy/T/intuition";
+    const native = "/var/folders/xy/T/holm";
     const placeAt = (p: Area) => ({ dockIdleBounds: p, dockPeekBounds: p, dockOpenBounds: p, dockChatBounds: p, dockBackBounds: p });
     /** The window's place in an area, for the chat that area gives (D0042). */
     const placed = (area: Area) => dockBounds(area, chatSize(area));
@@ -995,7 +995,7 @@ describe("self-test runner", () => {
       snipDisplays: [{ bounds: macDisplay, scaleFactor: 1.5 }], snipOverlayBounds: [macDisplay],
       windowsRelease: null, popupMaterial: "vibrancy",
     };
-    const macPosts = [{ text: "intuition self-test 1" }, { imagePath: mac.imagePath! }];
+    const macPosts = [{ text: "holm self-test 1" }, { imagePath: mac.imagePath! }];
     const at = (r: Partial<SelfTestResult>, where: Where) => problems(r, { posts: macPosts, puts: puts() }, "http://127.0.0.1:5000", png, where);
     const linuxPlace = placed(macDisplay);
     const linux: SelfTestResult = { ...mac, os: "linux", primaryWorkArea: macDisplay, ...placeAt(linuxPlace), dockUrl: `http://127.0.0.1:5000/dock?${chatQuery(macDisplay)}`, popupMaterial: "none" };
@@ -1156,7 +1156,7 @@ describe("self-test runner", () => {
 
   test("what the stub runner received and the saved file are asserted too", () => {
     expect(check(good, [{ imagePath }])).toHaveLength(1);
-    expect(check(good, [{ text: "intuition self-test 1" }])).toHaveLength(1);
+    expect(check(good, [{ text: "holm self-test 1" }])).toHaveLength(1);
     // The clipboard image twice (missing, not a PNG) and the snip once.
     expect(check(good, posts, () => null)).toHaveLength(3);
     expect(check(good, posts, () => Buffer.from("BM not a png at all"))).toHaveLength(2);
@@ -1169,7 +1169,7 @@ describe("self-test runner", () => {
       expect((await fetch(`${runner.url}/prompt`)).headers.get("content-type")).toContain("text/html");
       // The dock page calls setState when the bridge is there, and has a clear background.
       const dockPage = await (await fetch(`${runner.url}/dock`)).text();
-      expect(dockPage).toContain('window.intuitionDock?.setState("idle")');
+      expect(dockPage).toContain('window.holmDock?.setState("idle")');
       expect(dockPage).toContain("background: transparent");
       // Notifications are the real runner's; the shell no longer asks for them.
       expect((await fetch(`${runner.url}/api/notifications`)).status).toBe(404);
@@ -1231,12 +1231,12 @@ describe("self-test runner", () => {
 });
 
 describe("starting the runner from Windows", () => {
-  const wsl = { distro: "Ubuntu", repo: "/home/you/intuition", bun: "/home/you/.bun/bin/bun" };
+  const wsl = { distro: "Ubuntu", repo: "/home/you/holm", bun: "/home/you/.bun/bin/bun" };
 
   test("wsl.exe -d <distro> --exec <bun> <repo>/src/cli.ts start --login-env, as an array", () => {
     expect(runnerCommand(wsl)).toEqual({
       file: "C:\\Windows\\System32\\wsl.exe",
-      args: ["-d", "Ubuntu", "--exec", "/home/you/.bun/bin/bun", "/home/you/intuition/src/cli.ts", "start", "--login-env"],
+      args: ["-d", "Ubuntu", "--exec", "/home/you/.bun/bin/bun", "/home/you/holm/src/cli.ts", "start", "--login-env"],
     });
     expect(runnerCommand(wsl, "D:\\WINNT\\").file).toBe("D:\\WINNT\\System32\\wsl.exe");
     expect(runnerCommand({ ...wsl, repo: "/repo/" }).args[4]).toBe("/repo/src/cli.ts");
@@ -1265,7 +1265,7 @@ describe("starting the runner from Windows", () => {
       null, "x", [], {},
       { ...wsl, distro: "--exec" }, { ...wsl, distro: "-u root" }, { ...wsl, distro: "Ubuntu; calc" }, { ...wsl, distro: "a b" }, { ...wsl, distro: "" }, { ...wsl, distro: 7 },
       { ...wsl, bun: "bun" }, { ...wsl, bun: "--version" }, { ...wsl, bun: "C:\\bun.exe" }, { ...wsl, bun: "/bin/b\nun" }, { ...wsl, bun: undefined },
-      { ...wsl, repo: "~/intuition" }, { ...wsl, repo: "-e" }, { ...wsl, repo: "" }, { ...wsl, repo: "/r\u0000" }, { ...wsl, repo: ["/r"] },
+      { ...wsl, repo: "~/holm" }, { ...wsl, repo: "-e" }, { ...wsl, repo: "" }, { ...wsl, repo: "/r\u0000" }, { ...wsl, repo: ["/r"] },
     ]) {
       expect(`${JSON.stringify(bad)} ${parseWsl(bad)}`).toBe(`${JSON.stringify(bad)} undefined`);
     }
@@ -1282,7 +1282,7 @@ describe("starting the runner from Windows", () => {
     expect(runnerLocation({ WSL_DISTRO_NAME: "Ubuntu" })).toEqual({ distro: "Ubuntu", repo: REPO, bun: process.execPath });
     expect(runnerLocation({})).toBeUndefined();
 
-    const file = join(dir, "roaming", "intuition-shell", "settings.json");
+    const file = join(dir, "roaming", "holm-shell", "settings.json");
     const lines: string[] = [];
     expect(writeRunnerLocation(file, wsl, (l) => lines.push(l))).toBe(true);
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...DEFAULT_SETTINGS, wsl });
@@ -1319,10 +1319,10 @@ describe("starting the runner from Windows", () => {
 
 describe("start on login", () => {
   test("the login item: electron.exe on the quoted app folder", () => {
-    const exe = "C:\\Users\\A B\\AppData\\Local\\intuition\\shell\\node_modules\\electron\\dist\\electron.exe";
-    const appFolder = "C:\\Users\\A B\\AppData\\Local\\intuition\\shell";
+    const exe = "C:\\Users\\A B\\AppData\\Local\\holm\\shell\\node_modules\\electron\\dist\\electron.exe";
+    const appFolder = "C:\\Users\\A B\\AppData\\Local\\holm\\shell";
     expect(loginItem(exe, appFolder)).toEqual({ path: exe, args: [`"${appFolder}"`] });
-    expect(APP_ID).toBe("intuition");
+    expect(APP_ID).toBe("holm");
   });
 
   test("--login takes on, off or status, and nothing else", () => {

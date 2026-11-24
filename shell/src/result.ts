@@ -42,7 +42,7 @@ export interface SelfTestResult {
   dockUrl: string | null;
   /** Shown (without being activated). Nobody saw it. */
   dockVisible: boolean;
-  /** What the page sees of the bridge: `typeof intuitionDock : its keys : typeof require : typeof process`. */
+  /** What the page sees of the bridge: `typeof holmDock : its keys : typeof require : typeof process`. */
   dockBridge: string | null;
   /** The primary display's bounds, which the dock's are checked against. */
   primaryDisplay: Area | null;
@@ -118,7 +118,7 @@ export interface SelfTestResult {
   snipPhases: Record<string, number> | null;
   /** Every display's capture came back with pixels. False on a locked desktop. */
   snipCaptured: boolean | null;
-  /** What the page sees of the bridge: `typeof intuitionSnip : its keys, sorted : typeof require : typeof process`. */
+  /** What the page sees of the bridge: `typeof holmSnip : its keys, sorted : typeof require : typeof process`. */
   snipBridge: string | null;
   /** The rectangle the page asked to crop, in the first display's DIPs, and the Windows path it was saved as. */
   snipCropRect: Area | null;

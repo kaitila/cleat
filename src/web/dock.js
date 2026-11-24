@@ -1,7 +1,7 @@
 // The dock: a pill that says what the sessions are doing, a peek when one finishes or needs the
 // person, and, on hover, an open view where a session is read, approved and continued.
 // The contract with the shell is docs/protocol.md, "Dock": the page picks one of four states (the fourth, chat, is the chat view grown out of the notch: D0042) and
-// tells the shell through window.intuitionDock.setState, which is absent in a normal browser.
+// tells the shell through window.holmDock.setState, which is absent in a normal browser.
 // The shell's window never changes size: the page draws the island inside it and animates it alone.
 // Text from the model, from tools and from the person is untrusted: it reaches the page only as
 // text nodes (textContent), never as markup.
@@ -46,6 +46,7 @@ import {
   inWorkspace,
   islandSize,
   isLive,
+  justStarted,
   liveOthers,
   LIVE_MAX,
   mayClose,
@@ -274,7 +275,7 @@ function tellShell(next) {
   if (told === next) return;
   told = next;
   try {
-    window.intuitionDock?.setState(next);
+    window.holmDock?.setState(next);
   } catch {
     // No bridge worth the name: the page works the same without it.
   }
@@ -1439,6 +1440,26 @@ document.addEventListener("keydown", (e) => {
   focusReply(auto);
 });
 
+/**
+ * A task the person just started (the pop-up, the snip, New task) becomes the notch's session: the
+ * next opening shows it, an open dock or chat switches to it at once, and the choice is remembered.
+ * News that arrives after it (a peek) still wins, as for any session.
+ */
+function showStarted(session) {
+  lastPeeked = session.id;
+  saveSession(storage(), session.id);
+  if (state === "open") {
+    // In a workspace the dock is not filtering on: this time the list shows them all.
+    if (workspace && session.workspace !== workspace) {
+      workspace = "";
+      renderList();
+    }
+    select(session.id);
+  } else if (state === "chat") {
+    embed()?.show(session.id);
+  }
+}
+
 // ---------- the chat: the island grown large (D0042) ----------
 
 /** What the chat's page lets the dock ask of it (chat.js, window.holmEmbed), or null until it has loaded. */
@@ -1525,7 +1546,7 @@ els.expand.addEventListener("click", () => goChat(selected));
 
 // The shell asks for the chat (its tray's Open chat, a link to the chat view anywhere): the island grows into it.
 try {
-  window.intuitionDock?.onChat?.((id) => goChat(typeof id === "string" && id ? id : null));
+  window.holmDock?.onChat?.((id) => goChat(typeof id === "string" && id ? id : null));
 } catch {
   // A bridge without it: the chat is grown into from the page only.
 }
@@ -1534,7 +1555,7 @@ try {
 // pressed again while the chat is shown, puts it away. The shell gives the dock the keyboard when it
 // hears "chat", as for a click.
 try {
-  window.intuitionDock?.onChatKey?.(() => {
+  window.holmDock?.onChatKey?.(() => {
     if (state === "chat") close();
     else goChat(null);
   });
@@ -1567,9 +1588,11 @@ function onMessage(message) {
     case "session": {
       const session = message.session;
       if (!session?.id) break;
+      const started = justStarted(session, sessions.has(session.id), Date.now());
       sessions.set(session.id, session);
       renderPill();
       checkPeek();
+      if (started) showStarted(session);
       if (state !== "open") break;
       if (!selected && (!workspace || session.workspace === workspace)) select(session.id);
       renderList();
