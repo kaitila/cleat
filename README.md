@@ -17,16 +17,16 @@ Holm runs the agents with the [Claude Code](https://docs.claude.com/en/docs/clau
 In a terminal (on Windows, a WSL terminal):
 
 ```sh
-curl -fsSL https://bun.sh/install | bash && export PATH="$HOME/.bun/bin:$PATH" && bun install -g github:kaitila/holm && holm setup
+curl -fsSL https://kaitila.github.io/holm/install.sh | sh
 ```
 
-That is the whole of it. The line installs [bun](https://bun.sh/) (skip that part if you have it: `bun install -g github:kaitila/holm && holm setup`), then holm with everything it runs: Claude Code and Codex come with it, inside the agents' own SDKs, and the tray app's Electron is downloaded by setup. No git, Node or npm is needed. What is left is logging in to the agent you use: setup offers to run Claude Code's login (a page in your browser), or later `holm login` (`holm login codex` for [Codex](docs/agents.md)). Why it is done this way: [D0045](docs/decisions/D0045-install-with-bun-only.md).
+That is the whole of it. The [script](site/install.sh) installs [bun](https://bun.sh/) if it is missing (and on Debian or Ubuntu the `unzip` its installer needs), then holm, then runs `holm setup` in your terminal. With bun already there, the same is `bun install -g github:kaitila/holm && holm setup`. Holm comes with everything it runs: Claude Code and Codex come with it, inside the agents' own SDKs, and the tray app's Electron is downloaded by setup. No git, Node or npm is needed. What is left is logging in to the agent you use: setup offers to run Claude Code's login (a page in your browser), or later `holm login` (`holm login codex` for [Codex](docs/agents.md)). Why it is done this way: [D0045](docs/decisions/D0045-install-with-bun-only.md).
 
 | Platform | Where things run | Before the line |
 |---|---|---|
 | macOS | Everything on the Mac | Nothing |
-| Linux | Everything on the machine | A desktop with a system tray, and `unzip` for bun's installer (`sudo apt install -y unzip`) |
-| Windows 10 or 11 | The agents and the runner in WSL 2, the tray app on Windows | WSL 2: `wsl --install` in a terminal run as administrator, restart, open Ubuntu and make its user; then `sudo apt install -y unzip`, and the line in that Ubuntu terminal |
+| Linux | Everything on the machine | A desktop with a system tray (the script installs `unzip` on Debian and Ubuntu; elsewhere install it first) |
+| Windows 10 or 11 | The agents and the runner in WSL 2, the tray app on Windows | WSL 2: `wsl --install` in a terminal run as administrator, restart, open Ubuntu and make its user; then the line in that Ubuntu terminal |
 
 To work on holm itself, clone it instead: `git clone https://github.com/kaitila/holm && cd holm && bun install && bun run setup`.
 

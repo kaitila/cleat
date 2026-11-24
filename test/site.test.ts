@@ -20,7 +20,8 @@ const noComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").repla
 /** The repository: the one other place the page links to (links, not loads). */
 const REPO = "https://github.com/kaitila/holm";
 /** bun's installer, named in the install line (D0045). */
-const BUN_INSTALLER = "https://bun.sh/install";
+/** The install line's script, on the site's own address (D0047). */
+const INSTALL_SCRIPT = "https://kaitila.github.io/holm/install.sh";
 /** The SVG namespace in base.css's grain: a name inside a data: URL, not a request. */
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -50,7 +51,7 @@ describe("it loads nothing from outside its own folder", () => {
     for (const [file, text] of texts) {
       const urls = [...text.matchAll(/(?:https?:)?\/\/[a-z0-9.-]+\.[a-z]{2,}[^\s"'()<>]*/gi)].map((m) => m[0]);
       // bun's installer is text in the install line, to copy, not something the page loads.
-      const foreign = urls.filter((u) => !u.startsWith(REPO) && u !== SVG_NS && !u.startsWith(`${SVG_NS}`) && u !== BUN_INSTALLER);
+      const foreign = urls.filter((u) => !u.startsWith(REPO) && u !== SVG_NS && !u.startsWith(`${SVG_NS}`) && u !== INSTALL_SCRIPT);
       expect({ file, foreign }).toEqual({ file, foreign: [] });
     }
   });
@@ -166,6 +167,33 @@ describe("every colour, font and spring is a base.css token", () => {
   });
 });
 
+describe("the install script (D0047)", () => {
+  const script = read("install.sh");
+
+  test("is built beside the page, so the line's address serves it", () => {
+    expect(files).toContain("install.sh");
+    expect(script).toBe(readFileSync(join(SITE, "install.sh"), "utf8"));
+  });
+
+  test("is POSIX sh that parses, and stops on the first error", () => {
+    expect(script).toStartWith("#!/bin/sh\n");
+    expect(script).toContain("set -eu");
+    const parsed = Bun.spawnSync(["sh", "-n", join(SITE, "install.sh")]);
+    expect({ code: parsed.exitCode, err: parsed.stderr.toString() }).toEqual({ code: 0, err: "" });
+  });
+
+  test("gets bun only when it is missing, installs holm from GitHub, and runs setup on the terminal", () => {
+    expect(script).toContain("if ! command -v bun >/dev/null 2>&1; then");
+    expect(script).toContain("curl -fsSL https://bun.sh/install | bash");
+    expect(script).toContain("bun install -g github:kaitila/holm");
+    expect(script).toContain("holm setup </dev/tty");
+    expect(script).toContain("holm setup --yes");
+    // Nothing else is fetched or run: the one other URL in it is the line's own, in a comment.
+    const urls = [...script.matchAll(/https?:\/\/[^\s"')]+/g)].map((m) => m[0]);
+    expect([...new Set(urls)].sort()).toEqual(["https://bun.sh/install", INSTALL_SCRIPT]);
+  });
+});
+
 describe("what it says", () => {
   test("the keys are the app's defaults, a Mac's in the markup and Ctrl+Alt for the others", () => {
     expect([...html.matchAll(/<kbd data-other="([^"]+)">([^<]+)<\/kbd>/g)].map((m) => `${m[2]}/${m[1]}`)).toEqual(["Cmd/Ctrl", "Shift/Alt", "Cmd/Ctrl", "Shift/Alt"]);
@@ -176,7 +204,7 @@ describe("what it says", () => {
     // The README's line: the first line of its first sh block, under "Install". It needs only bun's installer (D0045).
     const readme = readFileSync(join(SITE, "..", "README.md"), "utf8");
     const line = /## Install[\s\S]*?```sh\n([^\n]+)\n/.exec(readme)?.[1];
-    expect(line).toStartWith("curl -fsSL https://bun.sh/install | bash && ");
+    expect(line).toBe(`curl -fsSL ${INSTALL_SCRIPT} | sh`);
     expect(line).not.toContain("git clone");
     expect(html).toContain(`<code id="install-line" class="install-line">${line!.replace(/&/g, "&amp;")}</code>`);
     expect(js).toContain("navigator.clipboard.writeText(text)");
