@@ -77,6 +77,7 @@ function runNotch(island) {
     shape(state);
   };
   const switchDot = island.querySelector(".switch .dot");
+  const wide = matchMedia("(min-width: 761px)");
   const decide = (allowed) => {
     approval?.setAttribute("data-state", allowed ? "allow" : "open");
     // Allowed, the session runs again.
@@ -91,9 +92,12 @@ function runNotch(island) {
     { at: 4800, run: () => show("open") },
     { at: 7600, run: () => allow?.setAttribute("data-pressed", "") },
     { at: 7900, run: () => { allow?.removeAttribute("data-pressed"); decide(true); shape("open"); } },
-    { at: 9400, run: () => show("idle") },
+    // One click (or Cmd+Shift+J): the same notch grows into the whole chat. Not on a narrow screen,
+    // where the chat would not fit.
+    { at: 9400, run: () => show(wide.matches ? "chat" : "idle") },
+    { at: 13600, run: () => show("idle") },
   ];
-  const LOOP = 11500;
+  const LOOP = 15800;
   /** @type {number[]} */
   let timers = [];
   let playing = false;

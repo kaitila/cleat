@@ -1,7 +1,8 @@
 /* The landing page: the browser window is the screen. A Mac's notch hangs from its top edge and does
    what the app's does (site.js); under it, a few lines. Every colour, length, font and spring is a
    token of the app's base.css, which the build puts beside this file. No glass, no backdrop: the
-   notch is the one object on the page, black on the page's ground in either scheme. */
+   notch is the one object on the page, black on the page's light ground (the page is light only:
+   data-theme="light" on <html>). */
 
 /* ---------- one screen: the notch at its top edge, the words at its bottom ---------- */
 .screen {
@@ -10,7 +11,7 @@
   flex-direction: column;
   justify-content: flex-end;
   min-height: 100svh;
-  padding: calc(var(--control) * 14) var(--space-6) var(--space-6);
+  padding: calc(var(--control) * 15) var(--space-6) var(--space-5);
 }
 .stage {
   position: absolute;
@@ -20,7 +21,7 @@
   --wing: calc(var(--control) * 3);
   display: flex;
   justify-content: center;
-  height: calc(var(--control) * 14);
+  height: calc(var(--control) * 14.5);
   overflow: hidden;
 }
 
@@ -29,11 +30,12 @@
 @property --island-w { syntax: "<length>"; inherits: false; initial-value: 0; }
 @property --island-h { syntax: "<length>"; inherits: false; initial-value: 0; }
 
-/* One box as large as the open dock; what is seen of it is its clip, hanging from the top centre. */
+/* One box as large as the chat, its largest state; what is seen of it is its clip, hanging from the
+   top centre. */
 .island {
   position: relative;
   flex: none;
-  width: calc(var(--control) * 16);
+  width: calc(var(--control) * 23);
   height: calc(var(--control) * 14);
   margin: 0;
   background: var(--notch);
@@ -107,6 +109,19 @@
 .approval[data-state="allow"] .approval-actions { display: none; }
 .reply { margin: 0 var(--space-3) var(--space-3); padding: var(--space-1) var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-m); background: var(--surface); color: var(--muted); }
 
+/* Chat (D0042): the same island grown large, the sessions by workspace beside the conversation. */
+.chat { display: flex; width: calc(var(--control) * 23); height: calc(var(--control) * 13.5); padding-top: var(--notch-h); }
+.side { flex: none; width: calc(var(--control) * 7); padding: var(--space-3) var(--space-2); border-right: var(--hairline) solid var(--line); }
+.side p { margin: 0; }
+.side-head { padding: var(--space-2) var(--space-2) var(--space-1); color: var(--muted); font-size: var(--text-xs); font-weight: var(--medium); letter-spacing: var(--track-caps); text-transform: uppercase; }
+.side-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; height: var(--control); padding-inline: var(--space-2); border-radius: var(--radius-s); color: var(--muted); font-size: var(--text-s); white-space: nowrap; }
+.side-row span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.side-row[aria-current="true"] { background: var(--selected); color: var(--text); }
+.conv { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3) var(--space-5) 0; }
+.conv p { margin: 0; }
+.conv-title { display: flex; align-items: center; gap: var(--space-2); font-weight: var(--medium); }
+.conv .reply { margin: auto 0 var(--space-4); }
+
 /* ---------- the words: a caption at the screen's bottom left; the links at its bottom right ---------- */
 .bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); }
 .page { flex: 0 1 calc(var(--measure) * 0.75); min-width: 0; }
@@ -138,7 +153,7 @@
 @media (max-width: 500px) {
   .island { scale: 0.82; }
   .stage { height: calc(var(--control) * 11.5); }
-  .keys dt { width: calc(var(--control) * 3.5); }
+  .keys dt { width: calc(var(--control) * 4.5); }
 }
 /* Reduced motion: the shape changes at once and the content only fades. */
 @media (prefers-reduced-motion: reduce) {
