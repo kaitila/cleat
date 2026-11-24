@@ -153,7 +153,7 @@ export function hotkeyNotice(which: "hotkey" | "snip hotkey", failed: string, ac
   // Under Wayland a shortcut can fail although nobody holds it: the tray has both actions.
   const tray = wayland ? " Under Wayland global shortcuts may not register at all: the tray's New task and Snip do the same." : "";
   return {
-    title: `intuition: the ${which} could not be set`,
+    title: `Holm: the ${which} could not be set`,
     body: `${failed} could not be registered: another program holds it, the shell's other hotkey is the same, or it is not a valid shortcut. ${still} Choose another in Settings.${tray}`,
   };
 }

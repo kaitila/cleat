@@ -22,15 +22,15 @@ const PROMPT = "Create a file named proof.txt in the current directory containin
 
 type Ask = Extract<SessionEvent, { kind: "approval_request" }>;
 
-const dir = realpathSync(mkdtempSync(join(tmpdir(), "intuition-smoke-")));
+const dir = realpathSync(mkdtempSync(join(tmpdir(), "holm-smoke-")));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const proof = join(workspace, "proof.txt");
 const configFile = join(dir, "config.json");
 // permissionMode "default": in auto mode the classifier would allow this write without asking (smoke-auto.ts checks that).
 writeFileSync(configFile, JSON.stringify({ permissionMode: "default", workspaces: [{ name: "smoke", path: workspace }] }));
-// Its own environment, so a INTUITION_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ INTUITION_CONFIG: configFile, INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" }));
+// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}`);
 
 interface RunSeen {

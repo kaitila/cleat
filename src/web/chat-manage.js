@@ -66,7 +66,7 @@ export function isFolded(workspace, { folded, searchFolded, query = "", headings
 }
 
 /** Where the folded workspaces are remembered, per browser. */
-export const FOLDED_KEY = "intuition.chat.folded";
+export const FOLDED_KEY = "holm.chat.folded";
 
 /** The workspaces folded last time, from `storage` (localStorage); none when it can't be read. */
 export function readFolded(storage) {
@@ -98,7 +98,7 @@ function settled(session) {
   return session?.status === "idle" || session?.status === "error";
 }
 
-/** Only a session intuition started, and not while a turn runs. One from the terminal is only archived. */
+/** Only a session holm started, and not while a turn runs. One from the terminal is only archived. */
 export function canDelete(session) {
   return session?.source !== "terminal" && settled(session);
 }
@@ -129,7 +129,7 @@ export function deleteConfirm(session) {
   return {
     title: `Delete “${title}”?`,
     body:
-      "This removes the session from intuition (its messages here) and deletes its Claude Code transcript, " +
+      "This removes the session from holm (its messages here) and deletes its Claude Code transcript, " +
       "so claude --resume no longer lists it. It can't be undone. To keep it out of the way instead, archive it.",
     confirm: "Delete",
   };

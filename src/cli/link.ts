@@ -1,9 +1,9 @@
-// `intuition link` and `unlink`: a symlink named intuition, in a folder on the PATH, to src/cli.ts.
+// `holm link` and `unlink`: a symlink named holm, in a folder on the PATH, to src/cli.ts.
 // bun runs a linked script from its real path, so the command finds the repo from any folder.
 import { existsSync, lstatSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
 
-export const LINK_NAME = "intuition";
+export const LINK_NAME = "holm";
 /** The script the link points to: this checkout's src/cli.ts. */
 export const CLI = join(import.meta.dir, "..", "cli.ts");
 

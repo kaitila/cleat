@@ -3,7 +3,7 @@
 // under it, centred, with the focus in it: type the task, Enter starts the session with the area attached.
 // Tab or ⌘1..9 (Ctrl+1..9 off a Mac) switches the workspace, Alt+A flips the agent (the workspace's own until flipped),
 // Shift+Enter is a new line, Esc closes every overlay.
-// The shell's half is window.intuitionSnip (shell/src/snip-preload.ts): getCapture(), crop(rect)
+// The shell's half is window.holmSnip (shell/src/snip-preload.ts): getCapture(), crop(rect)
 // and close(). The runner's half is POST /api/sessions (docs/protocol.md).
 import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
 import { workspaceDigit, anchorBox, anchorLabel, devicePixels, errorText, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, UNREACHABLE, wholeDisplay } from "./snip-geometry.js";
@@ -26,7 +26,7 @@ async function api(path, init) {
 }
 
 function start() {
-  const bridge = window.intuitionSnip;
+  const bridge = window.holmSnip;
   const $ = (id) => document.getElementById(id);
   const frozen = $("frozen");
   const shade = $("shade");

@@ -5,7 +5,7 @@
 // prefers-color-scheme), from the value cached in localStorage at once, then from GET
 // /api/settings, and from then on from each { type: "settings" } message on /ws.
 (() => {
-  const KEY = "intuition.theme";
+  const KEY = "holm.theme";
   const THEMES = ["system", "light", "dark"];
   const root = document.documentElement;
 
@@ -71,6 +71,6 @@
   });
 
   /** For the settings page: apply a choice at once, before the runner has answered. */
-  window.intuitionTheme = { apply, current: () => root.getAttribute("data-theme") ?? "system" };
+  window.holmTheme = { apply, current: () => root.getAttribute("data-theme") ?? "system" };
   connect();
 })();

@@ -39,7 +39,7 @@ export class Store {
     this.eventsDir = join(dataDir, "events");
     mkdirSync(this.eventsDir, { recursive: true });
     // Sessions stored before `source` existed are all the runner's own.
-    for (const s of readJson<SessionMeta[]>(this.sessionsPath, [])) this.sessions.set(s.id, { ...s, source: s.source ?? "intuition" });
+    for (const s of readJson<SessionMeta[]>(this.sessionsPath, [])) this.sessions.set(s.id, { ...s, source: s.source ?? "holm" });
     this.state = { lastWorkspace: readJson<{ lastWorkspace?: string | null }>(this.statePath, {}).lastWorkspace ?? null };
     this.recover();
   }

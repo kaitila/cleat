@@ -18,11 +18,11 @@ afterAll(async () => {
 });
 
 function configWith(file: unknown) {
-  const dir = mkdtempSync(join(tmpdir(), "intuition-mode-"));
+  const dir = mkdtempSync(join(tmpdir(), "holm-mode-"));
   dirs.push(dir);
   const path = join(dir, "config.json");
   writeFileSync(path, JSON.stringify(file));
-  return () => loadConfig({ INTUITION_CONFIG: path, INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" });
+  return () => loadConfig({ HOLM_CONFIG: path, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" });
 }
 
 describe("config permissionMode", () => {

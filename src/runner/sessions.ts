@@ -73,7 +73,7 @@ export class Sessions {
       workspace: workspace.name,
       cwd: workspace.path,
       title: titleOf(prompt),
-      source: "intuition",
+      source: "holm",
       agent,
       status: "running",
       createdAt: now,

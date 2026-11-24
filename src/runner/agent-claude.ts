@@ -48,7 +48,7 @@ export function canUseToolFor(input: TurnInput): CanUseTool {
  * hides every transcript that starts with one of those. Any other name keeps the session in the
  * picker; "cli" itself can't be used, as Claude Code turns it into "sdk-cli" when it runs headless.
  */
-export const ENTRYPOINT = "intuition";
+export const ENTRYPOINT = "holm";
 
 /** The environment Claude Code runs in: the runner's, with ENTRYPOINT. */
 export function claudeEnv(env: Record<string, string | undefined> = process.env): Record<string, string | undefined> {

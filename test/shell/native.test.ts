@@ -24,8 +24,8 @@ import { autostartEntry as cliAutostartEntry, parseLocalRunner as cliParseLocalR
 import { REPO } from "../../src/shell/paths";
 import { savedPathPattern } from "../../src/shell/selftest-run";
 
-const runner = { kind: "local" as const, repo: "/home/a/intuition", bun: "/home/a/.bun/bin/bun" };
-const wsl = { distro: "Ubuntu", repo: "/home/you/intuition", bun: "/home/you/.bun/bin/bun" };
+const runner = { kind: "local" as const, repo: "/home/a/holm", bun: "/home/a/.bun/bin/bun" };
+const wsl = { distro: "Ubuntu", repo: "/home/you/holm", bun: "/home/you/.bun/bin/bun" };
 
 describe("the OS", () => {
   test("from process.platform: win32, darwin, and everything else Linux", () => {
@@ -37,12 +37,12 @@ describe("the OS", () => {
     for (const os of ["windows", "linux"] as const) expect(defaultHotkeys(os)).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S" });
   });
 
-  test("savedPathPattern: native paths are <temp>/intuition/<kind>-<time>.png; Windows ones as before", () => {
-    const clipPath = "/var/folders/xy/T/intuition/clip-20261115-090507-042.png";
+  test("savedPathPattern: native paths are <temp>/holm/<kind>-<time>.png; Windows ones as before", () => {
+    const clipPath = "/var/folders/xy/T/holm/clip-20261115-090507-042.png";
     expect(savedPathPattern("macos", "clip").test(clipPath)).toBe(true);
-    expect(savedPathPattern("linux", "snip").test("/tmp/intuition/snip-20261115-090508-000.png")).toBe(true);
-    expect(savedPathPattern("linux", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe(false);
-    expect(savedPathPattern("windows-wsl", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\intuition\\clip-1.png")).toBe(true);
+    expect(savedPathPattern("linux", "snip").test("/tmp/holm/snip-20261115-090508-000.png")).toBe(true);
+    expect(savedPathPattern("linux", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\holm\\clip-1.png")).toBe(false);
+    expect(savedPathPattern("windows-wsl", "clip").test("C:\\Users\\x\\AppData\\Local\\Temp\\holm\\clip-1.png")).toBe(true);
     expect(savedPathPattern("windows-wsl", "clip").test(clipPath)).toBe(false);
   });
 
@@ -63,10 +63,10 @@ describe("starting the runner", () => {
 
   test("Windows: wsl.exe as before, attached. macOS and Linux: bun on the repo's cli, detached, with the login shell's environment", () => {
     expect(runnerSpawn("windows", { wsl }, "C:\\Windows")).toEqual({
-      file: "C:\\Windows\\System32\\wsl.exe", args: ["-d", "Ubuntu", "--exec", wsl.bun, "/home/you/intuition/src/cli.ts", "start", "--login-env"], detached: false,
+      file: "C:\\Windows\\System32\\wsl.exe", args: ["-d", "Ubuntu", "--exec", wsl.bun, "/home/you/holm/src/cli.ts", "start", "--login-env"], detached: false,
     });
     for (const os of ["macos", "linux"] as const) {
-      expect(runnerSpawn(os, { runner: { ...runner, repo: "/home/a/intuition/" } })).toEqual({ file: runner.bun, args: ["/home/a/intuition/src/cli.ts", "start", "--login-env"], detached: true });
+      expect(runnerSpawn(os, { runner: { ...runner, repo: "/home/a/holm/" } })).toEqual({ file: runner.bun, args: ["/home/a/holm/src/cli.ts", "start", "--login-env"], detached: true });
     }
   });
 
@@ -77,9 +77,9 @@ describe("starting the runner", () => {
   });
 
   test("the notice says where to start it", () => {
-    expect(runnerDownHint("windows", false)).toBe("Start it in WSL: intuition up");
-    expect(runnerDownHint("macos", false)).toBe("Start it in a terminal: intuition up");
-    expect(runnerDownHint("linux", true)).toContain("In a terminal: intuition start, and intuition logs");
+    expect(runnerDownHint("windows", false)).toBe("Start it in WSL: holm up");
+    expect(runnerDownHint("macos", false)).toBe("Start it in a terminal: holm up");
+    expect(runnerDownHint("linux", true)).toContain("In a terminal: holm start, and holm logs");
   });
 });
 
@@ -174,8 +174,8 @@ describe("the dock per OS", () => {
     expect(dockTransparent("linux", { DISPLAY: ":0", XDG_CURRENT_DESKTOP: "KDE" })).toBe(true);
     expect(dockTransparent("linux", { DISPLAY: ":0" })).toBe(false);
     expect(dockTransparent("linux", { DISPLAY: ":0", XDG_CURRENT_DESKTOP: "i3" })).toBe(false);
-    expect(dockTransparent("linux", { DISPLAY: ":0", INTUITION_DOCK_OPAQUE: "0" })).toBe(true);
-    expect(dockTransparent("macos", { INTUITION_DOCK_OPAQUE: "1" })).toBe(false);
+    expect(dockTransparent("linux", { DISPLAY: ":0", HOLM_DOCK_OPAQUE: "0" })).toBe(true);
+    expect(dockTransparent("macos", { HOLM_DOCK_OPAQUE: "1" })).toBe(false);
   });
 
   test("an opaque dock is the state's island at the top centre of the transparent window's place", () => {
@@ -203,19 +203,19 @@ describe("Linux", () => {
     expect(hasAppIndicator("appindicatorsupport@rgcjonas.gmail.com")).toBe(true);
     expect(hasAppIndicator("ding@rastersoft.com\n")).toBe(false);
     const gnome = { XDG_CURRENT_DESKTOP: "GNOME", DISPLAY: ":0" };
-    expect(linuxNotices(gnome, "ding@rastersoft.com").map((n) => n.title)).toEqual(["intuition: GNOME shows no tray icon"]);
+    expect(linuxNotices(gnome, "ding@rastersoft.com").map((n) => n.title)).toEqual(["Holm: GNOME shows no tray icon"]);
     expect(linuxNotices(gnome, "appindicatorsupport@rgcjonas.gmail.com")).toEqual([]);
     // gnome-extensions missing or failing: nothing is claimed about the tray.
     expect(linuxNotices(gnome, null)).toEqual([]);
-    expect(linuxNotices({ WAYLAND_DISPLAY: "wayland-0" }, null).map((n) => n.title)).toEqual(["intuition: the hotkeys may not work under Wayland"]);
+    expect(linuxNotices({ WAYLAND_DISPLAY: "wayland-0" }, null).map((n) => n.title)).toEqual(["Holm: the hotkeys may not work under Wayland"]);
     expect(linuxNotices({ DISPLAY: ":0", XDG_CURRENT_DESKTOP: "KDE" }, null)).toEqual([]);
   });
 
   test("start on login: an XDG autostart file that runs Electron on the app folder; the command line writes the same one", () => {
-    expect(autostartFile("/home/a", {})).toBe("/home/a/.config/autostart/intuition.desktop");
-    expect(autostartFile("/home/a", { XDG_CONFIG_HOME: "/x" })).toBe("/x/autostart/intuition.desktop");
-    const entry = autostartEntry("/home/a/.local/share/intuition/shell/node_modules/electron/dist/electron", ["--no-sandbox", "/home/a/my $dir/100%"]);
-    expect(entry).toContain('Exec="/home/a/.local/share/intuition/shell/node_modules/electron/dist/electron" "--no-sandbox" "/home/a/my \\$dir/100%%"\n');
+    expect(autostartFile("/home/a", {})).toBe("/home/a/.config/autostart/holm.desktop");
+    expect(autostartFile("/home/a", { XDG_CONFIG_HOME: "/x" })).toBe("/x/autostart/holm.desktop");
+    const entry = autostartEntry("/home/a/.local/share/holm/shell/node_modules/electron/dist/electron", ["--no-sandbox", "/home/a/my $dir/100%"]);
+    expect(entry).toContain('Exec="/home/a/.local/share/holm/shell/node_modules/electron/dist/electron" "--no-sandbox" "/home/a/my \\$dir/100%%"\n');
     expect(cliAutostartEntry).toBe(autostartEntry);
   });
 });
@@ -223,9 +223,9 @@ describe("Linux", () => {
 describe("macOS", () => {
   test("start on login: a launch agent that runs Electron on the app folder, since a login item would open Electron.app without it", () => {
     expect(launchAgentFile("/Users/a")).toBe(`/Users/a/Library/LaunchAgents/${LAUNCH_AGENT}.plist`);
-    const plist = launchAgentPlist("/Users/a/Library/Application Support/intuition/shell/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron", ["/Users/a/Library/Application Support/intuition/shell", "<&>"]);
+    const plist = launchAgentPlist("/Users/a/Library/Application Support/holm/shell/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron", ["/Users/a/Library/Application Support/holm/shell", "<&>"]);
     expect(plist).toContain(`<key>Label</key><string>${LAUNCH_AGENT}</string>`);
-    expect(plist).toContain("    <string>/Users/a/Library/Application Support/intuition/shell</string>\n");
+    expect(plist).toContain("    <string>/Users/a/Library/Application Support/holm/shell</string>\n");
     expect(plist).toContain("    <string>&lt;&amp;&gt;</string>\n");
     expect(plist).toContain("<key>RunAtLoad</key><true/>");
   });

@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// The app's own commands: `intuition <command>` once `bun src/cli.ts link` has put it on the PATH, or `bun src/cli.ts <command>`.
+// The app's own commands: `holm <command>` once `bun src/cli.ts link` has put it on the PATH, or `bun src/cli.ts <command>`.
 // Every command prints through src/cli/ui.ts: the same marks, colours and spinners, and plain lines without a terminal.
 import { join } from "node:path";
 import { pick } from "./cli/command";
@@ -23,11 +23,11 @@ const { c } = ui;
 function usage(): string {
   const h = (s: string) => c.bold(s);
   const rows = (list: [string, string][]) => list.map(([name, what]) => `  ${name.padEnd(32)}${what}`).join("\n");
-  return `intuition: fire tasks at Claude Code from a hotkey, a pop-up and a chat.
+  return `Holm: fire tasks at Claude Code from a hotkey, a pop-up and a chat.
 
 ${h("USAGE")}
-  intuition <command> [flags]
-  intuition                       up, or setup while there is no config yet
+  holm <command> [flags]
+  holm                       up, or setup while there is no config yet
 
 ${h("GET STARTED")}
 ${rows([
@@ -57,7 +57,7 @@ ${rows([
 
 ${h("MORE")}
 ${rows([
-  ["link [dir]", "put intuition on the PATH (default: bun's)"],
+  ["link [dir]", "put holm on the PATH (default: bun's)"],
   ["unlink [dir]", "remove that link"],
   ["uninstall [--purge]", "undo setup (--purge: config and sessions too)"],
   ["help", "print this"],
@@ -75,9 +75,9 @@ ${rows([
 ])}
 
 ${h("EXAMPLES")}
-  $ intuition setup
-  $ intuition setup --yes --workspace web=~/code/web --no-login
-  $ intuition doctor --json
+  $ holm setup
+  $ holm setup --yes --workspace web=~/code/web --no-login
+  $ holm doctor --json
 
 ${h("LEARN MORE")}
   README.md and docs/platforms.md. Colour follows NO_COLOR and FORCE_COLOR.`;
@@ -233,7 +233,7 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
 };
 
 const words = process.argv.slice(2);
-// The first plain `intuition`, before there is a config: setup.
+// The first plain `holm`, before there is a config: setup.
 const picked = words.length === 0 && firstRun() ? { name: "setup", rest: [] } : pick(words, Object.keys(commands));
 if (!picked) usageError(`unknown command: ${words.join(" ")}`);
 const { name, rest } = picked;

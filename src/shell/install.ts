@@ -104,7 +104,7 @@ function same(a: string, b: string): boolean {
  */
 export async function isCurrent(paths: ShellPaths): Promise<boolean> {
   if (!isInstalled(paths) || installedElectron(paths) !== wantedElectron()) return false;
-  const fresh = mkdtempSync(join(tmpdir(), "intuition-shell-bundle-"));
+  const fresh = mkdtempSync(join(tmpdir(), "holm-shell-bundle-"));
   try {
     await buildShell(fresh);
     copyFileSync(join(SHELL_SRC, "package.json"), join(fresh, "package.json"));
@@ -116,7 +116,7 @@ export async function isCurrent(paths: ShellPaths): Promise<boolean> {
 
 function needInstalled(paths: ShellPaths, platform: Platform): void {
   needPlatform(platform, true);
-  if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
+  if (!isInstalled(paths)) throw new Error("the shell is not installed: run `holm shell install`");
 }
 
 /** Where the runner lives in WSL, for the Windows shell to start it: this distribution, this repo and the bun running this command. */
@@ -253,7 +253,7 @@ export async function login(action: "on" | "off" | "status", paths?: ShellPaths,
   await shell.exited;
   clearTimeout(timer);
   try {
-    if (!existsSync(resultFile)) throw new Error("the shell wrote no answer: an older bundle may be installed (run `intuition shell install`)");
+    if (!existsSync(resultFile)) throw new Error("the shell wrote no answer: an older bundle may be installed (run `holm shell install`)");
     const result = JSON.parse(readFileSync(resultFile, "utf8")) as LoginResult;
     if (result.error || typeof result.openAtLogin !== "boolean") throw new Error(`the shell could not ${action === "status" ? "read" : "set"} start on login: ${result.error}`);
     return result;
@@ -268,7 +268,7 @@ export async function login(action: "on" | "off" | "status", paths?: ShellPaths,
  */
 export function autostart(action: "on" | "off" | "status", paths: ShellPaths, platform: Platform, file = autostartFile()): LoginResult {
   if (action === "on") {
-    if (!isInstalled(paths)) throw new Error("the shell is not installed: run `intuition shell install`");
+    if (!isInstalled(paths)) throw new Error("the shell is not installed: run `holm shell install`");
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, autostartEntry(paths.electronExe, [...platform.electronFlags(), platform.appArg(paths.app)]));
   } else if (action === "off") {

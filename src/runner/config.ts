@@ -51,15 +51,15 @@ export interface Config {
   settings: StoredSettings;
   dataDir: string;
   configPath: string;
-  /** INTUITION_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
+  /** HOLM_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
   fakeAgent: boolean;
-  /** INTUITION_BUILD_ID: the build id the runner reports and `start` expects, instead of the hash of the code (tests only). */
+  /** HOLM_BUILD_ID: the build id the runner reports and `start` expects, instead of the hash of the code (tests only). */
   buildId: string | null;
 }
 
 export const DEFAULT_CONFIG = {
   port: DEFAULT_PORT,
-  // None: the first run, `intuition setup` and the Settings window ask for them.
+  // None: the first run, `holm setup` and the Settings window ask for them.
   workspaces: [] as { name: string; path: string }[],
 };
 
@@ -79,7 +79,7 @@ export function expandHome(path: string): string {
 }
 
 export function configPath(env: Record<string, string | undefined> = process.env): string {
-  return resolve(expandHome(env.INTUITION_CONFIG ?? "~/.config/intuition/config.json"));
+  return resolve(expandHome(env.HOLM_CONFIG ?? "~/.config/holm/config.json"));
 }
 
 /** The index of the first workspace whose name an earlier one has, or null. */
@@ -132,11 +132,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!parsed.success) throw new Error(`${path}: ${z.prettifyError(parsed.error)}`);
   const twice = duplicateWorkspace(parsed.data.workspaces);
   if (twice !== null) throw new Error(`${path}: workspace "${parsed.data.workspaces[twice]!.name}" is listed twice`);
-  const dataDir = resolve(expandHome(env.INTUITION_DATA_DIR ?? "~/.local/share/intuition"));
+  const dataDir = resolve(expandHome(env.HOLM_DATA_DIR ?? "~/.local/share/holm"));
   mkdirSync(dataDir, { recursive: true });
   const { port, ...settings } = parsed.data;
   const config: Config = {
-    port: env.INTUITION_PORT !== undefined ? Number(env.INTUITION_PORT) : port,
+    port: env.HOLM_PORT !== undefined ? Number(env.HOLM_PORT) : port,
     workspaces: [],
     permissionMode: settings.permissionMode,
     workspaceModes: {},
@@ -145,8 +145,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     settings,
     dataDir,
     configPath: path,
-    fakeAgent: env.INTUITION_FAKE_AGENT === "1",
-    buildId: env.INTUITION_BUILD_ID || null,
+    fakeAgent: env.HOLM_FAKE_AGENT === "1",
+    buildId: env.HOLM_BUILD_ID || null,
   };
   applySettings(config, settings);
   return config;

@@ -1,4 +1,4 @@
-// The fake agent, used when INTUITION_FAKE_AGENT=1 (tests and CI, which have no Claude Code login).
+// The fake agent, used when HOLM_FAKE_AGENT=1 (tests and CI, which have no Claude Code login).
 // It never starts Claude Code and never touches the workspace. One turn is scripted from the prompt:
 //
 //   1. It reports a made-up Claude Code session id, `fake-<uuid>` (or the id it was asked to resume),

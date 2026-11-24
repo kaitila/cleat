@@ -44,16 +44,16 @@ if (status.exitCode !== 0 || !/^logged in/i.test(statusText)) {
 const TIMEOUT_MS = 300_000;
 const BORN = "Reply with exactly: born in terminal";
 const GROWN = "Reply with exactly: grown in terminal";
-const ANSWER = "Reply with exactly: answered in intuition";
+const ANSWER = "Reply with exactly: answered in holm";
 
-const dir = mkdtempSync(join(tmpdir(), "intuition-smoke-codex-sync-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-smoke-codex-sync-"));
 // The real path: Codex records the folder with links resolved.
 const workspace = join(realpathSync(dir), "workspace");
 mkdirSync(workspace);
 const configFile = join(dir, "config.json");
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace, agent: "codex" }] }));
-// Its own environment, so a INTUITION_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ INTUITION_CONFIG: configFile, INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" }));
+// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}, codex ${statusText}`);
 
 const seen: Record<string, unknown> = {};
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
   if (refused.status !== 409 || refusedError !== OPEN_IN_TERMINAL) return void finish(1, `a reply without force answered ${refused.status}: ${refusedError}`);
   const forced = await post(`/api/sessions/${id}/messages`, { prompt: ANSWER, force: true });
   if (forced.status !== 202) return void finish(1, `a reply with force answered ${forced.status}: ${await forced.text()}`);
-  const answered = await until("the forced reply's answer", () => eventsOf(id).find((e) => e.seq > answerSeen.seq && e.kind === "assistant_text" && e.text.toLowerCase().includes("answered in intuition")));
+  const answered = await until("the forced reply's answer", () => eventsOf(id).find((e) => e.seq > answerSeen.seq && e.kind === "assistant_text" && e.text.toLowerCase().includes("answered in holm")));
   const ended = await until("the forced reply to end", () => {
     const s = lastOf(id);
     if (s?.status === "error") void finish(1, `the forced reply failed: ${JSON.stringify(eventsOf(id).at(-1))}`);

@@ -24,15 +24,15 @@ if (process.env.CI) {
 const TIMEOUT_MS = 240_000;
 const PROMPT = "Create a file named proof.txt in the current directory containing exactly: hi\nUse the Write tool for it, nothing else.";
 
-const dir = realpathSync(mkdtempSync(join(tmpdir(), "intuition-smoke-auto-")));
+const dir = realpathSync(mkdtempSync(join(tmpdir(), "holm-smoke-auto-")));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const proof = join(workspace, "proof.txt");
 const configFile = join(dir, "config.json");
 // No permissionMode: the default config's mode is what is checked.
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace }] }));
-// Its own environment, so a INTUITION_FAKE_AGENT left in the shell can't turn this into a fake run.
-const config = loadConfig({ INTUITION_CONFIG: configFile, INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: "0" });
+// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
+const config = loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" });
 const runner = startServer(config);
 console.log(`runner on ${runner.url}, workspace ${workspace}, permissionMode asked for: ${config.permissionMode}`);
 
