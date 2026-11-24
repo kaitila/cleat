@@ -1,5 +1,5 @@
 // From a fresh clone to a running app, as a new user does it: `bun scripts/setup-check.ts` (add --keep to leave it all running).
-// Needs a desktop, Node with npm, and Claude Code logged in, so it is not part of the test suite or CI.
+// Needs a desktop and Claude Code logged in, so it is not part of the test suite or CI.
 //
 // In a temp folder it makes a home with two projects in it, clones this repo's HEAD, runs `bun install` and
 // `bun src/cli.ts setup --yes --workspace <each> --link-dir <a temp bin>` with HOME set to the temp home, then checks
@@ -20,7 +20,7 @@ const REPO = join(import.meta.dir, "..");
 const keep = process.argv.includes("--keep");
 
 if (process.env.CI) {
-  console.log("skipped: setup from a fresh clone needs a desktop, Node with npm and a Claude Code login");
+  console.log("skipped: setup from a fresh clone needs a desktop and a Claude Code login");
   process.exit(0);
 }
 const layout = detectLayout() === "windows-wsl" ? "linux" : detectLayout();
@@ -66,8 +66,6 @@ Object.assign(env, {
   ...(detectLayout() === "windows-wsl" ? { HOLM_PLATFORM: "linux" } : {}),
   // The downloads are kept in the real caches, so a second run does not fetch them again.
   BUN_INSTALL_CACHE_DIR: process.env.BUN_INSTALL_CACHE_DIR ?? join(realHome, ".bun", "install", "cache"),
-  npm_config_cache: process.env.npm_config_cache ?? join(realHome, ".npm"),
-  electron_config_cache: process.env.electron_config_cache ?? join(realHome, layout === "macos" ? "Library/Caches/electron" : ".cache/electron"),
 });
 
 async function run(cmd: string[], cwd: string): Promise<{ code: number; out: string }> {

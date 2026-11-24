@@ -69,10 +69,10 @@
     </dl>
 
     <div class="install">
-      <code id="install-line" class="install-line">git clone https://github.com/kaitila/holm &amp;&amp; cd holm &amp;&amp; bun install &amp;&amp; bun run setup</code>
+      <code id="install-line" class="install-line">curl -fsSL https://bun.sh/install | bash &amp;&amp; export PATH="$HOME/.bun/bin:$PATH" &amp;&amp; bun install -g github:kaitila/holm &amp;&amp; holm setup</code>
       <button id="copy" class="quiet small copy" type="button" aria-describedby="install-line">Copy</button>
     </div>
-    <p class="fine small muted">macOS, Linux, or Windows with WSL 2. Needs bun, Node, and Claude Code or Codex. It runs on your machine: nothing leaves it but what the agent sends.</p>
+    <p class="fine small muted">macOS, Linux, or Windows with WSL 2. The line brings bun, the app and its agents; you log in to Claude Code or Codex. It runs on your machine: nothing leaves it but what the agent sends.</p>
   </div>
 
   <footer class="foot small muted">

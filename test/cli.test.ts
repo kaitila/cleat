@@ -140,7 +140,7 @@ describe("every command into a pipe", () => {
     const report = JSON.parse(out);
     expect(report.layout).toBe("linux");
     expect(typeof report.ok).toBe("boolean");
-    expect(report.checks.map((c: { name: string }) => c.name)).toContain("node and npm");
+    expect(report.checks.map((c: { name: string }) => c.name)).not.toContain("node and npm");
     for (const c of report.checks) expect(Object.keys(c).sort()).toEqual(["detail", "fix", "name", "needed", "ok"]);
   });
 

@@ -11,6 +11,7 @@ import { doctor, machineProbes, parseDoctorArgs } from "./cli/doctor";
 import { clackAsk, DEFAULTS, firstRun, parseSetupArgs, setup } from "./cli/setup";
 import { parseUninstallArgs, uninstall } from "./cli/uninstall";
 import { installCurrentShell } from "./cli/up";
+import { agentLogin, installKind, packageName, parseLoginAgent, update } from "./cli/update";
 import { errorText, makeUi, promptOutput, termOf, type State } from "./cli/ui";
 import { install, isInstalled, login, pidFile, prompt, removeShell, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
 import { currentPlatform } from "./shell/platform";
@@ -35,9 +36,11 @@ ${h("USAGE")}
 
 ${h("GET STARTED")}
 ${rows([
-  ["setup", "from a fresh clone to a running app"],
+  ["setup", "from a fresh install to a running app"],
   ["up", "start the runner, install and start the shell"],
+  ["login [claude|codex]", "log the agent in (Claude Code's own login)"],
   ["doctor [--json]", "check what it needs, with a fix for each"],
+  ["update", "get the newest version, then up"],
 ])}
 
 ${h("RUNNER")}
@@ -180,6 +183,7 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
         runnerUrl: () => runner.runnerUrl(),
         startShell: (open) => (open ? prompt(undefined, platform) : start(undefined, platform)),
         login: async (on) => (await login(on ? "on" : "off", undefined, platform)).openAtLogin === true,
+        agentLogin: (agent) => agentLogin(agent),
       },
       ask,
       { ui: makeUi({ term, guide: true }), probes: machineProbes(platform), version },
@@ -205,6 +209,10 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
       removeShell: () => removeShell(undefined, platform),
       stopRunner: () => runner.stop(),
       unlink: (dir) => unlink(dir),
+    }).then((code) => {
+      // Installed by `bun install -g`: the package itself is bun's to remove.
+      if (installKind() === "package") ui.line(`  the app itself: ${c.cyan(`bun remove --global ${packageName()}`)}`);
+      return code;
     });
   },
   "shell install": () =>
@@ -228,6 +236,12 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
     const { openAtLogin } = await login(action);
     ui.line(`${ui.mark(openAtLogin ? "ok" : "skip")} start on login is ${openAtLogin ? "on" : "off"}`);
   },
+  login: (rest) => {
+    const agent = parseLoginAgent(rest);
+    if (!agent) usageError(`login takes claude or codex, not ${rest.join(" ")}`);
+    return agentLogin(agent);
+  },
+  update: () => update((l) => ui.line(`${ui.mark("ok")} ${l}`)),
   link: (rest) => link(rest[0]),
   unlink: (rest) => unlink(rest[0]),
   help: () => console.log(usage()),
@@ -242,7 +256,7 @@ const picked = words.length === 0 && firstRun() ? { name: "setup", rest: [] } : 
 if (!picked) usageError(`unknown command: ${words.join(" ")}`);
 const { name, rest } = picked;
 /** How many words each command takes after its name; the others take none. */
-const takes: Record<string, number> = { setup: Infinity, uninstall: Infinity, start: 1, restart: 1, resume: 1, doctor: 1, "shell login": 1, link: 1, unlink: 1 };
+const takes: Record<string, number> = { setup: Infinity, uninstall: Infinity, login: 1, start: 1, restart: 1, resume: 1, doctor: 1, "shell login": 1, link: 1, unlink: 1 };
 if (rest.length > (takes[name] ?? 0)) usageError(`${name} does not take ${rest.join(" ")}`);
 try {
   const code = await commands[name]!(rest);
