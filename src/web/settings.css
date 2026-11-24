@@ -135,6 +135,10 @@
 .shortcut[aria-invalid="true"] { border-color: var(--danger); }
 .keycaps { display: inline-flex; align-items: center; gap: var(--space-1); }
 .keycaps kbd { color: var(--text); background: var(--surface); }
+/* The pages' keys under them (D0046): the guide's rows in a card of their own, read-only. */
+.sub-label { margin: var(--space-4) 0 var(--space-2); padding-inline: var(--space-1); }
+.page-keys { padding: var(--space-3) var(--space-4); }
+.page-keys .guide { grid-template-columns: repeat(auto-fit, minmax(calc(var(--sidebar) + var(--space-5)), 1fr)); column-gap: var(--space-5); }
 
 /* ---------- a switch: a checkbox drawn as a track and a knob ---------- */
 .switch {

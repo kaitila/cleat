@@ -62,7 +62,7 @@ interface Settings {
   permissionMode: Mode;
   agent?: "claude" | "codex";
   workspaces: { name: string; path: string; permissionMode?: Mode; agent?: "claude" | "codex" | null }[];
-  shell: { hotkey: string; snipHotkey: string; dock: boolean; startOnLogin: boolean } | null;
+  shell: { hotkey: string; snipHotkey: string; chatHotkey?: string; dock: boolean; startOnLogin: boolean } | null;
   port: number;
 }
 
@@ -80,9 +80,31 @@ let stored: Settings = {
     { name: "alpha", path: join(dir, "alpha") },
     { name: "gone", path: join(dir, "gone"), permissionMode: "default" },
   ],
+  // From before the chat's hotkey (D0046): none.
   shell: { hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", dock: true, startOnLogin: false },
   port: 0,
 };
+
+/**
+ * The controls on the page that a person can't tell apart without a name or a tooltip: every visible
+ * button and link needs an accessible name, and one that is only a glyph (two characters or fewer, or
+ * none) needs a tooltip too (D0046).
+ */
+function unnamedControls(): string[] {
+  const out: string[] = [];
+  for (const el of document.querySelectorAll<HTMLElement>("button, a[href], [role=button], [role=menuitem]")) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || getComputedStyle(el).visibility === "hidden" || el.closest("[hidden], [inert]")) continue;
+    const words = (el.textContent ?? "").trim();
+    const labelled = el.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? "").join("") ?? "";
+    const name = el.getAttribute("aria-label") || labelled || words || el.title || el.dataset.tip;
+    const tooltip = el.title || el.dataset.tip;
+    if (!name) out.push(`no name: ${el.outerHTML.slice(0, 120)}`);
+    else if (words.length <= 2 && !labelled && !tooltip) out.push(`no tooltip: ${el.outerHTML.slice(0, 120)}`);
+  }
+  return out;
+}
+
 /** Every PUT body, for the checks. */
 const puts: unknown[] = [];
 /** How long GET /api/settings waits before it answers (the cache check sets it). */
@@ -107,6 +129,7 @@ function invalid(s: Record<string, unknown>): { error: string; field: string } |
     if (typeof shell.hotkey !== "string" || !shell.hotkey) return { error: "A shortcut is needed.", field: "shell.hotkey" };
     if (typeof shell.snipHotkey !== "string" || !shell.snipHotkey) return { error: "A shortcut is needed.", field: "shell.snipHotkey" };
     if (shell.snipHotkey === shell.hotkey) return { error: "This is already the New task shortcut.", field: "shell.snipHotkey" };
+    if (shell.chatHotkey !== undefined && (typeof shell.chatHotkey !== "string" || !shell.chatHotkey)) return { error: "A shortcut is needed.", field: "shell.chatHotkey" };
     for (const k of ["dock", "startOnLogin"]) if (typeof shell[k] !== "boolean") return { error: `${k} must be true or false`, field: `shell.${k}` };
   }
   return null;
@@ -250,7 +273,8 @@ try {
   }));
   check("it shows the stored theme and permission mode", shown.theme === "system" && shown.mode === "auto", JSON.stringify(shown));
   check("it shows the workspaces, in order, each with its own mode", shown.names.join() === "alpha,gone" && shown.modes.join() === ",default", JSON.stringify(shown));
-  check("the shortcuts are keycaps", shown.caps.join("|") === (MAC ? "⌃ ⌥ Space|⌃ ⌥ S" : "Ctrl Alt Space|Ctrl Alt S"), JSON.stringify(shown.caps));
+  // The chat's from before it was set: its default (D0046).
+  check("the shortcuts are keycaps", shown.caps.join("|") === (MAC ? "⌃ ⌥ Space|⌃ ⌥ S|⌘ ⇧ J" : "Ctrl Alt Space|Ctrl Alt S|Ctrl Alt J"), JSON.stringify(shown.caps));
   check("dock and startup show their switches", shown.dock && !shown.login);
   check("About shows the version and the port", shown.version === "0.1.0" && shown.port === String(server.port), JSON.stringify(shown));
   check("nothing is wider than the window", !shown.overflow);
@@ -341,6 +365,25 @@ try {
   await page.click('[data-shortcut="snipHotkey"]');
   await page.keyboard.press("Alt+F9");
   await until("Shortcuts: Snip is recorded", () => stored.shell?.snipHotkey === "Alt+F9");
+
+  // The chat's hotkey (D0046): settings from before it have none, so the row shows the default, and
+  // the next save stores it. Recorded like the others; another's keys are refused at once, unsent.
+  check("Shortcuts: Chat shows its default before it was ever set", (await page.evaluate(() => [...document.querySelectorAll('[data-shortcut="chatHotkey"] kbd')].map((k) => k.textContent).join(" "))) === (MAC ? "⌘ ⇧ J" : "Ctrl Alt J"));
+  check("and the Snip save stored it", stored.shell?.chatHotkey === (MAC ? "Command+Shift+J" : "Control+Alt+J"), JSON.stringify(stored.shell));
+  const putsBefore = puts.length;
+  await page.click('[data-shortcut="chatHotkey"]');
+  await page.keyboard.press("Alt+F9");
+  await until("Shortcuts: the Snip shortcut's keys are refused for Chat, under its row", async () => ((await visibleError(page, '[data-error-for="shell.chatHotkey"]')) ?? "") === "This is already the Snip shortcut.", () => "");
+  check("and not sent", puts.length === putsBefore && stored.shell?.chatHotkey === (MAC ? "Command+Shift+J" : "Control+Alt+J"));
+  await page.click('[data-shortcut="chatHotkey"]');
+  await page.keyboard.press("Control+Alt+K");
+  await until("Shortcuts: Chat is recorded", () => stored.shell?.chatHotkey === "Control+Alt+K");
+  check("and its error goes", (await visibleError(page, '[data-error-for="shell.chatHotkey"]')) === null);
+  const pageKeys = await page.evaluate(() => [...document.querySelectorAll("#page-keys .guide-title")].map((t) => t.textContent).join(","));
+  check("under the shortcuts, the pages' keys, read-only: the guide's list less the global three", pageKeys === "Dock,Chat,New task and snip", pageKeys);
+  check("in this platform's words", (await page.evaluate(() => [...document.querySelectorAll('#page-keys [data-key="dock.switch"] kbd')].map((k) => k.textContent).join(""))) === (MAC ? "⌘K" : "CtrlK"));
+  const unnamed = await page.evaluate(unnamedControls);
+  check(`every button and link has a name, and every glyph-only one a tooltip`, unnamed.length === 0, unnamed.join("; "));
 
   await page.click('label.setting:has([data-switch="dock"])');
   await until("Dock: off is saved", () => stored.shell?.dock === false);

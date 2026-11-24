@@ -117,8 +117,19 @@
           <button class="shortcut quiet" type="button" data-shortcut="snipHotkey" data-field="shell.snipHotkey" aria-labelledby="snip-name snip-keys" aria-describedby="shortcut-help"><span class="keycaps" id="snip-keys"></span></button>
         </div>
         <p class="field-error small" data-error-for="shell.snipHotkey" hidden></p>
-        <p id="shortcut-help" class="card-note muted small">Click one and press the new keys; Esc keeps the old ones. They work as soon as they're saved.</p>
+        <div class="setting">
+          <div class="setting-text">
+            <span class="strong" id="chat-name">Chat</span>
+            <span class="muted small">Opens the chat in the notch, and closes it again.</span>
+          </div>
+          <button class="shortcut quiet" type="button" data-shortcut="chatHotkey" data-field="shell.chatHotkey" aria-labelledby="chat-name chat-keys" aria-describedby="shortcut-help"><span class="keycaps" id="chat-keys"></span></button>
+        </div>
+        <p class="field-error small" data-error-for="shell.chatHotkey" hidden></p>
+        <p id="shortcut-help" class="card-note muted small">Click one and press the new keys; Esc keeps the old ones. They work from any program as soon as they're saved.</p>
       </div>
+      <!-- The pages' own keys, read-only: the same list as the guide in the dock and the chat (shortcuts.js, D0046). -->
+      <h3 class="label sub-label" id="h-page-keys">In the dock, the chat and the pop-up</h3>
+      <div id="page-keys" class="card glass page-keys" aria-labelledby="h-page-keys"></div>
     </section>
 
     <section class="section" aria-labelledby="h-dock">
@@ -198,8 +209,8 @@
       </div>
       <div class="workspace-actions">
         <span class="exists small"></span>
-        <button class="quiet small up" type="button" aria-label="Move up">↑</button>
-        <button class="quiet small down" type="button" aria-label="Move down">↓</button>
+        <button class="quiet small up" type="button" aria-label="Move up" title="Move up: the first is the default">↑</button>
+        <button class="quiet small down" type="button" aria-label="Move down" title="Move down">↓</button>
         <button class="quiet small remove" type="button">Remove</button>
       </div>
       <p class="field-error small" hidden></p>

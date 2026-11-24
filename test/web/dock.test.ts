@@ -84,7 +84,7 @@ describe("served by the runner", () => {
 
   test("every module the dock imports is one the runner serves", async () => {
     const imports = (file: string) => [...source(file).matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "markdown.js", "questions.js", "agent.js", "keys.js", "dock-state.js"]);
+    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "markdown.js", "questions.js", "agent.js", "keys.js", "shortcuts.js", "shortcuts-sheet.js", "dock-state.js"]);
     expect(imports("dock-state.js")).toEqual(["chat-format.js", "keys.js"]);
     for (const file of [...imports("dock.js"), ...imports("dock-state.js")]) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
   });
@@ -208,9 +208,9 @@ describe("the contract with the shell", () => {
     expect(noComments(source("dock.js"))).not.toMatch(/resizeTo|resizeBy|innerWidth|innerHeight/);
   });
 
-  test("the bridge is used for setState and onChat and nothing else, and the page works without it", () => {
+  test("the bridge is used for setState, onChat and onChatKey and nothing else, and the page works without it", () => {
     const js = noComments(source("dock.js"));
-    expect(js.match(/intuitionDock[?.\w]*/g)).toEqual(["intuitionDock?.setState", "intuitionDock?.onChat?."]);
+    expect(js.match(/intuitionDock[?.\w]*/g)).toEqual(["intuitionDock?.setState", "intuitionDock?.onChat?.", "intuitionDock?.onChatKey?."]);
   });
 
   test("New task is a new window on /prompt; Open in chat grows the island into the chat, not a window (D0042)", () => {

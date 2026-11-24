@@ -302,3 +302,9 @@ button.live-session { flex: 0 1 auto; min-width: var(--control-s); max-width: ca
 .menu-item { justify-content: flex-start; color: var(--text); font-weight: var(--regular); }
 .row-title.pinned::before { content: "Pinned"; margin-right: var(--space-2); color: var(--accent); font-size: var(--text-s); }
 .session-row .rename { flex: 1; min-width: 0; min-height: var(--control-s); padding-block: 0; padding-inline: var(--space-1); }
+
+/* The keyboard shortcuts (D0046): the whole panel under the notch's band, in the island's own colour,
+   the panel held at the open dock's height while it shows (dock.js). */
+.panel > .sheet { inset: var(--notch-h) 0 0 0; border-radius: 0; background: transparent; }
+/* The island's own surface is the sheet's ground: what it covers is put out of sight, not dimmed through. */
+.panel[data-sheet] > :not(.sheet, .tip) { visibility: hidden; }

@@ -25,7 +25,9 @@ import { canStop, manage, menuItems, renameInline, sessionMenu, visible } from "
 import { renderMarkdown } from "./markdown.js";
 import { answersList, questionDecidedLabel, questionForm, questionsOf } from "./questions.js";
 import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.js";
-import { commandLabel } from "./keys.js";
+import { commandLabel, MAC } from "./keys.js";
+import { guide, tip } from "./shortcuts.js";
+import { shortcutsSheet, tooltips } from "./shortcuts-sheet.js";
 import {
   CLOSE_MS,
   clickAction,
@@ -125,7 +127,17 @@ let listOpen = false;
 /** The row Up, Down and Enter in the find field work on: the first that matches, until moved. */
 let activeRow = null;
 const COMMAND = commandLabel();
-els.switcher.title = `Switch session (${COMMAND}K)`;
+const newTaskLink = els.panel.querySelector(".new-task");
+
+/** The shell's part of the settings (GET /api/settings, then each { type: "settings" }), for the global hotkeys' tooltips and the guide. */
+let shellKeys = null;
+/** The tooltips that name a key: the global ones are the person's own, so they are written again when the settings change. */
+function renderTips() {
+  const keys = { mac: MAC, shell: shellKeys };
+  els.expand.title = tip("Open in the chat", "chatHotkey", keys);
+  newTaskLink.title = tip("New task", "hotkey", keys);
+  els.more.title = "More: the session's actions, keyboard shortcuts";
+}
 
 /**
  * Opens or closes the switch under the head; the island follows its height. Open, the keyboard is in
@@ -194,6 +206,25 @@ window.addEventListener("blur", () => commandHeld(false));
  * in terminal, then the same three). It lives in the panel, inside the island.
  */
 const menu = sessionMenu(document, els.panel);
+
+/**
+ * The keyboard shortcuts (D0046): ? in the open dock while the keyboard is not in a text box, or
+ * "Keyboard shortcuts" in the head's "…". Over the whole panel, which is as tall as the open dock
+ * may be while it shows; Esc puts it away and nothing else.
+ */
+const sheet = shortcutsSheet(document, els.panel, {
+  sections: () => guide({ mac: MAC, shell: shellKeys }),
+  keys: () => state === "open",
+  onChange: (on) => {
+    els.panel.toggleAttribute("data-sheet", on);
+    els.panel.style.minHeight = on ? `${SIZES.open.height}px` : "";
+    if (!on) scheduleClose();
+  },
+});
+// No shadow in the dock (its window is the island): the sheet is the panel's own colour (dock.css).
+sheet.el.classList.remove("glass-float");
+// Tooltips drawn inside the island, where the shell takes the mouse (an OS tooltip may not show for the dock at all).
+tooltips(document, els.panel, { enabled: () => state === "open" });
 /** True while a row's title is being edited: like a reply being typed, it holds the dock open. */
 let renaming = false;
 /** A refusal of Stop, Rename, Pin or Archive, said in the head for a few seconds. */
@@ -951,6 +982,7 @@ async function act(id, action) {
   if (!session) return;
   // The chat is the island grown large, on this session (D0042), not a window.
   if (action === "chat") goChat(id);
+  else if (action === "keys") sheet.open();
   else if (action === "resume") await copyResume(session);
   else if (action === "pin") await run(session.pinned ? "unpin" : "pin", id, "pin", { pinned: !session.pinned });
   else if (action === "archive") await run(session.archived ? "unarchive" : "archive", id, "archive", { archived: !session.archived });
@@ -995,11 +1027,15 @@ els.more.addEventListener("click", () => {
     menu.close();
     return;
   }
-  if (!session) return;
+  const keysItem = { action: "keys", label: "Keyboard shortcuts" };
+  els.more.setAttribute("aria-expanded", "true");
+  if (!session) {
+    menu.open([keysItem], els.more, (action) => action === "keys" && sheet.open());
+    return;
+  }
   const items = [{ action: "chat", label: "Open in chat" }];
   if (resumeCommand(session)) items.push({ action: "resume", label: "Continue in terminal" });
-  els.more.setAttribute("aria-expanded", "true");
-  menu.open([...items, ...menuItems(session, false)], els.more, (action) => void act(session.id, action));
+  menu.open([...items, ...menuItems(session, false), keysItem], els.more, (action) => void act(session.id, action));
 });
 new MutationObserver(() => {
   if (!menu.isOpen) els.more.setAttribute("aria-expanded", "false");
@@ -1021,10 +1057,11 @@ function renderHead() {
   els.session.hidden = !session;
   // With no session at all there is nothing to switch to (the line under the head says so).
   els.switcher.hidden = shown().length === 0;
-  els.more.hidden = !session;
+  // With no session the "…" still has the keyboard shortcuts.
+  els.more.hidden = false;
   if (!session) {
     els.title.textContent = "Sessions";
-    els.title.title = "";
+    els.switcher.title = tip("Switch session", "dock.switch");
     delete els.switcherDot.dataset.status;
     headAgent.hidden = true;
     headStatus.hidden = !manageError;
@@ -1033,7 +1070,7 @@ function renderHead() {
     return;
   }
   els.title.textContent = session.title || "Untitled";
-  els.title.title = session.title || "";
+  els.switcher.title = `${session.title || "Untitled"}\n${tip("Switch session", "dock.switch")}`;
   els.switcherDot.dataset.status = session.status;
   els.switcherDot.title = sessionStatus(session);
   const kind = agentOf(session);
@@ -1267,7 +1304,7 @@ function holds() {
     pointerInside: inside,
     pointerDown: down,
     // A row's menu, its title being edited, or a find being typed holds it open as a focused reply box does.
-    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || renaming || picking() || (document.hasFocus() && listOpen && els.find.value !== "") || steppedDown,
+    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || sheet.isOpen || renaming || picking() || (document.hasFocus() && listOpen && els.find.value !== "") || steppedDown,
     // A draft holds it open only while the dock has the keyboard: once the person has gone to another
     // app, nothing they could press reaches the dock (not Esc, not a press beside it), so it closes
     // when the pointer is away, and the draft is kept for when it opens again.
@@ -1311,6 +1348,7 @@ function close() {
   clearTimeout(closeTimer);
   if (state !== "open" && state !== "chat") return;
   if (state === "chat") embed()?.hide();
+  sheet.close(false);
   steppedDown = false;
   // Closed under the pointer (Esc): it stays closed until the pointer has left.
   dismissed = inside;
@@ -1376,7 +1414,7 @@ document.addEventListener("keydown", (e) => {
 // Alt+Down, Ctrl+Shift+Tab and Alt+Up: the next one or the one before (dock-state.js, dockKey, D0040).
 // Picked by a key, the keyboard goes to the reply box.
 document.addEventListener("keydown", (e) => {
-  if (state !== "open" || picking() || menu.isOpen || renaming) return;
+  if (state !== "open" || picking() || menu.isOpen || sheet.isOpen || renaming) return;
   const key = dockKey(e);
   if (!key) return;
   e.preventDefault();
@@ -1430,6 +1468,7 @@ function goChat(id = null) {
   steppedDown = false;
   if (listOpen) showList(false);
   menu.close();
+  sheet.close(false);
   if (pick) saveSession(storage(), pick);
   if (state !== "chat") go("chat");
   // The frame first, so the keyboard is in the chat even while its reply box is off (a turn running).
@@ -1489,6 +1528,18 @@ try {
   window.intuitionDock?.onChat?.((id) => goChat(typeof id === "string" && id ? id : null));
 } catch {
   // A bridge without it: the chat is grown into from the page only.
+}
+
+// The chat's own hotkey (D0046): it grows the island into the chat from wherever the dock is, and
+// pressed again while the chat is shown, puts it away. The shell gives the dock the keyboard when it
+// hears "chat", as for a click.
+try {
+  window.intuitionDock?.onChatKey?.(() => {
+    if (state === "chat") close();
+    else goChat(null);
+  });
+} catch {
+  // An older bridge: the hotkey opens the chat through onChat.
 }
 
 // ---------- the connection ----------
@@ -1564,6 +1615,23 @@ function onMessage(message) {
     case "notification":
       onNotification(message.notification);
       break;
+    case "settings":
+      shellKeys = message.settings?.shell ?? null;
+      renderTips();
+      if (sheet.isOpen) sheet.open();
+      break;
+  }
+}
+
+/** The settings, once: the person's global hotkeys, for the tooltips and the guide. Later changes come on the socket. */
+async function loadKeys() {
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) return;
+    shellKeys = (await res.json())?.shell ?? null;
+    renderTips();
+  } catch {
+    // The defaults stay; the socket's next settings message has them.
   }
 }
 
@@ -1615,8 +1683,10 @@ els.panel.style.maxHeight = `${SIZES.open.height}px`;
 els.chat.style.width = `${SIZES.chat.width}px`;
 els.chat.style.height = `${SIZES.chat.height}px`;
 renderPill();
+renderTips();
 go("idle");
 connect();
+void loadKeys();
 // The chat's page, loaded once and kept (D0042): soon after the dock's own, so it does not hold up the pill.
 setTimeout(() => {
   els.chatFrame.src = "/?embed=dock";

@@ -182,10 +182,13 @@ export function setupLines(platform, reachable, shell = null) {
   else lines.push({ key: "startOnLogin", name: "Start at login", tone: "bad", value: "Can't be read", detail: `The shell could not read it. ${where}: intuition shell login status says why.` });
 
   if (report) {
-    const missing = [["hotkey", "New task"], ["snipHotkey", "Snip"]].filter(([k]) => report.hotkeys?.[k] !== true);
-    if (missing.length === 0) lines.push({ key: "hotkeys", name: "Shortcuts", tone: "ok", value: "Registered", detail: "Both work from any program." });
+    // A shell from before the chat's hotkey reports two (D0046).
+    const all = [["hotkey", "New task"], ["snipHotkey", "Snip"], ["chatHotkey", "Chat"]].filter(([k]) => k !== "chatHotkey" || report.hotkeys?.chatHotkey !== undefined);
+    const missing = all.filter(([k]) => report.hotkeys?.[k] !== true);
+    if (missing.length === 0) lines.push({ key: "hotkeys", name: "Shortcuts", tone: "ok", value: "Registered", detail: `${all.length === 2 ? "Both" : "All three"} work from any program.` });
     else {
-      const names = missing.map(([k, name]) => (shell?.[k] ? `${name} (${keycaps(shell[k]).join("+")})` : name)).join(" and ");
+      const each = missing.map(([k, name]) => (shell?.[k] ? `${name} (${keycaps(shell[k]).join("+")})` : name));
+      const names = each.length > 1 ? `${each.slice(0, -1).join(", ")} and ${each.at(-1)}` : each[0];
       const wayland = report.os === "linux" ? ", or the desktop refuses global shortcuts (Wayland: start the shell with DISPLAY set, or use the tray)" : "";
       lines.push({ key: "hotkeys", name: "Shortcuts", tone: "bad", value: "Not registered", detail: `${names}: another program holds the keys${wayland}. Pick other keys under Shortcuts.` });
     }

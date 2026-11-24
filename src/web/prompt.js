@@ -3,10 +3,12 @@
 // Enter starts, Shift+Enter is a new line, ⌘1..9 (Ctrl+1..9 off a Mac) picks a workspace, Alt+A flips the agent
 // (Claude Code or Codex, the workspace's own until flipped), Esc closes.
 // The shell captures the clipboard as the window opens: the capture shows under the task box and
-// goes with the task, unless it is removed (its × or Alt+Backspace).
+// goes with the task, unless it is removed (its ×, or Backspace in an empty task: D0046).
 // The API is docs/protocol.md; the types are src/shared/protocol.ts.
 import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
 import { commandAria, commandDigit, MAC } from "./keys.js";
+import { hintLine, tip } from "./shortcuts.js";
+import { renderHint, tooltips } from "./shortcuts-sheet.js";
 
 export const UNREACHABLE = "the runner is not reachable";
 
@@ -26,6 +28,15 @@ export function initialWorkspace(workspaces, lastUsed) {
 export function workspaceDigit(event, mac = MAC) {
   const digit = commandDigit(event, mac);
   return digit === null ? null : digit - 1;
+}
+
+/**
+ * True for the key that removes the clipboard attachment: Backspace alone, pressed (not held) in an
+ * empty task box, as a recipient's chip goes in a mail's To field. Never Alt+Backspace: on a Mac
+ * Option+Backspace deletes a word in every text box, and taking it surprised (D0046).
+ */
+export function isRemoveKey(event, text) {
+  return Boolean(event && event.key === "Backspace" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.repeat && !event.isComposing && text === "");
 }
 
 /** The line shown for an answer that isn't a success: the runner's own error text if it sent one. */
@@ -204,7 +215,7 @@ function start() {
     const name = document.createElement("span");
     name.textContent = agentName(kind);
     agentButton.replaceChildren(agentSvg(document, kind), name);
-    agentButton.title = `Starts on ${agentName(kind)}. Alt+A switches to ${agentName(flipAgent(kind))}`;
+    agentButton.title = `Starts on ${agentName(kind)}. ${tip(`Switch to ${agentName(flipAgent(kind))}`, "task.agent")}`;
     agentButton.setAttribute("aria-label", `Agent: ${agentName(kind)}. Switch to ${agentName(flipAgent(kind))}`);
     task.placeholder = taskPlaceholder(kind);
   }
@@ -239,9 +250,9 @@ function start() {
     remove.type = "button";
     remove.className = "clip-remove quiet small";
     remove.textContent = "×";
-    remove.title = "Remove (Alt+Backspace)";
+    remove.title = tip("Remove the clipboard", "task.remove");
     remove.setAttribute("aria-label", "Remove the clipboard attachment");
-    remove.setAttribute("aria-keyshortcuts", "Alt+Backspace");
+    remove.setAttribute("aria-keyshortcuts", "Backspace");
     remove.addEventListener("click", removeAttachment);
     clip.replaceChildren(label, what, remove);
     // It springs in each time a capture arrives (prompt.css).
@@ -339,8 +350,7 @@ function start() {
       void submit();
       return;
     }
-    if (e.key === "Backspace" && e.altKey && !e.ctrlKey && !e.metaKey) {
-      // Always swallowed: in a text box Alt+Backspace is undo, which would surprise here.
+    if (attachment !== null && e.target === task && isRemoveKey(e, task.value)) {
       e.preventDefault();
       removeAttachment();
       return;
@@ -369,6 +379,8 @@ function start() {
   };
   void document.fonts?.ready.then(replaceMark);
   window.addEventListener("resize", replaceMark);
+  renderHint(document, document.getElementById("keys"), hintLine("prompt", MAC));
+  tooltips(document, document.body);
   task.focus();
   void load();
   for (const ms of CLIPBOARD_POLLS) setTimeout(() => void pollClipboard(), ms);

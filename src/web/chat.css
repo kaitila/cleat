@@ -29,6 +29,7 @@
 /* "New task" and the settings gear, a square quiet button with a line icon in the button's colour (stroke="currentColor" in the markup). */
 .sidebar-actions { display: flex; align-items: center; gap: var(--space-1); }
 .settings-link { width: var(--control); padding: 0; }
+.keys-button { width: var(--control); padding: 0; font-weight: var(--medium); color: var(--muted); }
 .gear { width: var(--space-4); height: var(--space-4); fill: none; stroke-width: 1.25; stroke-linejoin: round; }
 .sessions {
   flex: 1;
@@ -248,3 +249,13 @@
   .sidebar { max-height: 34vh; }
   .head > *, .stream, .reply { padding-inline: var(--space-4); }
 }
+
+/* The keyboard shortcuts (D0046): a calm sheet over the chat, near its top, two columns where there is room. */
+body > .sheet {
+  inset: var(--space-6) 0 auto;
+  width: min(var(--measure), calc(100% - var(--space-5) * 2));
+  max-height: calc(100% - var(--space-6) * 2);
+  margin-inline: auto;
+  backdrop-filter: var(--frost);
+}
+body > .sheet .guide { grid-template-columns: repeat(auto-fit, minmax(calc(var(--sidebar) + var(--space-5)), 1fr)); column-gap: var(--space-5); }

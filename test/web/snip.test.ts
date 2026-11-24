@@ -28,7 +28,7 @@ describe("the runner serves the snip page", () => {
 
   test("every module it imports is served, and the page needs nothing else from the runner", async () => {
     const imports = (file: string) => [...source(file).matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports("snip.js")).toEqual(["agent.js", "snip-geometry.js", "keys.js"]);
+    expect(imports("snip.js")).toEqual(["agent.js", "snip-geometry.js", "keys.js", "shortcuts.js", "shortcuts-sheet.js"]);
     expect(imports("snip-geometry.js")).toEqual(["keys.js"]);
     expect(imports("keys.js")).toEqual([]);
     expect(imports("agent.js")).toEqual([]);
@@ -199,6 +199,7 @@ describe("the workspace chip and the keys", () => {
   test("the box has the agent switch beside the workspace, and its key in the hints", () => {
     const html = source("snip.html");
     expect(html).toMatch(/id="workspace"[\s\S]*<button id="agent" class="agent-switch[^"]*" type="button" aria-keyshortcuts="Alt\+A">/);
-    expect(html).toContain("<kbd>Alt</kbd><kbd>A</kbd><span>agent</span>");
+    expect(html).toContain('<span id="keys" class="keys muted" aria-hidden="true"></span>');
+    expect(source("snip.js")).toContain('renderHint(document, document.getElementById("keys"), hintLine("snip", MAC));');
   });
 });

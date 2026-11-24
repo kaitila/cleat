@@ -106,6 +106,13 @@ const shots = mkdtempSync(join(tmpdir(), "intuition-dock-shots-"));
 const hostileId = seed(join(dir, "data"));
 const runner = testRunner({ dir, driver: fakeDriver(STEP_MS) });
 let failed = false;
+
+/** Saves the shell's part of the settings, as the Settings page does: GET, change, PUT. */
+async function putShell(shell: Record<string, unknown>): Promise<void> {
+  const current = await (await fetch(`${runner.url}/api/settings`)).json();
+  const res = await fetch(`${runner.url}/api/settings`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...current, shell }) });
+  if (!res.ok) throw new Error(`PUT /api/settings answered ${res.status}: ${await res.text()}`);
+}
 /** Every URL the pages asked for: none may be on another host. */
 const requested: string[] = [];
 const pageErrors: string[] = [];
@@ -116,7 +123,14 @@ function instruments(bridge: boolean): void {
   w.__calls = [];
   // What the shell's preload gives the page: setState and nothing else. The window stays as it is.
   // And onChat, through which the shell grows the island into the chat (D0042): kept, for the test to call as the shell would.
-  if (bridge) w.intuitionDock = { setState: (state: string) => void w.__calls.push({ state, at: Date.now() }), onChat: (callback: (id: string | null) => void) => void (w.__onChat = callback) };
+  // And onChatKey, the chat's hotkey (D0046), kept for the test to press as the shell would.
+  if (bridge) {
+    w.intuitionDock = {
+      setState: (state: string) => void w.__calls.push({ state, at: Date.now() }),
+      onChat: (callback: (id: string | null) => void) => void (w.__onChat = callback),
+      onChatKey: (callback: () => void) => void (w.__onChatKey = callback),
+    };
+  }
 
   /** The island as drawn. Its box never changes, so its clip is found by asking what is under a point. */
   w.__shape = () => {
@@ -261,7 +275,7 @@ async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, r
         const layer = document.getElementById(view)!;
         if (layer.hidden || layer.hasAttribute("data-off") || layer.classList.contains("leaving")) why.push(`#${view} is not shown`);
         for (const el of [layer, ...layer.querySelectorAll("*")]) {
-          if (el.closest(".scroller > *, .sessions > *") || (el as HTMLElement).offsetParent === null) continue;
+          if (el.closest(".scroller > *, .sessions > *, .sheet-body > *") || (el as HTMLElement).offsetParent === null) continue;
           const b = el.getBoundingClientRect();
           if (b.width === 0 || b.height === 0) continue;
           const [l, t, r, bt] = [b.left - box.left - shape.left, b.top - box.top, b.right - box.left - shape.left - shape.width, b.bottom - box.top - shape.height];
@@ -451,11 +465,53 @@ try {
     check((await page.locator("#switcher #title").textContent()) !== "" && (await page.locator("#switcher .session-agent svg").count()) === 1, "the switch shows the session's title and its agent's glyph");
     await page.locator("#more").click();
     const items = await d.text(".menu:not([hidden]) .menu-item");
-    check(items[0] === "Open in chat" && items.slice(-3).join(",") === "Rename,Pin,Archive" && (await page.locator("#more").getAttribute("aria-expanded")) === "true", `"…" opens a small menu: ${items.join(", ")}`);
+    check(items[0] === "Open in chat" && items.slice(-4).join(",") === "Rename,Pin,Archive,Keyboard shortcuts" && (await page.locator("#more").getAttribute("aria-expanded")) === "true", `"…" opens a small menu: ${items.join(", ")}`);
     await page.locator(".menu").evaluate((el: Element) => Promise.all(el.getAnimations().map((x) => x.finished)));
     await d.shot("open-more");
     await page.locator("#more").click();
     check((await page.locator(".menu:not([hidden])").count()) === 0, "a second press on '…' puts its menu away");
+
+    // The keyboard shortcuts (D0046): every key, the global ones as the person recorded them, which
+    // come to the open dock on the socket when Settings saves them.
+    await putShell({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", chatHotkey: "Control+Alt+K", dock: true, startOnLogin: false });
+    await page.waitForFunction(() => document.getElementById("expand")?.title === "Open in the chat (⌃⌥K)" || document.getElementById("expand")?.dataset.tip === "Open in the chat (⌃⌥K)");
+    check(true, "a new chat hotkey saved in Settings reaches the dock's tooltips at once: Open in the chat (⌃⌥K)");
+    await page.locator("#more").click();
+    await page.locator(".menu-item", { hasText: "Keyboard shortcuts" }).click();
+    await page.locator(".sheet:not([hidden])").waitFor();
+    check((await d.text(".sheet .guide-title")).join(",") === "Anywhere,Dock,Chat,New task and snip", `"Keyboard shortcuts" in the "…" opens the guide: ${(await d.text(".sheet .guide-title")).join(", ")}`);
+    const caps = async (key: string) => (await page.locator(`.sheet .guide-row[data-key="${key}"] .combo`).first().locator("kbd").allTextContents()).join("");
+    check((await caps("chatHotkey")) === "⌃⌥K" && (await caps("hotkey")) === "⌃⌥Space" && (await caps("snipHotkey")) === "⌃⌥S", `it lists the recorded global keys as keycaps (${await caps("hotkey")}, ${await caps("snipHotkey")}, ${await caps("chatHotkey")})`);
+    check((await caps("dock.switch")) === "⌘K" && (await caps("task.agent")) === "⌥A" && (await caps("dock.next")) === "⌃Tab", "and the dock's, the chat's and the pop-up's keys in a Mac's words (⌘K, ⌥A, ⌃Tab)");
+    await d.settle("open");
+    const sheetBox = await page.locator(".sheet").boundingBox();
+    const panelBox = await page.locator("#panel").boundingBox();
+    check(sheetBox && panelBox && sheetBox.y >= panelBox.y && sheetBox.y + sheetBox.height <= panelBox.y + panelBox.height + 1 && sheetBox.height > 300, `the guide covers the panel, held at the open dock's height, inside the island (${JSON.stringify(sheetBox)})`);
+    await d.fits("open");
+    await d.shot("open-shortcuts");
+    await page.keyboard.press("Escape");
+    check((await page.locator(".sheet:not([hidden])").count()) === 0 && (await d.lastCall()).state === "open", "Esc puts the guide away, and only the guide: the dock stays open");
+    await page.locator("#switcher").focus();
+    await page.keyboard.press("Shift+Slash");
+    check((await page.locator(".sheet:not([hidden])").count()) === 1, "? opens it when the keyboard is not in a text box");
+    await page.keyboard.press("Escape");
+    await page.locator("#reply-text").focus().catch(() => {});
+    if (await page.locator("#reply-text").isEnabled()) {
+      await page.keyboard.press("Shift+Slash");
+      check((await page.locator(".sheet:not([hidden])").count()) === 0, "and in the reply box ? is a question mark");
+      await page.locator("#reply-text").fill("");
+    }
+    // The tooltips are the page's own, inside the island.
+    await page.locator("#expand").hover();
+    await page.locator(".tip:not([hidden])").waitFor({ timeout: 2000 });
+    const tipText = await page.locator(".tip").textContent();
+    const tipBox = await page.locator(".tip").boundingBox();
+    const island = await page.locator("#panel").boundingBox();
+    check(tipText === "Open in the chat (⌃⌥K)" && tipBox && island && tipBox.x >= island.x && tipBox.x + tipBox.width <= island.x + island.width && tipBox.y + tipBox.height <= island.y + island.height, `hovering the chat's button shows its tooltip with the recorded key, inside the island (${tipText})`);
+    await d.shot("open-tooltip");
+    await page.locator("#switcher").hover();
+    await page.waitForFunction(() => /Switch session \(⌘K\)$/.test(document.querySelector(".tip:not([hidden])")?.textContent ?? ""), null, { timeout: 2000 });
+    check(true, "the switch's tooltip is its session's title and Switch session (⌘K)");
     await page.locator("#more").click();
     await page.locator(".menu:not([hidden])").waitFor();
     const pagesBefore = d.context.pages().length;
@@ -1293,6 +1349,39 @@ try {
       await p.keyboard.press("Escape");
       await c.settle("idle");
       check((await c.lastCall()).state === "idle", `${where}: a second Esc closes it`);
+
+      // ---- the chat's hotkey (D0046): from the pill into the chat, the keyboard in it, and out again ----
+      await p.evaluate(() => (window as Any).__onChatKey());
+      await c.settle("chat");
+      check((await c.lastCall()).state === "chat" && (await p.evaluate(() => document.activeElement?.id)) === "chat-frame", `${where}: the chat's hotkey grows the pill into the chat, and the keyboard is in it`);
+      // The guide in the chat: its ? button, or ? itself.
+      await frame.locator("#keys-button").click();
+      await frame.locator(".sheet:not([hidden])").waitFor();
+      const chatGuide = (await frame.locator(".sheet .guide-title").allTextContents()).join(",");
+      check(chatGuide === "Anywhere,Dock,Chat,New task and snip", `${where}: the chat's ? button opens the same guide (${chatGuide})`);
+      await c.shot(`chat-shortcuts${notch ? "-notch" : ""}`);
+      await p.keyboard.press("Escape");
+      check((await frame.locator(".sheet:not([hidden])").count()) === 0 && (await c.lastCall()).state === "chat", `${where}: Esc puts the guide away and the chat stays`);
+      await frame.locator("#keys-button").hover();
+      await frame.locator(".tip:not([hidden])").waitFor({ timeout: 2000 });
+      check((await frame.locator(".tip").textContent()) === "Keyboard shortcuts (?)", `${where}: the chat's ? button says what it is in a tooltip`);
+      await p.evaluate(() => (window as Any).__onChatKey());
+      await c.settle("idle");
+      check((await c.lastCall()).state === "idle", `${where}: pressed again, the chat's hotkey puts it away`);
+      // The guide in the small dock, out of this notch or without one.
+      await c.hover();
+      await p.locator("#panel").waitFor();
+      await c.settle("open");
+      await p.locator("#more").click();
+      await p.locator(".menu-item", { hasText: "Keyboard shortcuts" }).click();
+      await p.locator(".sheet:not([hidden])").waitFor();
+      await c.settle("open");
+      await c.shot(`open-shortcuts${notch ? "-notch" : ""}`);
+      await p.keyboard.press("Escape");
+      await p.keyboard.press("Escape");
+      await c.settle("idle");
+      // Closed under the pointer, the dock opens again only once the pointer has left.
+      await c.leave();
 
       // ---- from the open dock: its head, or the notch's band over it ----
       await c.hover();
