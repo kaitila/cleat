@@ -1,6 +1,7 @@
 // `holm doctor`: which layout this is, and whether each prerequisite and part is there, each with a one-line fix.
-// The probes are passed in, so tests check the report without the machine's own git, Node or Claude Code.
+// The probes are passed in, so tests check the report without the machine's own git or Claude Code.
 import { existsSync, readFileSync } from "node:fs";
+import { claudeBinary } from "../runner/agent-claude";
 import { codexBinary } from "../runner/agent-codex";
 import { loadConfig } from "../runner/config";
 import { isInstalled, login, pidFile } from "../shell/install";
@@ -37,6 +38,8 @@ export interface Probes {
   login(): Promise<boolean | null>;
   /** The codex binary the runner's Codex agent runs (agent-codex.ts codexBinary), or null when it isn't installed. */
   codex(): string | null;
+  /** The Claude Code the runner runs: the Agent SDK's own (agent-claude.ts claudeBinary). Without it, or without this probe, `claude` on the PATH. */
+  claude?(): string | null;
   /**
    * Runs these commands at once, in the background, so that `output` answers them from what they printed:
    * a spinner keeps turning while they run. Optional; without it `output` runs each when asked.
@@ -45,13 +48,12 @@ export interface Probes {
 }
 
 /** The commands each prerequisite runs, by its name: what `warm` is given before the check. */
-export function commandsFor(name: string, codex: string | null = null): string[][] {
+export function commandsFor(name: string, codex: string | null = null, claude = "claude"): string[][] {
   const all: Record<string, string[][]> = {
     git: [["git", "--version"]],
     bun: [],
-    "node and npm": [["node", "--version"], ["npm", "--version"]],
-    "Claude Code": [["claude", "--version"]],
-    "Claude Code login": [["claude", "auth", "status"]],
+    "Claude Code": [[claude, "--version"]],
+    "Claude Code login": [[claude, "auth", "status"]],
     Codex: codex ? [[codex, "--version"]] : [],
     "Codex login": codex ? [[codex, "login", "status"]] : [],
   };
@@ -59,19 +61,13 @@ export function commandsFor(name: string, codex: string | null = null): string[]
 }
 
 /** Every command the prerequisites and Codex's checks run. */
-export function allCommands(codex: string | null): string[][] {
-  return ["git", "node and npm", "Claude Code", "Claude Code login", "Codex", "Codex login"].flatMap((n) => commandsFor(n, codex));
+export function allCommands(codex: string | null, claude = "claude"): string[][] {
+  return ["git", "Claude Code", "Claude Code login", "Codex", "Codex login"].flatMap((n) => commandsFor(n, codex, claude));
 }
 
-/** Electron's installer needs this Node (node_modules/electron's engines). */
-export const MIN_NODE = [22, 12] as const;
-
-/** True when a `node -v` string is at least MIN_NODE. */
-export function nodeIsNew(version: string): boolean {
-  const m = /^v?(\d+)\.(\d+)/.exec(version.trim());
-  if (!m) return false;
-  const [major, minor] = [Number(m[1]), Number(m[2])];
-  return major > MIN_NODE[0] || (major === MIN_NODE[0] && minor >= MIN_NODE[1]);
+/** The Claude Code command the checks run: the Agent SDK's own, else `claude` on the PATH. */
+export function claudeCommand(probes: Pick<Probes, "claude">): string {
+  return probes.claude?.() ?? "claude";
 }
 
 const LAYOUT_WORDS: Record<Layout, string> = {
@@ -84,34 +80,35 @@ function gitFix(layout: Layout): string {
   return layout === "macos" ? "install git: `xcode-select --install`, or `brew install git`" : "install git: `sudo apt install git` (or your distribution's package)";
 }
 
-/** The prerequisites: git, bun, Node with npm, Claude Code and its login. Setup checks these before it asks anything. */
-export function prerequisites(platform: Platform, probes: Pick<Probes, "output">): Check[] {
+/**
+ * The prerequisites: bun (this process), Claude Code and its login, and git (optional: only a git checkout
+ * needs it, to update). No Node or npm: Electron comes from its release (D0045). Claude Code is the Agent SDK's
+ * own, which `bun install` brings; `claude` on the PATH is used only when that one is missing.
+ * Setup checks these before it asks anything.
+ */
+export function prerequisites(platform: Platform, probes: Pick<Probes, "output" | "claude">): Check[] {
   const out: Check[] = [];
   const add = (c: Check) => out.push(c);
 
   const git = probes.output(["git", "--version"]);
-  add({ name: "git", ok: git !== null, needed: true, detail: git ?? "not found", fix: gitFix(platform.layout) });
+  add({ name: "git", ok: git !== null, needed: false, detail: git ?? "not found: needed only to update a git checkout", fix: gitFix(platform.layout) });
 
   add({ name: "bun", ok: true, needed: true, detail: `${Bun.version} (${process.execPath})`, fix: "install bun: https://bun.sh" });
 
-  const node = probes.output(["node", "--version"]);
-  const npm = probes.output(["npm", "--version"]);
-  const nodeOk = node !== null && nodeIsNew(node) && npm !== null;
+  const cmd = claudeCommand(probes);
+  const claude = probes.output([cmd, "--version"]);
   add({
-    name: "node and npm",
-    ok: nodeOk,
+    name: "Claude Code",
+    ok: claude !== null,
     needed: true,
-    detail: node === null ? "node not found" : !nodeIsNew(node) ? `node ${node} is older than ${MIN_NODE.join(".")}` : npm === null ? `node ${node}, but npm not found` : `node ${node}, npm ${npm}`,
-    fix: `install Node ${MIN_NODE.join(".")} or later, with npm (https://nodejs.org, or nvm): Electron's installer needs it`,
+    detail: claude === null ? "not found" : cmd === "claude" ? claude : `${claude}, the Agent SDK's`,
+    fix: "`holm update` installs it again with the app (the Agent SDK brings Claude Code)",
   });
 
-  const claude = probes.output(["claude", "--version"]);
-  add({ name: "Claude Code", ok: claude !== null, needed: true, detail: claude ?? "not found", fix: "install Claude Code: https://docs.claude.com/en/docs/claude-code/setup" });
-
   if (claude !== null) {
-    const status = probes.output(["claude", "auth", "status"]);
+    const status = probes.output([cmd, "auth", "status"]);
     const loggedIn = status !== null && /"loggedIn"\s*:\s*true/.test(status);
-    add({ name: "Claude Code login", ok: loggedIn, needed: true, detail: loggedIn ? "logged in" : "not logged in", fix: "log in: `claude auth login`" });
+    add({ name: "Claude Code login", ok: loggedIn, needed: true, detail: loggedIn ? "logged in" : "not logged in", fix: "log in: `holm login`" });
   }
   return out;
 }
@@ -121,11 +118,11 @@ export function codexChecks(probes: Pick<Probes, "output" | "codex">): Check[] {
   const out: Check[] = [];
   const codex = probes.codex();
   const codexVersion = codex === null ? null : probes.output([codex, "--version"]);
-  out.push({ name: "Codex", ok: codexVersion !== null, needed: false, detail: codexVersion ?? "not installed", fix: "`bun install` in the repo installs it (@openai/codex-sdk); only needed for sessions on Codex" });
+  out.push({ name: "Codex", ok: codexVersion !== null, needed: false, detail: codexVersion ?? "not installed", fix: "`holm update` installs it again with the app (the Codex SDK brings it); only needed for sessions on Codex" });
   if (codexVersion !== null) {
     const status = probes.output([codex!, "login", "status"]);
     const loggedIn = status !== null && /^logged in/i.test(status);
-    out.push({ name: "Codex login", ok: loggedIn, needed: false, detail: loggedIn ? status! : "not logged in", fix: "log in: `codex login` (only needed for sessions on Codex)" });
+    out.push({ name: "Codex login", ok: loggedIn, needed: false, detail: loggedIn ? status! : "not logged in", fix: "log in: `holm login codex` (only needed for sessions on Codex)" });
   }
   return out;
 }
@@ -269,6 +266,7 @@ export function machineProbes(platform: Platform, env: Env = process.env): Probe
     },
     runner: () => runnerUrl(env),
     codex: codexBinary,
+    claude: claudeBinary,
     shellInstalled: () => {
       try {
         return isInstalled(platform.shellPaths());
@@ -311,7 +309,7 @@ export function parseDoctorArgs(words: string[]): DoctorOptions | null {
 /** Prints the report (a spinner while the checks run, on a terminal). Returns 1 when something needed is missing, else 0. */
 export async function doctor(env: Env = process.env, log: Log = console.log, platform: Platform = currentPlatform(env), probes: Probes = machineProbes(platform, env), options: DoctorOptions = {}, ui: Ui = makeUi({ term: termOf(env) })): Promise<number> {
   const spinner = options.json ? null : ui.spin("checking");
-  await probes.warm?.(allCommands(probes.codex()));
+  await probes.warm?.(allCommands(probes.codex(), claudeCommand(probes)));
   const list = await checks(platform, probes, env);
   spinner?.clear();
   if (options.json) log(reportJson(platform, list));

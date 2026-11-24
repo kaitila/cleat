@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DOCK_PRELOAD } from "../../shell/src/dock";
+import { fetchElectron } from "./electron-fetch";
 import type { LoginResult } from "../../shell/src/login";
 import { SNIP_PRELOAD } from "../../shell/src/snip";
 import { DEFAULT_SETTINGS, PID_FILE, withWsl } from "../../shell/src/settings";
@@ -54,11 +55,6 @@ export function installedElectron(paths: ShellPaths): string | null {
   return readFileSync(versionFile, "utf8").trim().replace(/^v/, "");
 }
 
-async function run(cmd: string[], cwd: string, env: Record<string, string>): Promise<void> {
-  const p = Bun.spawn(cmd, { cwd, env: { ...process.env, ...env }, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
-  if ((await p.exited) !== 0) throw new Error(`${cmd.join(" ")} failed in ${cwd}`);
-}
-
 /** Throws when the shell cannot be installed or run on this layout: windows-wsl without the Windows disk, or (to start it) Linux without a display. */
 function needPlatform(platform: Platform, starting: boolean): void {
   const why = platform.layout === "linux" && !starting ? null : platform.unavailable();
@@ -83,10 +79,9 @@ export async function install(paths?: ShellPaths, log: (line: string) => void = 
     log(`Electron ${wanted} is already installed`);
     return;
   }
-  log(`installing Electron ${wanted} for ${platform.os} (a download of about 130 MB the first time)`);
-  // This machine's npm and node. For windows-wsl, WSL's: the Node on the Windows side is too old for Electron's installer.
-  await run(["npm", "install", "--no-audit", "--no-fund", "--no-package-lock"], paths.app, platform.electronEnv);
-  await run(["node", join("node_modules", "electron", "install.js")], paths.app, platform.electronEnv);
+  log(`installing Electron ${wanted} for ${platform.os} (a download of about 110 MB the first time)`);
+  // From Electron's GitHub release, checked against its SHASUMS256.txt: no npm or Node (D0045). For windows-wsl, the Windows build, written to the Windows disk from WSL.
+  await fetchElectron(wanted, platform.electronTarget, paths.app, { log });
   if (installedElectron(paths) !== wanted) throw new Error(`Electron ${wanted} is not at ${paths.electronExe} after the install`);
   log(`Electron ${wanted}: ${paths.electronExe}`);
 }

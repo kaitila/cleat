@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DEFAULT_SETTINGS } from "../shell/src/settings";
-import { checks, doctor, nodeIsNew, type Probes, report } from "../src/cli/doctor";
+import { checks, doctor, type Probes, report } from "../src/cli/doctor";
 import { makeUi } from "../src/cli/ui";
 import { autostart, BUNDLE, withLocalRunner, writeRunnerLocation } from "../src/shell/install";
 import type { ShellPaths } from "../src/shell/paths";
@@ -54,10 +54,10 @@ describe("each layout's paths and commands", () => {
   });
 
   test("Electron is fetched for the shell's OS: Windows x64 from WSL, as before; this machine's OS otherwise", () => {
-    expect(platformFor("windows-wsl").electronEnv).toEqual({ npm_config_platform: "win32", npm_config_arch: "x64" });
-    expect(platformFor("linux").electronEnv.npm_config_platform).toBe("linux");
-    expect(platformFor("macos").electronEnv.npm_config_platform).toBe("darwin");
-    for (const layout of ["linux", "macos"] as const) expect(["x64", "arm64", "armv7l"]).toContain(platformFor(layout).electronEnv.npm_config_arch!);
+    expect(platformFor("windows-wsl").electronTarget).toEqual({ platform: "win32", arch: "x64" });
+    expect(platformFor("linux").electronTarget.platform).toBe("linux");
+    expect(platformFor("macos").electronTarget.platform).toBe("darwin");
+    for (const layout of ["linux", "macos"] as const) expect(["x64", "arm64", "armv7l"]).toContain(platformFor(layout).electronTarget.arch);
   });
 
   test("the native layouts hand Electron the app folder as it is; only Linux as root turns Chromium's sandbox off", () => {
@@ -183,9 +183,14 @@ describe("holm doctor", () => {
   const ui = makeUi({ term: { interactive: false, color: false, unicode: true, columns: 80 }, write: () => {} });
   const has = (lines: string[], mark: string, name: string) => lines.findIndex((l) => new RegExp(`^${mark} ${name.replace(/[()]/g, "\\$&")} +\\S`).test(l));
 
-  test("Node 22.12 or later", () => {
-    for (const v of ["v22.12.0", "v22.23.0", "v23.0.0", "24.1.0"]) expect(nodeIsNew(v)).toBe(true);
-    for (const v of ["v22.11.9", "v20.18.0", "v8.0.0", "nope"]) expect(nodeIsNew(v)).toBe(false);
+  test("git, Node and npm are not needed (D0045): git missing is a dash with its fix, exit 0; Node is never run", async () => {
+    const lines: string[] = [];
+    const ran: string[] = [];
+    const probes = all({ output: (cmd) => (ran.push(cmd[0]!), cmd[0] === "git" ? null : all().output(cmd)) });
+    expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), probes, {}, ui)).toBe(0);
+    expect(has(lines, "–", "git")).toBeGreaterThan(0);
+    expect(ran).not.toContain("node");
+    expect(ran).not.toContain("npm");
   });
 
   test("everything there: exit 0, the layout first, no fixes", async () => {
@@ -194,16 +199,13 @@ describe("holm doctor", () => {
     expect(lines[0]).toBe("layout: linux (the runner and the shell on this machine)");
     expect(lines.join("\n")).not.toContain("fix:");
     expect(lines.at(-1)).toBe("✓ everything needed is there");
-    for (const name of ["git", "bun", "node and npm", "Claude Code", "Claude Code login", "config", "display", "runner", "shell installed", "shell running", "start at login", "Codex", "Codex login"]) {
+    for (const name of ["git", "bun", "Claude Code", "Claude Code login", "config", "display", "runner", "shell installed", "shell running", "start at login", "Codex", "Codex login"]) {
       expect(`${name}: ${has(lines, "✓", name) > 0}`).toBe(`${name}: true`);
     }
   });
 
   test("a needed prerequisite missing: exit 1, with its fix on the next line", async () => {
     for (const [what, probes, name] of [
-      ["no git", all({ output: (cmd) => (cmd[0] === "git" ? null : all().output(cmd)) }), "git"],
-      ["old node", all({ output: (cmd) => (cmd[0] === "node" ? "v20.18.0" : all().output(cmd)) }), "node and npm"],
-      ["no npm", all({ output: (cmd) => (cmd[0] === "npm" ? null : all().output(cmd)) }), "node and npm"],
       ["no claude", all({ output: (cmd) => (cmd[0] === "claude" ? null : all().output(cmd)) }), "Claude Code"],
       ["logged out", all({ output: (cmd) => (cmd[1] === "auth" ? '{ "loggedIn": false }' : all().output(cmd)) }), "Claude Code login"],
       ["broken config", all({ config: () => ({ ok: false, error: "/c/config.json is not valid JSON" }) }), "config"],
@@ -238,7 +240,7 @@ describe("holm doctor", () => {
     expect(await doctor(display, (l) => lines.push(l), platformFor("linux"), out, {}, ui)).toBe(0);
     const at = lines.findIndex((l) => /^– Codex login +not logged in/.test(l));
     expect(at).toBeGreaterThan(0);
-    expect(lines[at + 1]).toContain("codex login");
+    expect(lines[at + 1]).toContain("holm login codex");
   });
 
   test("windows-wsl checks the Windows disk, and needs it; macOS has no display check", async () => {

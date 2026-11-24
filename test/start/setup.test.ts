@@ -38,8 +38,6 @@ function folders() {
 function probes(answers: Record<string, string | null> = {}) {
   const base: Record<string, string | null> = {
     "git --version": "git version 2.43.0",
-    "node --version": "v22.12.0",
-    "npm --version": "10.9.0",
     "claude --version": "2.1.0 (Claude Code)",
     "claude auth status": '{ "loggedIn": true }',
   };
@@ -105,7 +103,7 @@ function config(env: { HOLM_CONFIG: string }) {
 }
 
 /** Runs setup with a plain ui; `interactive` says whether a scripted Ask may be asked. */
-async function run(options: Partial<SetupOptions>, ask: Ask = DEFAULTS, over: { platform?: Platform; actions?: Actions; probes?: ReturnType<typeof probes>; f?: ReturnType<typeof folders>; interactive?: boolean } = {}) {
+async function run(options: Partial<SetupOptions>, ask: Ask = DEFAULTS, over: { platform?: Platform; actions?: Actions; probes?: ReturnType<typeof probes> & { claude?: () => string | null }; f?: ReturnType<typeof folders>; interactive?: boolean } = {}) {
   const f = over.f ?? folders();
   const out = plain();
   const fake = actions();
@@ -349,33 +347,70 @@ describe("setup", () => {
 
   test("a missing requirement stops it before any question, with its fix; asked, it offers to check again", async () => {
     const f = folders();
-    const r = await run({ yes: true }, DEFAULTS, { f, probes: probes({ "node --version": "v20.1.0" }), interactive: false });
+    const r = await run({ yes: true }, DEFAULTS, { f, probes: probes({ "claude --version": null }), interactive: false });
     expect(r.code).toBe(1);
     expect(r.calls).toEqual([]);
     expect(existsSync(f.env.HOLM_CONFIG)).toBe(false);
-    expect(r.text).toContain("✗ node and npm       node v20.1.0 is older than 22.12");
-    expect(r.text).toContain("fix: install Node 22.12");
-    expect(r.text).toContain("missing: node and npm");
+    expect(r.text).toContain("✗ Claude Code        not found");
+    expect(r.text).toContain("fix: `holm update` installs it again");
+    expect(r.text).toContain("missing: Claude Code");
 
     // Asked: fixed in another terminal, then Check again goes on.
-    let node = "v20.1.0";
-    const p = { ...probes(), output: (cmd: string[]) => (cmd.join(" ") === "node --version" ? node : probes().output(cmd)) };
+    let claude: string | null = null;
+    const p = { ...probes(), output: (cmd: string[]) => (cmd.join(" ") === "claude --version" ? claude : probes().output(cmd)) };
     const ask = scripted([]);
-    const again: Ask = { ...ask, select: async (o) => (o.message === "Once they are fixed" ? ((node = "v22.12.0"), true) : o.initial) as never };
+    const again: Ask = { ...ask, select: async (o) => (o.message === "Once they are fixed" ? ((claude = "2.1.0 (Claude Code)"), true) : o.initial) as never };
     const fixed = await run({}, again, { probes: p });
     expect(fixed.code).toBe(0);
-    expect(fixed.text).toContain("✓ node and npm       node v22.12.0");
+    expect(fixed.text).toContain("✓ Claude Code        2.1.0 (Claude Code)");
 
     const quit = await run({}, { ...ask, select: async (o) => (o.message === "Once they are fixed" ? false : o.initial) as never }, { probes: probes({ "claude --version": null }) });
     expect(quit.code).toBe(1);
-    expect(quit.text).toContain("fix: install Claude Code");
   });
 
-  test("not logged in to Claude Code: it never logs in for you; it warns with the command and goes on", async () => {
+  test("no git, Node or npm is needed: git missing is a dash, and Node is not asked about (D0045)", async () => {
+    const asked: string[] = [];
+    const p = probes({ "git --version": null });
+    const r = await run({ yes: true }, DEFAULTS, { probes: { ...p, output: (cmd: string[]) => (asked.push(cmd[0]!), p.output(cmd)) }, interactive: false });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("– git");
+    expect(r.text).toContain("needed only to update a git checkout");
+    expect(asked).not.toContain("node");
+    expect(asked).not.toContain("npm");
+  });
+
+  test("Claude Code is the Agent SDK's own when the probe names it: its version and login are asked of that binary", async () => {
+    const p = probes({ "/sdk/claude --version": "2.1.322 (Claude Code)", "/sdk/claude auth status": '{ "loggedIn": true }', "claude --version": null });
+    const r = await run({ yes: true }, DEFAULTS, { probes: { ...p, claude: () => "/sdk/claude" }, interactive: false });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain("✓ Claude Code        2.1.322 (Claude Code), the Agent SDK's");
+    expect(r.text).toContain("✓ Claude Code login  logged in");
+  });
+
+  test("not logged in to Claude Code: --yes never logs in for you; it warns with the command and goes on", async () => {
     const r = await run({ yes: true }, DEFAULTS, { probes: probes({ "claude auth status": '{ "loggedIn": false }' }), interactive: false });
     expect(r.code).toBe(0);
     expect(r.text).toContain("✗ Claude Code login  not logged in");
-    expect(r.text).toContain("sessions fail until you log in: run claude auth login");
+    expect(r.text).toContain("sessions fail until you log in: run holm login");
+  });
+
+  test("not logged in, on a terminal: it asks, and a yes runs the agent's login, then checks again", async () => {
+    let loggedIn = false;
+    const p = { ...probes(), output: (cmd: string[]) => (cmd.join(" ") === "claude auth status" ? `{ "loggedIn": ${loggedIn} }` : probes().output(cmd)) };
+    const logins: string[] = [];
+    const { a } = actions({ agentLogin: async (agent) => (logins.push(agent), (loggedIn = true), 0) });
+    const ask = scripted([]);
+    const r = await run({}, ask, { probes: p, actions: a });
+    expect(ask.asked).toContain("Log in to Claude Code now? (it opens a page in your browser)");
+    expect(logins).toEqual(["claude"]);
+    expect(r.text).not.toContain("sessions fail until you log in");
+
+    // A no: nothing is run, and the warning says the command.
+    logins.length = 0;
+    loggedIn = false;
+    const no = await run({}, { ...scripted([]), confirm: async (o) => (o.message.startsWith("Log in") ? false : o.initial) as never }, { probes: p, actions: a });
+    expect(logins).toEqual([]);
+    expect(no.text).toContain("sessions fail until you log in: run holm login");
   });
 
   test("Codex is shown as optional: a dash when it is missing, a tick when it is there", async () => {

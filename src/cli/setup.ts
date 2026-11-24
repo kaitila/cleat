@@ -1,4 +1,4 @@
-// `holm setup`: from a fresh clone to a running app, as a guided flow (docs/decisions/D0030).
+// `holm setup`: from a fresh install (bun install -g, or a clone) to a running app, as a guided flow (docs/decisions/D0030).
 // 1. Requirements: a spinner per check. 2. Workspaces. 3. Hotkeys. 4. Permissions. 5. Start at login.
 // Then the work, a spinner per step and a checklist, and an outro with what to do next.
 // Every answer is asked before anything is written; the config is written once, atomically, at the start of the work.
@@ -11,7 +11,7 @@ import { configPath, DEFAULT_CONFIG, expandHome, loadConfig, SettingsSchema, typ
 import { writeSettings } from "../runner/settings";
 import type { PermissionMode } from "../shared/protocol";
 import type { Platform } from "../shell/platform";
-import { codexChecks, commandsFor, firstLine, layoutLine, prerequisites, stateOf, type Check, type Probes } from "./doctor";
+import { claudeCommand, codexChecks, commandsFor, firstLine, layoutLine, prerequisites, stateOf, type Check, type Probes } from "./doctor";
 import { acceleratorError, errorText, keycaps, makeUi, stripAnsi, type State, type Ui } from "./ui";
 
 type Env = Record<string, string | undefined>;
@@ -255,6 +255,8 @@ export interface Actions {
   startShell(prompt: boolean): void;
   /** Turns start at login on or off; returns whether it is on. */
   login(on: boolean): Promise<boolean>;
+  /** Runs the agent's own login on this terminal (`holm login`); returns its exit code. Optional: without it setup only says the command. */
+  agentLogin?(agent: "claude" | "codex"): Promise<number>;
 }
 
 /** The exit code of start that means a runner with other code was kept (runner.KEPT): setup goes on. */
@@ -264,7 +266,7 @@ export const CANCELLED = 130;
 export const NO_TERMINAL = 2;
 
 /** The prerequisites without which setup stops. The login only warns: sessions fail until it is done, but nothing else does. */
-const BLOCKING = ["git", "bun", "node and npm", "Claude Code"];
+const BLOCKING = ["bun", "Claude Code"];
 
 const PERMISSION_CHOICES: Choice<PermissionMode>[] = [
   { value: "auto", label: "Auto (recommended)", hint: "a classifier lets routine tool calls run and asks you about the rest" },
@@ -275,7 +277,7 @@ const ADD = "\0add";
 
 export interface SetupContext {
   env?: Env;
-  probes?: Pick<Probes, "output" | "codex" | "warm">;
+  probes?: Pick<Probes, "output" | "codex" | "warm" | "claude">;
   home?: string;
   ui?: Ui;
   /** The version in the intro: package.json's. */
@@ -328,7 +330,13 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
       return 1;
     }
   }
-  if (list.some((ch) => ch.name === "Claude Code login" && !ch.ok)) ui.line(`${ui.mark("warn")} sessions fail until you log in: run ${c.cyan("claude auth login")} in another terminal`);
+  if (list.some((ch) => ch.name === "Claude Code login" && !ch.ok)) {
+    // The login is Claude Code's own (a browser page, or a key): offered here on a terminal, never run without a yes.
+    const now = !options.yes && interactive && actions.agentLogin ? await ask.confirm({ message: "Log in to Claude Code now? (it opens a page in your browser)", initial: true }) : false;
+    if (now === CANCEL) return cancelled();
+    const loggedIn = now && (await actions.agentLogin!("claude")) === 0 && (await requirements(ui, platform, probes)).some((ch) => ch.name === "Claude Code login" && ch.ok);
+    if (!loggedIn) ui.line(`${ui.mark("warn")} sessions fail until you log in: run ${c.cyan("holm login")} (or ${c.cyan("holm login codex")} for Codex)`);
+  }
 
   // A missing config is not written here (loadConfig would write the default one): nothing is, until every answer is in.
   const path = configPath(env);
@@ -522,18 +530,19 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
 }
 
 /** The requirements, each under its own spinner: a tick, a cross with its fix, or a dash for an optional one. */
-async function requirements(ui: Ui, platform: Platform, probes: Pick<Probes, "output" | "codex" | "warm">): Promise<Check[]> {
+async function requirements(ui: Ui, platform: Platform, probes: Pick<Probes, "output" | "codex" | "warm" | "claude">): Promise<Check[]> {
   const codex = probes.codex();
+  const claude = claudeCommand(probes);
   const pad = "Claude Code login".length + 2;
   const done = (ch: Check) => ({ state: stateOf(ch), text: `${ch.name.padEnd(pad)}${ui.c.dim(ch.needed ? ch.detail : `${ch.detail} (optional)`)}`, more: ch.ok ? [] : [`${" ".repeat(pad)}fix: ${ch.fix}`] });
   const all = () => [...prerequisites(platform, probes), ...codexChecks(probes)];
-  for (const name of ["git", "bun", "node and npm", "Claude Code", "Claude Code login", "Codex", "Codex login"]) {
-    await probes.warm?.(commandsFor(name, codex));
+  for (const name of ["bun", "Claude Code", "Claude Code login", "Codex", "Codex login", "git"]) {
+    await probes.warm?.(commandsFor(name, codex, claude));
     // The logins are checked only when their program is there.
     const check = all().find((ch) => ch.name === name);
     if (!check) continue;
     await ui.task(`Checking ${name}`, async () => {
-      await probes.warm?.(commandsFor(name, codex));
+      await probes.warm?.(commandsFor(name, codex, claude));
       return check;
     }, done);
   }

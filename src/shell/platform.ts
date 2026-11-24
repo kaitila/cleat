@@ -4,6 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ElectronTarget } from "./electron-fetch";
 import { autostartEntry, autostartFile as shellAutostartFile } from "../../shell/src/login";
 import { type LocalRunner, parseLocalRunner } from "../../shell/src/os";
 import { SETTINGS_FILE } from "../../shell/src/settings";
@@ -59,8 +60,8 @@ export interface Platform {
   shellPaths(): ShellPaths;
   /** The shell's settings file: Electron's user data folder is <appData>/<the name in shell/package.json>. */
   settingsFile(): string;
-  /** npm's environment for fetching Electron for the shell's OS and architecture. */
-  electronEnv: Record<string, string>;
+  /** The Electron release zip the shell's OS and architecture need (./electron-fetch). */
+  electronTarget: ElectronTarget;
   /** The app folder as the Electron executable is given it (a Windows path for windows-wsl). */
   appArg(app: string): string;
   /** Extra Electron arguments before the shell's own. */
@@ -101,8 +102,8 @@ export function windowsPidAlive(pid: number): boolean {
   return p.exitCode === 0 && new RegExp(`\\s${pid}\\s`).test(p.stdout.toString());
 }
 
-/** npm's names for the architectures Electron ships. */
-function npmArch(arch: string = process.arch): string {
+/** Electron's names for the architectures it ships. */
+function electronArch(arch: string = process.arch): ElectronTarget["arch"] {
   return arch === "arm64" ? "arm64" : arch === "arm" ? "armv7l" : "x64";
 }
 
@@ -117,8 +118,8 @@ const windowsWsl: Platform = {
   unavailable: () => (hasWindows() ? null : "the Windows shell needs WSL with the Windows disk at /mnt/c"),
   shellPaths: () => windowsShellPaths(),
   settingsFile: () => windowsSettingsFile(),
-  // Electron is fetched for Windows although npm and node run in WSL.
-  electronEnv: { npm_config_platform: "win32", npm_config_arch: "x64" },
+  // Electron is fetched for Windows although the command runs in WSL.
+  electronTarget: { platform: "win32", arch: "x64" },
   appArg: (app) => toWindows(app),
   electronFlags: () => [],
   runnerLocation: (env = process.env, repo = REPO, bun = process.execPath) => {
@@ -140,7 +141,7 @@ function native(layout: "macos" | "linux", home: () => string): Platform {
     unavailable: (env = process.env) => (layout === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY ? "the Linux shell needs a display: neither DISPLAY nor WAYLAND_DISPLAY is set" : null),
     shellPaths: () => nativePaths(home()),
     settingsFile: () => join(appData(layout), shellName(), SETTINGS_FILE),
-    electronEnv: { npm_config_platform: layout === "macos" ? "darwin" : "linux", npm_config_arch: npmArch() },
+    electronTarget: { platform: layout === "macos" ? "darwin" : "linux", arch: electronArch() },
     appArg: (app) => app,
     // Chromium will not start as root with its sandbox (WSL's default user is root): the one case it is turned off.
     electronFlags: () => (layout === "linux" && isRoot() ? ["--no-sandbox"] : []),

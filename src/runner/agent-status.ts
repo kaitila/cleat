@@ -1,9 +1,10 @@
 // GET /api/agents: whether each agent can run here, as `holm doctor` sees it (src/cli/doctor.ts):
-// Claude Code installed (`claude --version`) and logged in (`claude auth status`), Codex installed
+// Claude Code installed (the Agent SDK's own binary, else `claude`: `--version`) and logged in (`auth status`), Codex installed
 // (the binary the SDK runs, `--version`) and logged in (`codex login status`). The settings page
 // shows it beside the agent choice. The commands are the doctor's; their answers are kept a while,
 // as each one takes a moment and the page may ask often.
 import type { AgentKind, AgentStatus, AgentsResponse } from "../shared/protocol";
+import { claudeBinary } from "./agent-claude";
 import { codexBinary } from "./agent-codex";
 
 /** What a command prints, trimmed, or null when it can't be run, fails, prints nothing or takes too long. */
@@ -29,12 +30,13 @@ export const machineOutput: Output = async (cmd) => {
 };
 
 /** Claude Code's status: the doctor's "Claude Code" and "Claude Code login" checks. */
-export async function claudeStatus(output: Output): Promise<AgentStatus> {
-  const version = firstLine(await output(["claude", "--version"]));
-  if (version === null) return { agent: "claude", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "Install Claude Code, then log in: claude auth login" };
-  const status = await output(["claude", "auth", "status"]);
+export async function claudeStatus(output: Output, binary: string | null = null): Promise<AgentStatus> {
+  const cmd = binary ?? "claude";
+  const version = firstLine(await output([cmd, "--version"]));
+  if (version === null) return { agent: "claude", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "holm update installs it again with the app, then log in: holm login" };
+  const status = await output([cmd, "auth", "status"]);
   const loggedIn = status !== null && /"loggedIn"\s*:\s*true/.test(status);
-  return { agent: "claude", installed: true, version, loggedIn, detail: loggedIn ? `${version}, logged in` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: claude auth login" };
+  return { agent: "claude", installed: true, version, loggedIn, detail: loggedIn ? `${version}, logged in` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: holm login" };
 }
 
 const firstLine = (text: string | null) => text?.split("\n")[0]?.trim() || null;
@@ -43,22 +45,22 @@ const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 /** Codex's status: the doctor's "Codex" and "Codex login" checks. */
 export async function codexStatus(output: Output, binary: string | null): Promise<AgentStatus> {
   const version = binary === null ? null : firstLine(await output([binary, "--version"]));
-  if (version === null) return { agent: "codex", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "bun install in the repo installs it (@openai/codex-sdk), then: codex login" };
+  if (version === null) return { agent: "codex", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "holm update installs it again with the app, then log in: holm login codex" };
   const status = firstLine(await output([binary!, "login", "status"]));
   const loggedIn = status !== null && /^logged in/i.test(status);
-  return { agent: "codex", installed: true, version, loggedIn, detail: loggedIn ? `${version}, ${lower(status!)}` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: codex login" };
+  return { agent: "codex", installed: true, version, loggedIn, detail: loggedIn ? `${version}, ${lower(status!)}` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: holm login codex" };
 }
 
 /** What the route answers with: a function the server calls for each GET. */
 export type AgentStatusSource = () => Promise<AgentsResponse>;
 
 /** The machine's status, asked at most once per STATUS_TTL_MS (and once at a time). */
-export function machineStatus(output: Output = machineOutput, binary: () => string | null = codexBinary, now: () => number = Date.now): AgentStatusSource {
+export function machineStatus(output: Output = machineOutput, binary: () => string | null = codexBinary, now: () => number = Date.now, claude: () => string | null = claudeBinary): AgentStatusSource {
   let kept: { at: number; answer: Promise<AgentsResponse> } | null = null;
   return () => {
     const t = now();
     if (kept === null || t - kept.at >= STATUS_TTL_MS) {
-      const answer = Promise.all([claudeStatus(output), codexStatus(output, binary())]).then((agents) => ({ agents, checkedAt: new Date(t).toISOString() }));
+      const answer = Promise.all([claudeStatus(output, claude()), codexStatus(output, binary())]).then((agents) => ({ agents, checkedAt: new Date(t).toISOString() }));
       kept = { at: t, answer };
     }
     return kept.answer;
