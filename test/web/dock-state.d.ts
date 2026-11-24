@@ -31,7 +31,11 @@ declare module "*/web/dock-state.js" {
   export const SESSION_KEY: string;
   export function savedSession(storage: StorageLike | null | undefined): string | null;
   export function saveSession(storage: StorageLike | null | undefined, id: string | null): void;
-  export function dockKey(event: { key?: string; code?: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; isComposing?: boolean } | null | undefined): { step: -1 | 1 } | { workspace: number } | null;
+  export function dockKey(event: { key?: string; code?: string; altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; isComposing?: boolean } | null | undefined, mac?: boolean): { find: true } | { nth: number } | { step: -1 | 1 } | null;
+  export function dockOrder<T extends { status: string }>(list: T[]): T[];
+  export function liveOthers<T extends { id: string; status: string }>(order: T[], selected: string | null, max?: number): T[];
+  export function isLive(session: unknown): boolean;
+  export const LIVE_MAX: number;
   export function stepSession(ids: string[], current: string | null, step: number): string | null;
   export function recentEvents<T>(events: T[], max?: number): T[];
   interface StorageLike { getItem(key: string): string | null; setItem(key: string, value: string): void; removeItem(key: string): void }

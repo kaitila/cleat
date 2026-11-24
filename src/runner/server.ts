@@ -161,8 +161,9 @@ async function answerApproval(req: Request, app: App, id: string, approvalId: st
   const b = await body(req);
   if (!b) return fail(400, "the body must be a JSON object");
   if (b.decision !== "allow" && b.decision !== "deny") return fail(400, 'decision must be "allow" or "deny"');
-  const session = app.sessions.answer(id, approvalId, b.decision);
-  return session ? json({ session } satisfies SessionResponse) : fail(404, NO_APPROVAL);
+  const session = app.sessions.answer(id, approvalId, b.decision, b.answers);
+  if (!session) return fail(404, NO_APPROVAL);
+  return "refused" in session ? fail(400, session.refused) : json({ session } satisfies SessionResponse);
 }
 
 /** The session's answer, or the refusal's. */

@@ -1,12 +1,13 @@
 // The snip overlay (/assets/snip.html): the shell opens one per display on the snip hotkey, each on
 // its own frozen capture. Drag an area (a click takes the whole display), and a prompt box appears
 // under it, centred, with the focus in it: type the task, Enter starts the session with the area attached.
-// Tab or Alt+1..9 switches the workspace, Alt+A flips the agent (the workspace's own until flipped),
+// Tab or ⌘1..9 (Ctrl+1..9 off a Mac) switches the workspace, Alt+A flips the agent (the workspace's own until flipped),
 // Shift+Enter is a new line, Esc closes every overlay.
 // The shell's half is window.intuitionSnip (shell/src/snip-preload.ts): getCapture(), crop(rect)
 // and close(). The runner's half is POST /api/sessions (docs/protocol.md).
 import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
-import { altDigit, anchorBox, anchorLabel, devicePixels, errorText, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, UNREACHABLE, wholeDisplay } from "./snip-geometry.js";
+import { workspaceDigit, anchorBox, anchorLabel, devicePixels, errorText, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, UNREACHABLE, wholeDisplay } from "./snip-geometry.js";
+import { commandLabel } from "./keys.js";
 
 /** A selection narrower or shorter than this, in CSS pixels, shows no corner marks: they would cover it. */
 const SMALL = 32;
@@ -67,7 +68,7 @@ function start() {
   function drawWorkspace() {
     chipName.textContent = workspace ?? "no workspace";
     const i = workspaces.findIndex((w) => w.name === workspace);
-    chip.title = `Workspace${i >= 0 ? ` ${i + 1} of ${workspaces.length}` : ""} (Tab, Alt+1..9)`;
+    chip.title = `Workspace${i >= 0 ? ` ${i + 1} of ${workspaces.length}` : ""} (Tab, ${commandLabel()}1..9)`;
     drawAgent();
   }
 
@@ -261,7 +262,7 @@ function start() {
       if (!busy) flip();
       return;
     }
-    const position = altDigit(e);
+    const position = workspaceDigit(e);
     if (position === null) return;
     e.preventDefault();
     const w = workspaces[position];

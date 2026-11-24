@@ -2,6 +2,7 @@
 // where the prompt box and the size label go, and the workspace keys. src/web/snip.js draws them;
 // test/web/snip.test.ts checks them. Lengths are CSS pixels of the overlay window, whose top left is
 // its display's.
+import { commandDigit, MAC } from "./keys.js";
 
 /** A press that moves less than this, in CSS pixels, either way, is a click: it selects the whole display. */
 export const CLICK_SLOP = 4;
@@ -95,11 +96,10 @@ export function stepWorkspace(workspaces, current, step) {
   return usable[(at + step + usable.length) % usable.length];
 }
 
-/** The position (from 0) that Alt+1..9 asks for, or null. The physical key first: with Alt held some layouts report another character. */
-export function altDigit(event) {
-  if (!event.altKey || event.ctrlKey || event.metaKey) return null;
-  const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code ?? "")?.[1] ?? (/^[1-9]$/.test(event.key ?? "") ? event.key : null);
-  return digit ? Number(digit) - 1 : null;
+/** The position (from 0) that ⌘1..9 asks for (Ctrl+1..9 off a Mac), or null. Never Alt+digit: Option+2 is @ on many layouts (D0040). */
+export function workspaceDigit(event, mac = MAC) {
+  const digit = commandDigit(event, mac);
+  return digit === null ? null : digit - 1;
 }
 
 export const UNREACHABLE = "the runner is not reachable";

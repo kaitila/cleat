@@ -7,7 +7,7 @@ const WEB = join(import.meta.dir, "..", "..", "src", "web");
 // A plain JavaScript module with no types: imported by a computed path, so tsc leaves it alone.
 const modulePath = join(WEB, "prompt.js");
 type Attachment = { capturedAt: string; kind: "image"; imagePath: string } | { capturedAt: string; kind: "text"; text: string };
-const { initialWorkspace, noWorkspaceText, altDigit, errorText, UNREACHABLE, attachmentOf, preview, sessionBody, FRESH_MS, CLIPBOARD_POLLS } = (await import(modulePath)) as {
+const { initialWorkspace, noWorkspaceText, workspaceDigit, errorText, UNREACHABLE, attachmentOf, preview, sessionBody, FRESH_MS, CLIPBOARD_POLLS } = (await import(modulePath)) as {
   attachmentOf(capture: unknown, now?: number): Attachment | null;
   preview(text: string): string;
   sessionBody(workspace: string, task: string, attachment: Attachment | null, agent?: string | null): { workspace: string; prompt: string; imagePath?: string; agent?: string };
@@ -15,7 +15,7 @@ const { initialWorkspace, noWorkspaceText, altDigit, errorText, UNREACHABLE, att
   CLIPBOARD_POLLS: number[];
   initialWorkspace(workspaces: { name: string; exists: boolean }[], lastUsed: string | null): string | null;
   noWorkspaceText(workspaces: unknown[]): string;
-  altDigit(event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; code?: string; key?: string }): number | null;
+  workspaceDigit(event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; code?: string; key?: string }, mac?: boolean): number | null;
   errorText(status: number, body: unknown): string;
   UNREACHABLE: string;
 };
@@ -75,25 +75,27 @@ describe("initialWorkspace", () => {
   });
 });
 
-describe("altDigit", () => {
-  test("Alt+1..9 is a position from 0", () => {
-    expect(altDigit({ altKey: true, code: "Digit1", key: "1" })).toBe(0);
-    expect(altDigit({ altKey: true, code: "Digit9", key: "9" })).toBe(8);
-    expect(altDigit({ altKey: true, code: "Numpad3", key: "3" })).toBe(2);
+describe("workspaceDigit", () => {
+  test("⌘1..9 on a Mac and Ctrl+1..9 elsewhere is a position from 0", () => {
+    expect(workspaceDigit({ metaKey: true, code: "Digit1", key: "1" }, true)).toBe(0);
+    expect(workspaceDigit({ metaKey: true, code: "Digit9", key: "9" }, true)).toBe(8);
+    expect(workspaceDigit({ ctrlKey: true, code: "Numpad3", key: "3" }, false)).toBe(2);
   });
-  test("reads the physical key when Alt changes the character", () => {
-    expect(altDigit({ altKey: true, code: "Digit2", key: "@" })).toBe(1);
+  test("reads the physical key, and falls back to the character when there is no code", () => {
+    expect(workspaceDigit({ metaKey: true, code: "Digit2", key: "é" }, true)).toBe(1);
+    expect(workspaceDigit({ metaKey: true, key: "4" }, true)).toBe(3);
   });
-  test("falls back to the character when there is no code", () => {
-    expect(altDigit({ altKey: true, key: "4" })).toBe(3);
+  test("Option+2 is @ on a Finnish Mac: Alt+digit is the person's, never a hotkey", () => {
+    expect(workspaceDigit({ altKey: true, code: "Digit2", key: "@" }, true)).toBeNull();
+    expect(workspaceDigit({ altKey: true, code: "Digit2", key: "@" }, false)).toBeNull();
   });
-  test("is null without Alt, with Ctrl or Meta, and for other keys", () => {
-    expect(altDigit({ altKey: false, code: "Digit1", key: "1" })).toBeNull();
-    expect(altDigit({ altKey: true, ctrlKey: true, code: "Digit1", key: "1" })).toBeNull();
-    expect(altDigit({ altKey: true, metaKey: true, code: "Digit1", key: "1" })).toBeNull();
-    expect(altDigit({ altKey: true, code: "Digit0", key: "0" })).toBeNull();
-    expect(altDigit({ altKey: true, code: "KeyA", key: "a" })).toBeNull();
-    expect(altDigit({ altKey: true, code: "Enter", key: "Enter" })).toBeNull();
+  test("is null for the other platform's key, with Shift or Alt too, and for other keys", () => {
+    expect(workspaceDigit({ ctrlKey: true, code: "Digit1", key: "1" }, true)).toBeNull();
+    expect(workspaceDigit({ metaKey: true, code: "Digit1", key: "1" }, false)).toBeNull();
+    expect(workspaceDigit({ metaKey: true, shiftKey: true, code: "Digit1", key: "!" }, true)).toBeNull();
+    expect(workspaceDigit({ metaKey: true, altKey: true, code: "Digit1", key: "1" }, true)).toBeNull();
+    expect(workspaceDigit({ metaKey: true, code: "Digit0", key: "0" }, true)).toBeNull();
+    expect(workspaceDigit({ metaKey: true, code: "KeyA", key: "a" }, true)).toBeNull();
   });
 });
 

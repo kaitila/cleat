@@ -30,6 +30,8 @@ export function inputText(input, indent = 0) {
 export function toolSummary(name, input) {
   const fields = typeof input === "object" && input !== null && !Array.isArray(input) ? input : {};
   if (name === "Bash" && typeof fields.command === "string") return oneLine(fields.command);
+  // An agent's questions: the first one's text.
+  if (name === "AskUserQuestion" && Array.isArray(fields.questions) && typeof fields.questions[0]?.question === "string") return oneLine(fields.questions[0].question).slice(0, SUMMARY_MAX);
   for (const key of PATH_KEYS) {
     if (typeof fields[key] === "string" && fields[key]) return fields[key];
   }
@@ -153,7 +155,7 @@ export function replyState(session) {
   // A turn in a terminal: a reply here may go in all the same (the runner asks for force).
   if (session.status === "running" && session.terminalTurn === true) return { enabled: true, hint: "A turn is arriving from the terminal." };
   if (session.status === "running") return { enabled: false, hint: "Working. You can reply when this turn ends." };
-  if (session.status === "waiting_approval") return { enabled: false, hint: "Waiting for your Allow or Deny above." };
+  if (session.status === "waiting_approval") return { enabled: false, hint: "Waiting for your answer above." };
   if (session.status === "error") return { enabled: true, hint: "The last turn failed. A reply tries again." };
   return { enabled: true, hint: "Enter to send, Shift+Enter for a new line" };
 }

@@ -5,8 +5,8 @@ declare module "*/web/settings-model.js" {
   export interface RowLike { name: string; path: string; permissionMode?: string; agent?: string; fresh?: boolean }
   export interface StateLike { theme: string; permissionMode: string; agent?: string; workspaces: RowLike[]; shell: unknown; port: number }
   export function keyOf(code: string): string | null;
-  export function recordKey(event: KeyLike): Recorded;
-  export function keycaps(accelerator: string): string[];
+  export function recordKey(event: KeyLike, mac?: boolean): Recorded;
+  export function keycaps(accelerator: string, mac?: boolean): string[];
   export function isDraft(w: RowLike): boolean;
   export function putBody(state: StateLike): { body: { theme: string; permissionMode: string; agent?: string; workspaces: { name: string; path: string; permissionMode?: string; agent: string | null }[]; shell: unknown; port: number }; rows: number[] };
   export function fieldKeys(field: unknown, rows?: number[]): string[];

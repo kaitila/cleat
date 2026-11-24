@@ -34,6 +34,8 @@ import {
   preselect,
   SESSION_KEY,
   dockKey,
+  dockOrder,
+  liveOthers,
   savedSession,
   saveSession,
   stepSession,
@@ -79,8 +81,8 @@ describe("served by the runner", () => {
 
   test("every module the dock imports is one the runner serves", async () => {
     const imports = (file: string) => [...source(file).matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "markdown.js", "agent.js", "dock-state.js"]);
-    expect(imports("dock-state.js")).toEqual(["chat-format.js"]);
+    expect(imports("dock.js")).toEqual(["chat-format.js", "chat-manage.js", "markdown.js", "questions.js", "agent.js", "keys.js", "dock-state.js"]);
+    expect(imports("dock-state.js")).toEqual(["chat-format.js", "keys.js"]);
     for (const file of [...imports("dock.js"), ...imports("dock-state.js")]) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
   });
 
@@ -193,9 +195,11 @@ describe("the contract with the shell", () => {
     for (const body of frames) for (const prop of body.matchAll(/([\w-]+)\s*:/g)) expect(["opacity", "transform", "filter"]).toContain(prop[1]!);
     expect(css).toMatch(/@keyframes layer-fade \{ from \{ opacity: 0; filter: var\(--blur-in\); \} \}/);
     // No shadow and no backdrop-filter on the dock: the window is the island's size (a shadow would be
-    // cut off) and the frost is the OS's, behind the see-through window (D0028). No filter outside a fade.
+    // cut off) and the frost is the OS's, behind the see-through window (D0028). No filter outside a
+    // fade: in, the blur clears; out, it gathers again.
     expect(css).not.toMatch(/box-shadow|backdrop-filter/);
-    expect(css.replace(/@keyframes layer-fade \{[^}]*\}/, "")).not.toMatch(/\bfilter\b/);
+    expect(css).toMatch(/@keyframes layer-out \{ to \{ opacity: 0; transform: scale\(var\(--pop\)\); filter: var\(--blur-in\); \} \}/);
+    expect(css.replace(/@keyframes layer-(?:fade|out) \{[^}]*\}/g, "")).not.toMatch(/\bfilter\b/);
     expect(css).toMatch(/prefers-reduced-motion: reduce/);
     // The page never asks the shell for anything but the state: no size, and no call that waits for an animation.
     expect(noComments(source("dock.js"))).not.toMatch(/resizeTo|resizeBy|innerWidth|innerHeight/);
@@ -373,17 +377,41 @@ describe("the session the dock opens on", () => {
 });
 
 describe("the open dock's hotkeys", () => {
-  test("Alt+Up and Alt+Down step through the sessions, Alt+1..9 pick a workspace and Alt+0 all of them", () => {
-    expect(dockKey({ key: "ArrowUp", altKey: true })).toEqual({ step: -1 });
-    expect(dockKey({ key: "ArrowDown", altKey: true })).toEqual({ step: 1 });
-    expect(dockKey({ key: "1", code: "Digit1", altKey: true })).toEqual({ workspace: 1 });
-    expect(dockKey({ key: "0", code: "Digit0", altKey: true })).toEqual({ workspace: 0 });
-    // A Mac's Alt turns 1 into ¡: the physical key decides.
-    expect(dockKey({ key: "¡", code: "Digit1", altKey: true })).toEqual({ workspace: 1 });
-    expect(dockKey({ key: "3", code: "Numpad3", altKey: true })).toEqual({ workspace: 3 });
-    // Anything else, or Alt with another modifier, is the box's.
-    for (const e of [{ key: "ArrowUp" }, { key: "1", code: "Digit1" }, { key: "ArrowUp", altKey: true, shiftKey: true }, { key: "ArrowDown", altKey: true, metaKey: true }, { key: "1", code: "Digit1", altKey: true, ctrlKey: true }, { key: "a", code: "KeyA", altKey: true }, { key: "ArrowUp", altKey: true, isComposing: true }]) expect(dockKey(e)).toBeNull();
+  test("⌘K opens the switch, ⌘1..9 picks a row of it, Ctrl+Tab and Alt+arrows step; Alt+digit is the person's", () => {
+    expect(dockKey({ key: "k", code: "KeyK", metaKey: true }, true)).toEqual({ find: true });
+    expect(dockKey({ key: "k", code: "KeyK", ctrlKey: true }, false)).toEqual({ find: true });
+    expect(dockKey({ key: "3", code: "Digit3", metaKey: true }, true)).toEqual({ nth: 3 });
+    expect(dockKey({ key: "1", code: "Digit1", ctrlKey: true }, false)).toEqual({ nth: 1 });
+    expect(dockKey({ key: "Tab", ctrlKey: true }, true)).toEqual({ step: 1 });
+    expect(dockKey({ key: "Tab", ctrlKey: true, shiftKey: true }, true)).toEqual({ step: -1 });
+    expect(dockKey({ key: "ArrowUp", altKey: true }, true)).toEqual({ step: -1 });
+    expect(dockKey({ key: "ArrowDown", altKey: true }, true)).toEqual({ step: 1 });
+    // Option+2 is @ on a Finnish Mac, and Option+7..9 are | [ ]: never the dock's.
+    for (const e of [
+      { key: "@", code: "Digit2", altKey: true },
+      { key: "1", code: "Digit1", altKey: true },
+      { key: "ArrowUp" },
+      { key: "1", code: "Digit1" },
+      { key: "1", code: "Digit1", ctrlKey: true },
+      { key: "0", code: "Digit0", metaKey: true },
+      { key: "ArrowUp", altKey: true, shiftKey: true },
+      { key: "ArrowDown", altKey: true, metaKey: true },
+      { key: "ArrowUp", altKey: true, isComposing: true },
+      { key: "Tab" },
+    ]) expect(dockKey(e, true)).toBeNull();
     expect(dockKey(null)).toBeNull();
+  });
+
+  test("the dock's order puts the sessions waiting for the person first, then the running ones, then the rest as they were", () => {
+    const list = [session("pinned", "idle"), session("new", "idle"), session("run", "running"), session("wait", "waiting_approval"), session("run2", "running")];
+    expect(dockOrder(list).map((s) => s.id)).toEqual(["wait", "run", "run2", "pinned", "new"]);
+    expect(dockOrder([])).toEqual([]);
+  });
+
+  test("the head's other sessions at work leave out the one shown and the idle ones, at most two", () => {
+    const order = dockOrder([session("a", "waiting_approval"), session("b", "running"), session("c", "idle"), session("d", "running"), session("e", "running"), session("f", "running"), session("g", "error")]);
+    expect(liveOthers(order, "b").map((s) => s.id)).toEqual(["a", "d"]);
+    expect(liveOthers(order, null, 4).map((s) => s.id)).toEqual(["a", "b", "d", "e"]);
   });
 
   test("a step stops at either end of the list; from outside it, down starts at the top and up at the bottom", () => {

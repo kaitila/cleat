@@ -1,8 +1,9 @@
 // Starts sessions, continues them with replies, and runs their turns in the background: every
 // output of the agent driver is stored (events) or passed on (deltas), and sent to the WebSocket clients.
-import type { AgentKind, ApprovalDecision, Notification, PermissionMode, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
+import type { AgentKind, ApprovalDecision, Notification, QuestionAnswers, PermissionMode, ServerMessage, SessionMeta, SessionStatus, Workspace } from "../shared/protocol";
 import type { AgentDriver, ApprovalAsk, NewEvent } from "./agent";
 import { approvalBody, bodyOf, NO_TEXT, type Notifications } from "./notifications";
+import { answersRefusal, cleanAnswers, questionTexts } from "./questions";
 import { DEFAULT_AGENT, DEFAULT_PERMISSION_MODE } from "./config";
 import type { Store } from "./store";
 
@@ -41,8 +42,8 @@ export class Sessions {
   /** Set by the server once the sync exists. */
   watcher: TurnWatcher | null = null;
   private readonly turns = new Map<string, { abort: AbortController; interrupt: AbortController; done: Promise<void> }>();
-  /** The open approvals, by approvalId. `settle` gives the waiting tool call its answer. */
-  private readonly approvals = new Map<string, { sessionId: string; settle: (decision: ApprovalDecision) => void }>();
+  /** The open approvals, by approvalId: the call asked about, and `settle`, which gives it its answer. */
+  private readonly approvals = new Map<string, { sessionId: string; toolName: string; input: unknown; settle: (decision: ApprovalDecision, answers?: QuestionAnswers) => void }>();
 
   constructor(
     private readonly store: Store,
@@ -163,24 +164,29 @@ export class Sessions {
   /**
    * The person's answer to an open approval: stores approval_resolved, lets the tool call go on, and
    * the session is running again once no approval of its is open. Null when the session has no open
-   * approval with that id (unknown, or already answered).
+   * approval with that id (unknown, or already answered); `{ refused }` when the answers don't fit
+   * the call (questions.ts): an AskUserQuestion is allowed only with an answer to each question.
    */
-  answer(id: string, approvalId: string, decision: ApprovalDecision): SessionMeta | null {
-    if (this.approvals.get(approvalId)?.sessionId !== id) return null;
-    this.close(approvalId, decision);
+  answer(id: string, approvalId: string, decision: ApprovalDecision, answers?: unknown): SessionMeta | null | { refused: string } {
+    const open = this.approvals.get(approvalId);
+    if (open?.sessionId !== id) return null;
+    const refused = answersRefusal(open.toolName, open.input, decision, answers);
+    if (refused) return { refused };
+    const texts = questionTexts(open.toolName, open.input);
+    this.close(approvalId, decision, false, texts && answers ? cleanAnswers(texts, answers as QuestionAnswers) : undefined);
     return this.store.get(id)!;
   }
 
   /** Ends an open approval: recorded (unless `quiet`: the runner is stopping), then the tool call gets its answer. */
-  private close(approvalId: string, decision: ApprovalDecision, quiet = false): void {
+  private close(approvalId: string, decision: ApprovalDecision, quiet = false, answers?: QuestionAnswers): void {
     const open = this.approvals.get(approvalId);
     if (!open) return;
     this.approvals.delete(approvalId);
     if (!quiet) {
       const more = [...this.approvals.values()].some((a) => a.sessionId === open.sessionId);
-      this.record(open.sessionId, { kind: "approval_resolved", approvalId, decision }, more ? undefined : "running");
+      this.record(open.sessionId, { kind: "approval_resolved", approvalId, decision, ...(answers ? { answers } : {}) }, more ? undefined : "running");
     }
-    open.settle(decision);
+    open.settle(decision, answers);
   }
 
   /**
@@ -216,9 +222,12 @@ export class Sessions {
         const onAbort = () => this.close(approvalId, "deny", signal.aborted);
         this.approvals.set(approvalId, {
           sessionId: id,
-          settle: (decision) => {
+          toolName: ask.toolName,
+          input: ask.input,
+          settle: (decision, answers) => {
             callSignal?.removeEventListener("abort", onAbort);
             mine.delete(approvalId);
+            if (answers) ask.answered?.(answers);
             resolve(decision);
           },
         });

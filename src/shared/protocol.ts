@@ -85,7 +85,8 @@ export type SessionEvent = EventBase &
     | { kind: "tool_use"; toolUseId: string; name: string; input: unknown }
     | { kind: "tool_result"; toolUseId: string; content: string; isError: boolean }
     | { kind: "approval_request"; approvalId: string; toolUseId?: string; toolName: string; input: unknown; reason?: string }
-    | { kind: "approval_resolved"; approvalId: string; decision: ApprovalDecision }
+    /** `answers`: an AskUserQuestion's, allowed: each question's text and the person's answer (D0039). */
+    | { kind: "approval_resolved"; approvalId: string; decision: ApprovalDecision; answers?: QuestionAnswers }
     | { kind: "result"; ok: boolean; text?: string; costUsd?: number; durationMs?: number }
     /** A call the auto-mode classifier (or a deny rule, or the mode) denied without asking the person. `input` is a one-line summary. */
     | { kind: "auto_denied"; toolUseId: string; toolName: string; input?: string; reason?: string }
@@ -98,6 +99,13 @@ export type SessionEvent = EventBase &
 
 export type SessionEventKind = SessionEvent["kind"];
 export type ApprovalDecision = "allow" | "deny";
+/**
+ * The person's answers to an AskUserQuestion call: each question's text and its answer, an option's
+ * label, several labels joined by ", " for a multiSelect one, or their own words (D0039).
+ */
+export type QuestionAnswers = Record<string, string>;
+/** The tool whose approval carries answers. */
+export const ASK_USER_QUESTION = "AskUserQuestion";
 
 /** What the runner sends on the WebSocket at /ws. Clients send nothing. */
 export type ServerMessage =
@@ -227,7 +235,8 @@ export const TERMINAL_NOT_DELETED = "a session from the terminal is not deleted 
 /** The 409 for stopping a session the runner runs no turn of. */
 export const NOT_RUNNING = "no turn of this session is running here";
 export interface EventsResponse { events: SessionEvent[] }
-export interface ApprovalRequest { decision: ApprovalDecision }
+/** `answers`: required to allow an AskUserQuestion call, refused for any other tool. */
+export interface ApprovalRequest { decision: ApprovalDecision; answers?: QuestionAnswers }
 /** imagePath may be a Windows path (C:\...) here; the runner stores the WSL path. */
 export interface ClipboardPostRequest { text?: string; imagePath?: string }
 export interface NotificationsResponse { notifications: Notification[]; latest: number }

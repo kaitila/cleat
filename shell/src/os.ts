@@ -121,6 +121,26 @@ export function parseNotch(output: string, bounds: Area): Notch | null {
   return notch;
 }
 
+/** A stand-in notch's width, in points: about a MacBook's own (179 on a 14-inch, 185 on a 16-inch). */
+export const STAND_IN_NOTCH_WIDTH = 180;
+/**
+ * Its height, in points: a menu bar's on a display without a notch. Fixed, not read from the work
+ * area, which a full-screen app or a menu bar that hides itself changes: a stand-in that changed
+ * with it would reload the dock's page each time (D0037).
+ */
+export const STAND_IN_NOTCH_HEIGHT = 30;
+
+/**
+ * The notch the dock hangs from on a Mac (D0037): the display's own, or on a display without one (an
+ * external screen as the primary, or a measurement that failed) a stand-in drawn by the dock, at the
+ * top centre of the display and as tall as a menu bar. The dock then looks and works the same on
+ * every Mac display.
+ */
+export function dockNotchOf(measured: Notch | null, bounds: Area): Notch {
+  if (measured) return measured;
+  return { x: (bounds.width - STAND_IN_NOTCH_WIDTH) / 2, width: STAND_IN_NOTCH_WIDTH, height: STAND_IN_NOTCH_HEIGHT };
+}
+
 /** Desktops that run a compositor by default on X11: a transparent window shows what is under it. */
 const COMPOSITED = /\b(GNOME|KDE|Cinnamon|Budgie|Pantheon|Unity|Deepin|COSMIC|XFCE|MATE|LXQt)\b/i;
 

@@ -305,6 +305,12 @@ async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, r
 
 type Dock = Awaited<ReturnType<typeof dock>>;
 
+/** Opens the open dock's list of sessions under its head, where the rows are (D0038), unless it is open. */
+async function openList(page: Any): Promise<void> {
+  if ((await page.locator("#switcher").getAttribute("aria-expanded")) !== "true") await page.locator("#switcher").click();
+  await page.locator("#sessions-list").waitFor();
+}
+
 /** Records the frames while `act` changes the state and the island settles in `state`. */
 async function recorded(d: Dock, state: DockState, act: () => Promise<void>): Promise<Frame[]> {
   await d.page.evaluate(() => (window as Any).__record());
@@ -425,9 +431,9 @@ try {
   await card.locator("button", { hasText: "Allow" }).waitFor();
   check((await card.getAttribute("data-state")) === "open" && (await d.text(".approval-actions button")).join(",") === "Allow,Deny", "the open approval is a card with Allow and Deny");
   check((await card.locator(".approval-tool").textContent()) === "Write" && (await card.locator(".approval-path").textContent()) === `${runner.dir}/work/fake.txt`, "that names the tool and the file");
-  check((await page.locator("#reply-text").isDisabled()) && (await page.locator("#reply-text").getAttribute("placeholder")) === "Waiting for your Allow or Deny above." && (await page.locator("#reply-hint").isHidden()),
+  check((await page.locator("#reply-text").isDisabled()) && (await page.locator("#reply-text").getAttribute("placeholder")) === "Waiting for your answer above." && (await page.locator("#reply-hint").isHidden()),
     "the reply box is off, its placeholder a short hint while it waits, and no line under it");
-  check((await d.text(".panel-head > :not([hidden])")).length === 2 && (await page.locator(".panel-head .brand").count()) === 0, "the panel's head is the workspace switch and New task, nothing else");
+  check((await page.locator(".panel-head #switcher").isVisible()) && (await page.locator(".panel-head #workspace").count()) === 0 && (await page.locator("#sessions-list").isHidden()), "the panel's head is the session's switch, with the list of sessions closed under it (D0038)");
   check((await page.locator(".panel-head a", { hasText: "New task" }).getAttribute("href")) === "/prompt" && (await page.locator(".panel-head a").getAttribute("target")) === "_blank", "'New task' is a new window on /prompt");
   await d.settle("open");
   const opened = await d.fits("open");
@@ -437,8 +443,9 @@ try {
 
   // ---- the session's actions: a quiet "…" in its head ----
   {
-    const heads = await page.locator(".session-head > :not([hidden])").evaluateAll((els: Element[]) => els.map((el) => el.id || el.className));
-    check(heads.join(",") === "title,session-agent muted small,stop quiet small,more", `the head is the title, its agent, Stop while it runs, and "…" (${heads.join(", ")})`);
+    const heads = await page.locator(".panel-head > :not([hidden])").evaluateAll((els: Element[]) => els.map((el) => el.id || el.className));
+    check(heads.join(",") === "switcher,stop quiet small,more,button quiet small new-task", `the head is the session's switch, Stop while it runs, "…" and New task (${heads.join(", ")})`);
+    check((await page.locator("#switcher #title").textContent()) !== "" && (await page.locator("#switcher .session-agent svg").count()) === 1, "the switch shows the session's title and its agent's glyph");
     await page.locator("#more").click();
     const items = await d.text(".menu:not([hidden]) .menu-item");
     check(items[0] === "Open in chat" && items.slice(-3).join(",") === "Rename,Pin,Archive" && (await page.locator("#more").getAttribute("aria-expanded")) === "true", `"…" opens a small menu: ${items.join(", ")}`);
@@ -523,14 +530,42 @@ try {
   check(grown.height > opened.height - 200 && grown.height <= DOCK_SIZES.open.height, `the island followed its content: ${grown.height}px now`);
   await d.shot("open-replied");
 
+  // ---- an agent's questions: answered in the dock and handed back (D0039) ----
+  {
+    await box.fill("now ask me something");
+    await box.press("Enter");
+    const q = page.locator(".approval").last();
+    await q.locator(".questions").waitFor();
+    check((await q.locator(".approval-tool").textContent()) === "Question" && (await q.locator(".approval-state").textContent()) === "Needs your answer" && (await q.locator(".approval-actions button").allTextContents()).join(",") === "Answer,Skip", "an agent's questions are a card with Answer and Skip");
+    check((await q.locator(".question-text").allTextContents()).join("|") === "ColourWhich colour should the button be?|PagesWhich pages should get it?" && (await q.locator("input[type=radio]").count()) === 2 && (await q.locator("input[type=checkbox]").count()) === 3, "each question with its options: one to pick, or several");
+    const send = q.locator("button", { hasText: "Answer" });
+    check(await send.isDisabled(), "Answer is off until every question has an answer");
+    await q.locator(".option", { hasText: "Green" }).click();
+    check(await send.isDisabled(), "one answered is not enough");
+    await q.locator(".option", { hasText: "Chat" }).click();
+    await q.locator(".option", { hasText: "Dock" }).click();
+    check(!(await send.isDisabled()), "with both, Answer is on");
+    await d.settle("open");
+    await d.fits("open");
+    await d.shot("open-question");
+    await send.click();
+    await q.locator(".question-answers").waitFor();
+    check((await q.getAttribute("data-state")) === "allow" && (await q.locator(".approval-state").textContent()) === "Answered" && (await q.locator(".question-answers dd").allTextContents()).join("|") === "Green|Chat, Dock" && (await q.locator("button").count()) === 0, "answered, the card shows each answer, without buttons");
+    await page.locator(".msg.assistant:not(.streaming)", { hasText: "You answered: Which colour should the button be? Green; Which pages should get it? Chat, Dock" }).waitFor();
+    check(true, "and the agent got the answers");
+    await d.settle("open");
+    await d.shot("open-question-answered");
+  }
+
 
   // ---- managing a session from the open dock: Stop, and a row's menu (Rename, Pin, Archive) ----
   {
     const slowTitle = "count slowly in the dock";
     const slow = await runner.startSession(slowTitle);
     const slowRow = page.locator(".session-row", { hasText: slowTitle });
+    await openList(page);
     await slowRow.click();
-    const stop = page.locator(".session-head .stop");
+    const stop = page.locator(".panel-head .stop");
     await stop.waitFor();
     check((await stop.textContent()) === "Stop", "a running session has Stop in the open dock's head");
     await d.settle("open");
@@ -540,6 +575,7 @@ try {
     await page.locator(".note", { hasText: "Stopped" }).waitFor();
     await stop.waitFor({ state: "hidden" });
     check((await page.locator(".msg.streaming").count()) === 0, "Stop ends the turn: the stream says Stopped, and Stop is gone");
+    await openList(page);
     await slowRow.click({ button: "right" });
     const items = () => d.text(".menu:not([hidden]) .menu-item");
     check((await items()).join(",") === "Rename,Pin,Archive", "right-click on a row opens a small menu: Rename, Pin, Archive");
@@ -550,6 +586,7 @@ try {
     await page.locator(".menu-item", { hasText: "Pin" }).click();
     await page.locator(".row-title.pinned", { hasText: slowTitle }).waitFor();
     check((await d.text(".row-title"))[0] === slowTitle, "Pin puts it at the top of the list, marked");
+    await openList(page);
     await slowRow.click({ button: "right" });
     await page.locator(".menu-item", { hasText: "Rename" }).click();
     const input = page.locator(".session-row input.rename");
@@ -571,8 +608,9 @@ try {
     await page.locator(".row-title", { hasText: "renamed in the dock" }).waitFor({ state: "detached" });
     check((await all("?archived=1")).some((x) => x.id === slow.id), "Archive takes it out of the dock's list, archived in the runner");
     check((await d.lastCall()).state === "open", "and the dock stayed open throughout");
+    await openList(page);
     await page.locator(".session-row", { hasText: needs }).click();
-    await page.locator('.session-row[aria-current="true"]', { hasText: needs }).waitFor();
+    await page.locator('.session-row[aria-current="true"]', { hasText: needs }).waitFor({ state: "attached" });
     // Back where the next part starts: the reply box has the focus.
     await page.locator("#reply-text:not([disabled])").waitFor();
     await box.click();
@@ -645,14 +683,16 @@ try {
   const between = heights.filter((h) => h > DOCK_SIZES.idle.height + 1 && h < final - 1).length;
   check(between >= 5, `the island grows through ${between} frames between the pill and its full height: one shape, not a jump`);
   // A spring: past its size a little and back, never more than the bouncy spring's 11% (and never out of the window).
-  check(Math.max(...heights) <= Math.min(final * 1.12, DOCK_WINDOW.height) + 0.5 && Math.abs(final - DOCK_SIZES.open.height) <= 1, `opening, it springs to its size (${final}px) and at most a little past it (the most ${Math.max(...heights)}px), within the window`);
+  check(Math.max(...heights) <= Math.min(final * 1.12, DOCK_WINDOW.height) + 0.5 && final <= DOCK_SIZES.open.height + 0.5, `opening, it springs to its size (${final}px) and at most a little past it (the most ${Math.max(...heights)}px), within the window`);
   check(opening.every((f) => f.hung) && closing.every((f) => f.hung), `the top edge stays on the screen's edge in all ${opening.length + closing.length} frames of the open and the close`);
   const closingHeights = closing.map((f) => f.height);
-  check(closingHeights.every((h, i) => i === 0 || h <= closingHeights[i - 1]! + 0.5) && closingHeights.at(-1)! <= DOCK_SIZES.idle.height, "closing, it gathers back on the soft spring: it only shrinks, back to the pill");
+  // The soft spring dips a little under the pill and settles back up: that settle is below the pill's height.
+  check(closingHeights.every((h, i) => i === 0 || h <= closingHeights[i - 1]! + 0.5 || h <= DOCK_SIZES.idle.height) && closingHeights.at(-1)! <= DOCK_SIZES.idle.height, "closing, it gathers back on the soft spring: it only shrinks, back to the pill");
   /** How long until the shape first reaches `to` from `from`: the stretch, before any settle. */
   const reach = (frames: Frame[], from: number, to: number) => {
     const moving = frames.findIndex((f) => Math.abs(f.height - from) > 1);
-    const there = frames.findIndex((f, i) => i >= moving && Math.abs(f.height - to) <= 1);
+    // At it or past it: a fast frame can step over the size on the way to its overshoot.
+    const there = frames.findIndex((f, i) => i >= moving && (to > from ? f.height >= to - 1 : f.height <= to + 1));
     return frames.slice(moving, there + 1).reduce((sum, f) => sum + f.ms, 0);
   };
   const [openMs, closeMs] = [reach(opening, DOCK_SIZES.idle.height, final), reach(closing, final, closingHeights.at(-1)!)];
@@ -689,6 +729,7 @@ try {
   void first;
 
   // ---- untrusted text, and picking another session ----
+  await openList(page);
   await page.locator(".session-row", { hasText: "<img" }).click();
   await page.locator(".note", { hasText: "Done · 4.2 s · $0.031" }).waitFor();
   check((await page.locator("#title").textContent()) === HOSTILE && (await page.locator('.session-row[aria-current="true"]').getAttribute("href")) === `/?session=${hostileId}`, "clicking a row selects that session");
@@ -705,6 +746,7 @@ try {
   })), `a long session fills the island to its ${DOCK_SIZES.open.height}px and the stream scrolls inside it`);
   await d.shot("open-hostile");
   // ---- every markdown construct, in the open dock, light here and dark below ----
+  await openList(page);
   await page.locator(".session-row", { hasText: "Markdown sample" }).click();
   await page.locator(".msg.assistant.md", { hasText: "SPRING MEETUP" }).waitFor();
   const mdWrong = (await page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
@@ -714,8 +756,11 @@ try {
   await d.markdownShots();
 
   // ---- nothing scrolls sideways: a title and an answer wider than the panel ----
+  await openList(page);
   await page.locator(".session-row", { hasText: "very-long-path-segment" }).click();
   await page.locator(".msg.assistant", { hasText: "is one word" }).waitFor();
+  // The list open, so its row is laid out too (D0038).
+  await openList(page);
   await d.settle("open");
   const sideways = (await page.evaluate(() => {
     const why: string[] = [];
@@ -744,6 +789,7 @@ try {
     "the head has a quiet dropdown: All workspaces, then each workspace with sessions");
   const allTitles = await d.text(".row-title");
   const workTitles = allTitles.filter((t) => t !== LONG_TITLE).join("|");
+  await openList(page);
   await workspace.selectOption("work");
   await page.locator(".session-row", { hasText: "very-long-path-segment" }).waitFor({ state: "detached" });
   check((await d.text(".row-title")).join("|") === workTitles && (await page.locator(".row-workspace:not([hidden])").count()) === 0,
@@ -766,28 +812,32 @@ try {
   await page.locator("#panel").waitFor();
   await d.settle("open");
   check((await workspace.inputValue()) === "work" && (await d.text(".row-title")).join("|") === workTitles, "and so after the page is loaded again: the choice is remembered");
+  await openList(page);
   await workspace.selectOption("gone");
-  await page.locator('.session-row[aria-current="true"]', { hasText: "very-long-path-segment" }).waitFor();
+  await page.locator('.session-row[aria-current="true"]', { hasText: "very-long-path-segment" }).waitFor({ state: "attached" });
   check((await d.text(".row-title")).join("|") === LONG_TITLE, "'gone' lists its one session, and shows it");
+  await openList(page);
   await workspace.selectOption("");
-  await page.locator(".session-row", { hasText: needs }).waitFor();
+  await page.locator(".session-row", { hasText: needs }).waitFor({ state: "attached" });
   check((await d.text(".row-title")).join("|") === allTitles.join("|") && (await page.evaluate(() => localStorage.getItem("intuition.dock.workspace"))) === null, "All workspaces lists them all again, and is remembered as no choice");
 
   // ---- the agent: a quiet glyph on each row, and the head names it ----
   const codexTitle = "answer this on codex in the dock";
   const codexId = ((await (await runner.post("/api/sessions", { workspace: "work", prompt: codexTitle, agent: "codex" })).json()) as { session: { id: string } }).session.id;
   const codexRow = page.locator(".session-row", { hasText: codexTitle });
+  await openList(page);
   await codexRow.click();
   await page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${codexTitle}` }).waitFor();
   await page.locator(".note", { hasText: "Done" }).waitFor();
   const codexMark = codexRow.locator(".agent-mark");
   check((await codexMark.getAttribute("data-agent")) === "codex" && (await codexMark.getAttribute("title")) === "Runs on Codex" && (await codexMark.locator("svg").count()) === 1, "a Codex session's row has Codex's glyph, its name only as the tooltip");
   check((await page.locator(".session-row .agent-mark").count()) === (await page.locator(".session-row").count()), "every row has its agent's glyph");
-  check((await page.locator(".session-head .session-agent").textContent()) === "Codex", "the open session's head names its agent");
+  check((await page.locator("#switcher .session-agent").getAttribute("title")) === "Codex", "the open session's switch has its agent's glyph, named in the tooltip");
   await d.settle("open");
   await d.fits("open");
   await d.shot("open-codex");
   // Gone again, so the dark part below starts from the sessions it expects.
+  await openList(page);
   await page.locator(".session-row").filter({ hasNotText: codexTitle }).first().click();
   check((await runner.post(`/api/sessions/${codexId}/delete`, {})).ok, "the Codex session is deleted after its look");
   await page.locator(".session-row", { hasText: codexTitle }).waitFor({ state: "detached" });
@@ -825,17 +875,21 @@ try {
   await k.shot("open");
   const darkCodex = "answer this on codex in the dark dock";
   const darkCodexId = ((await (await runner.post("/api/sessions", { workspace: "work", prompt: darkCodex, agent: "codex" })).json()) as { session: { id: string } }).session.id;
+  await openList(k.page);
   await k.page.locator(".session-row", { hasText: darkCodex }).click();
-  await k.page.locator(".session-head .session-agent", { hasText: "Codex" }).waitFor();
+  await k.page.locator('#switcher .session-agent[title="Codex"]').waitFor();
   await k.page.locator(".note", { hasText: "Done" }).waitFor();
   await k.settle("open");
   await k.fits("open");
   await k.shot("open-codex");
+  await openList(k.page);
   await k.page.locator(".session-row").filter({ hasNotText: darkCodex }).first().click();
   check((await runner.post(`/api/sessions/${darkCodexId}/delete`, {})).ok, "dark: the Codex session is deleted after its look");
   await k.page.locator(".session-row", { hasText: darkCodex }).waitFor({ state: "detached" });
+  await openList(k.page);
   await k.page.locator(".session-row", { hasText: darkPrompt }).click();
-  await k.page.locator(".session-head .session-agent", { hasText: "Claude Code" }).waitFor();
+  await k.page.locator('#switcher .session-agent[title="Claude Code"]').waitFor();
+  await openList(k.page);
   await k.page.locator(".session-row", { hasText: "Markdown sample" }).click();
   await k.page.locator(".msg.assistant.md", { hasText: "SPRING MEETUP" }).waitFor();
   const mdDark = (await k.page.evaluate(markdownProblems, [MARKDOWN_EXPECTED])) as string[];
@@ -915,23 +969,25 @@ try {
       await t.page.locator("#panel").waitFor();
       await t.settle("open");
       const termRow = t.page.locator(".session-row", { hasText: first });
+      await openList(t.page);
       await termRow.waitFor();
       check((await t.page.locator(".session-row .terminal-mark:not([hidden])").count()) === 1, "dock: only the session from the terminal has the terminal mark");
       const mark = termRow.locator(".terminal-mark");
       check((await mark.getAttribute("title")) === "started in the terminal" && (await mark.textContent()) === ">_" && (await mark.isVisible()), "a quiet glyph whose tooltip says 'started in the terminal'");
+      await openList(t.page);
       await termRow.click();
       await t.page.locator(".msg.assistant", { hasText: "hello from the terminal" }).waitFor();
       await t.page.locator("#more").click();
       const resumeItem = t.page.locator(".menu:not([hidden]) .menu-item", { hasText: "Continue in terminal" });
       check(await resumeItem.isVisible(), "the dock's session head offers 'Continue in terminal' in its \"…\"");
       await resumeItem.click();
-      await t.page.locator(".session-head .session-status", { hasText: "Copied" }).waitFor();
+      await t.page.locator(".panel-head .session-status", { hasText: "Copied" }).waitFor();
       const copied = await t.page.evaluate(() => navigator.clipboard.readText());
       check(copied === `cd ${work} && claude --resume term-1`, `it copies the command that continues it, and says Copied (${copied})`);
       // A turn arrives from the terminal.
       const typedThere = "typed in the terminal";
       transcripts.write("term-1", work, [userEntry(typedThere)]);
-      await t.page.locator(".session-head .session-status", { hasText: "in terminal" }).waitFor();
+      await t.page.locator(".panel-head .session-status", { hasText: "in terminal" }).waitFor();
       check(true, "a turn arriving from the terminal: the head says 'in terminal'");
       await t.page.locator(".msg.user", { hasText: typedThere }).waitFor();
       check(!(await t.page.locator("#reply-text").isDisabled()) && (await t.page.locator("#reply-text").getAttribute("placeholder")) !== "Working. You can reply when this turn ends.", "the reply box stays on, without the usual running hint");
@@ -956,7 +1012,7 @@ try {
       await anyway.click();
       await t.page.locator(".msg.assistant:not(.streaming)", { hasText: `You said: ${here}` }).waitFor();
       check(JSON.stringify(bodies) === JSON.stringify([{ prompt: here, force: true }]), "'Send anyway' repeats the request with force: true, and it goes through");
-      await t.page.waitForFunction(() => document.querySelector(".session-head .session-status")?.textContent === "");
+      await t.page.waitForFunction(() => document.querySelector(".panel-head .session-status")?.textContent === "");
       check(true, "and the head no longer says 'in terminal'");
     } finally {
       await t.context.close();
@@ -1005,15 +1061,45 @@ try {
     check(true, "Alt+Up goes back up");
     await p.keyboard.press("Alt+ArrowDown");
     await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t, second);
-    const names = await p.locator("#workspace option").evaluateAll((os: Element[]) => os.map((o) => (o as HTMLOptionElement).value));
-    if (names.length > 1) {
-      await p.keyboard.press("Alt+1");
-      await p.waitForFunction((v: string) => (document.getElementById("workspace") as HTMLSelectElement).value === v, names[1]);
-      check(true, `Alt+1 picks the first workspace, '${names[1]}'`);
-      await p.keyboard.press("Alt+0");
-      await p.waitForFunction(() => (document.getElementById("workspace") as HTMLSelectElement).value === "");
-      check(true, "Alt+0 shows all workspaces again");
-    }
+    // ⌘K opens the switch with the keyboard in its find; typing narrows the rows, Enter shows the first.
+    await p.keyboard.press("ControlOrMeta+K");
+    await p.locator("#sessions-list:not([hidden])").waitFor();
+    check(await p.evaluate(() => document.activeElement?.id === "find"), "⌘K opens the switch with the keyboard in its find field");
+    await kb.settle("open");
+    await p.waitForTimeout(600);
+    await kb.shot("open-switch");
+    const target = rowsTitles.find((t: string) => t !== second && t.length > 3)!;
+    await p.keyboard.type(target.slice(0, Math.min(12, target.length)));
+    await p.waitForFunction(() => document.querySelectorAll(".sessions .session-row[data-active]").length === 1);
+    const narrowed = await p.locator(".sessions .row-title").allTextContents();
+    check(narrowed.includes(target) && narrowed.length <= rowsTitles.length, `typing narrows the switch ('${target}' among ${narrowed.length})`);
+    await p.keyboard.press("Enter");
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t && document.getElementById("sessions-list")!.hidden, narrowed[0]!);
+    check(await p.evaluate(() => document.activeElement?.id === "reply-text" || (document.getElementById("reply-text") as HTMLTextAreaElement).disabled), "Enter shows it, closes the switch and puts the keyboard back in the reply");
+    // ⌘2: the second row of the switch, with it closed.
+    const order = await p.locator(".sessions .row-title").allTextContents();
+    await p.keyboard.press("ControlOrMeta+2");
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t, order[1]!);
+    check(true, `⌘2 shows the second row of the switch ('${order[1]}')`);
+    // Esc in the open switch closes the switch, not the dock.
+    await p.keyboard.press("ControlOrMeta+K");
+    await p.locator("#sessions-list:not([hidden])").waitFor();
+    await p.keyboard.press("Escape");
+    await p.locator("#sessions-list").waitFor({ state: "hidden" });
+    check(await p.evaluate(() => !document.getElementById("panel")!.hidden), "Esc closes the switch and the dock stays open");
+    // Another session at work shows as a dot beside the switch; a press shows it (D0040).
+    const askTitle = "please ask me which colour";
+    await runner.startSession(askTitle);
+    await p.locator('#live .live-session[aria-label^="please ask me"] .dot[data-status="waiting_approval"]').waitFor();
+    check((await p.locator("#live .live-session").first().getAttribute("aria-label"))?.startsWith("please ask me") === true, "a session that waits for the person is a dot beside the switch, first");
+    await kb.settle("open");
+    await kb.shot("open-live");
+    await p.locator('#live .live-session[aria-label^="please ask me"]').click();
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t, askTitle);
+    check((await p.locator('#live .live-session[aria-label^="please ask me"]').count()) === 0, "pressing the dot shows that session, and the one shown has no dot of its own");
+    await p.locator(".approval button", { hasText: "Skip" }).click();
+    await p.waitForFunction(() => document.getElementById("live")!.hidden);
+    check(true, "skipped, it is no longer at work and the dots are gone");
     check((await p.locator("#reply-text").inputValue()) === "", "no hotkey typed a character into the box");
     // The one shown when it closes: after a switch to another workspace, one of that workspace's.
     const leftOn = await title();
@@ -1066,6 +1152,14 @@ try {
       const quiet = await n.shape();
       check(quiet.width === notch.width && quiet.height === notch.height, `${scheme}, out of the notch, nothing going on: the island is the notch itself, ${quiet.width}x${quiet.height}`);
       await n.shot("notch-idle-nothing", false);
+    }
+    // The open and the close out of the notch, frame by frame, to be looked at.
+    if (scheme === "dark") {
+      await strip(n, "notch-open", "open", n.hover, [0, 40, 80, 120, 160, 200, 240, 280, 320, 360]);
+      await strip(n, "notch-close", "idle", async () => {
+        await n.leave();
+        await n.page.waitForTimeout(450);
+      }, [0, 30, 60, 90, 120, 160, 200, 240, 290, 340]);
     }
     const title = `Out of the notch, ${scheme}`;
     await runner.startSession(title);

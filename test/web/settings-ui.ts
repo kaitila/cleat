@@ -37,6 +37,8 @@ function skip(why: string): never {
 }
 
 if (process.env.CI) skip("CI has no browser for this check");
+/** The page writes a Mac's keys by their symbols (headless Chromium on a Mac says MacIntel). */
+const MAC = process.platform === "darwin";
 const playwrightPath = join(homedir(), ".bun", "install", "global", "node_modules", "playwright");
 let browser: Browser;
 try {
@@ -248,7 +250,7 @@ try {
   }));
   check("it shows the stored theme and permission mode", shown.theme === "system" && shown.mode === "auto", JSON.stringify(shown));
   check("it shows the workspaces, in order, each with its own mode", shown.names.join() === "alpha,gone" && shown.modes.join() === ",default", JSON.stringify(shown));
-  check("the shortcuts are keycaps", shown.caps.join("|") === "Ctrl Alt Space|Ctrl Alt S", JSON.stringify(shown.caps));
+  check("the shortcuts are keycaps", shown.caps.join("|") === (MAC ? "⌃ ⌥ Space|⌃ ⌥ S" : "Ctrl Alt Space|Ctrl Alt S"), JSON.stringify(shown.caps));
   check("dock and startup show their switches", shown.dock && !shown.login);
   check("About shows the version and the port", shown.version === "0.1.0" && shown.port === String(server.port), JSON.stringify(shown));
   check("nothing is wider than the window", !shown.overflow);
@@ -328,14 +330,14 @@ try {
   check("a shortcut being recorded says so", (await page.evaluate(() => document.querySelector('[data-shortcut="hotkey"]')!.textContent)) === "Press the keys…");
   await page.keyboard.press("Escape");
   await Bun.sleep(150);
-  check("Esc keeps the old shortcut", stored.shell?.hotkey === "Control+Alt+Space" && (await page.evaluate(() => document.querySelector('[data-shortcut="hotkey"] kbd')?.textContent)) === "Ctrl");
+  check("Esc keeps the old shortcut", stored.shell?.hotkey === "Control+Alt+Space" && (await page.evaluate(() => document.querySelector('[data-shortcut="hotkey"] kbd')?.textContent)) === (MAC ? "⌃" : "Ctrl"));
   await page.click('[data-shortcut="hotkey"]');
   await page.keyboard.press("k");
-  check("a key without Ctrl, Alt or Win is refused inline", ((await visibleError(page, '[data-error-for="shell.hotkey"]')) ?? "").includes("Ctrl"));
+  check("a key without Ctrl, Alt or Win is refused inline", ((await visibleError(page, '[data-error-for="shell.hotkey"]')) ?? "").includes(MAC ? "⌘" : "Ctrl"));
   await page.keyboard.press("Control+Shift+K");
   await until("Shortcuts: New task is recorded from the keys pressed", () => stored.shell?.hotkey === "Control+Shift+K");
   const caps = await page.evaluate(() => [...document.querySelectorAll('[data-shortcut="hotkey"] kbd')].map((k) => k.textContent).join(" "));
-  check("and shown as keycaps", caps === "Ctrl Shift K", caps);
+  check("and shown as keycaps", caps === (MAC ? "⌃ ⇧ K" : "Ctrl Shift K"), caps);
   await page.click('[data-shortcut="snipHotkey"]');
   await page.keyboard.press("Alt+F9");
   await until("Shortcuts: Snip is recorded", () => stored.shell?.snipHotkey === "Alt+F9");

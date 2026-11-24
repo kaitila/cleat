@@ -39,6 +39,7 @@ import {
 import { resumeControl } from "./chat-resume.js";
 import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.js";
 import { renderMarkdown } from "./markdown.js";
+import { answersList, questionDecidedLabel, questionForm, questionsOf } from "./questions.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -345,10 +346,12 @@ function approvalCard(event) {
   el.dataset.state = "open";
   el.setAttribute("aria-label", "Approval needed");
   const head = h("div", "approval-head");
-  const state = h("span", "approval-state small", "Needs your approval");
-  head.append(h("span", "approval-tool", String(event.toolName ?? "Tool")), state);
+  // An agent's questions: the card is a form to answer them, Answer and Skip (questions.js, D0039).
+  const questions = questionsOf(event.toolName, event.input);
+  const state = h("span", "approval-state small", questions ? "Needs your answer" : "Needs your approval");
+  head.append(h("span", "approval-tool", questions ? "Question" : String(event.toolName ?? "Tool")), state);
   el.append(head);
-  const view = approvalView(event.toolName, event.input);
+  const view = questions ? { path: "", text: "", full: "" } : approvalView(event.toolName, event.input);
   if (view.path) el.append(h("div", "approval-path mono", view.path));
   if (view.text) {
     const pre = h("pre", "approval-input well", view.text);
@@ -357,19 +360,27 @@ function approvalCard(event) {
   }
   if (typeof event.reason === "string" && event.reason) el.append(h("div", "approval-reason muted small", event.reason));
   const actions = h("div", "approval-actions");
-  const allow = h("button", "primary", "Allow");
-  const deny = h("button", "", "Deny");
+  const allow = h("button", "primary", questions ? "Answer" : "Allow");
+  const deny = h("button", "", questions ? "Skip" : "Deny");
+  const form = questions ? questionForm(questions, { onChange: () => (allow.disabled = !form.answers()), onSubmit: () => form.answers() && !allow.disabled && void answer("allow") }) : null;
+  if (form) {
+    el.append(form.el);
+    allow.disabled = true;
+  }
   const error = h("span", "approval-error muted small");
   error.setAttribute("role", "status");
   const buttons = [allow, deny];
   const answer = async (decision) => {
+    const answers = decision === "allow" && form ? form.answers() : null;
+    if (decision === "allow" && form && !answers) return;
     for (const b of buttons) b.disabled = true;
+    form?.setDisabled(true);
     error.textContent = "";
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(event.approvalId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision }),
+        body: JSON.stringify(answers ? { decision, answers } : { decision }),
       });
       if (res.status === 404) throw new Error("this approval is no longer open");
       if (!res.ok) throw new Error(await errorText(res));
@@ -377,6 +388,8 @@ function approvalCard(event) {
     } catch (e) {
       error.textContent = `Couldn't send: ${e instanceof TypeError ? "the runner is not reachable" : e.message}`;
       for (const b of buttons) b.disabled = false;
+      form?.setDisabled(false);
+      if (form) allow.disabled = !form.answers();
     }
   };
   allow.type = deny.type = "button";
@@ -384,17 +397,21 @@ function approvalCard(event) {
   deny.addEventListener("click", () => void answer("deny"));
   actions.append(allow, deny, error);
   el.append(actions);
-  approvals.set(event.approvalId, { el, actions, state });
+  approvals.set(event.approvalId, { el, actions, state, questions, form });
   add(el);
 }
 
-/** The card after its answer: what was decided, and no buttons. `decision` undefined: nobody answered. */
-function approvalDecided(card, decision) {
+/**
+ * The card after its answer: what was decided, and no buttons. `decision` undefined: nobody answered.
+ * A question card shows each question with the answer given, in the place of its form.
+ */
+function approvalDecided(card, decision, answers) {
   if (card.el.dataset.state !== "open") return;
   card.el.dataset.state = decision === "allow" || decision === "deny" ? decision : "unanswered";
   card.el.removeAttribute("aria-label");
-  card.state.textContent = decidedLabel(decision);
+  card.state.textContent = card.questions ? questionDecidedLabel(decision) : decidedLabel(decision);
   card.actions.remove();
+  if (card.form) card.form.el.replaceWith(answersList(card.questions, decision === "allow" ? answers : null));
   follow();
 }
 
@@ -428,7 +445,7 @@ function apply(event) {
       break;
     case "approval_resolved": {
       const card = approvals.get(event.approvalId);
-      if (card) approvalDecided(card, event.decision);
+      if (card) approvalDecided(card, event.decision, event.answers);
       break;
     }
     case "result":

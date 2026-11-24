@@ -96,7 +96,7 @@
       <p class="field-error small" data-error-for="theme" hidden></p>
     </section>
 
-    <!-- Shortcuts, Dock and Startup are the Windows shell's: off until it has sent its values once. -->
+    <!-- Shortcuts, Dock and Startup are the shell's: off until it has sent its values once. -->
     <section class="section" aria-labelledby="h-shortcuts">
       <h2 id="h-shortcuts" class="label">Shortcuts</h2>
       <div class="card glass">
@@ -116,7 +116,7 @@
           <button class="shortcut quiet" type="button" data-shortcut="snipHotkey" data-field="shell.snipHotkey" aria-labelledby="snip-name snip-keys" aria-describedby="shortcut-help"><span class="keycaps" id="snip-keys"></span></button>
         </div>
         <p class="field-error small" data-error-for="shell.snipHotkey" hidden></p>
-        <p id="shortcut-help" class="card-note muted small">Click one and press the new keys; Esc keeps the old ones. The Windows shell applies them as soon as they're saved.</p>
+        <p id="shortcut-help" class="card-note muted small">Click one and press the new keys; Esc keeps the old ones. They work as soon as they're saved.</p>
       </div>
     </section>
 
@@ -140,14 +140,14 @@
         <label class="setting">
           <span class="setting-text">
             <span class="strong">Start at login</span>
-            <span class="muted small">The tray icon and the shortcuts are there when Windows starts.</span>
+            <span class="muted small">The tray icon and the shortcuts are there when you log in.</span>
           </span>
           <input class="switch" type="checkbox" role="switch" data-switch="startOnLogin" data-field="shell.startOnLogin">
         </label>
         <p class="field-error small" data-error-for="shell.startOnLogin" hidden></p>
       </div>
       <p class="field-error small" data-error-for="shell" hidden></p>
-      <p id="shell-missing" class="note muted small" hidden>The Windows shell hasn't connected yet. Start it once and its shortcuts, dock and startup settings appear here.</p>
+      <p id="shell-missing" class="note muted small" hidden>The desktop app hasn't connected yet. Start it once and its shortcuts, dock and startup settings appear here.</p>
     </section>
 
     <section class="section" aria-labelledby="h-about">

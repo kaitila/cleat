@@ -1,6 +1,6 @@
 # D0036: The open dock has the keyboard, hotkeys switch session and workspace, and it reopens on the last session
 
-Date: 2026-11-22. Status: active. Task: T-0002 (this machine's foreman board). Changes [D0008](D0008-dock.md) (the focus, what holds the dock open, the session it opens on) and builds on [D0032](D0032-calmer-dock-panel.md).
+Date: 2026-11-22. Status: active; its hotkeys are replaced by [D0040](D0040-dock-switch-and-command-keys.md) (⌘K, ⌘1..9, no Alt+digit). Task: T-0002 (this machine's foreman board). Changes [D0008](D0008-dock.md) (the focus, what holds the dock open, the session it opens on) and builds on [D0032](D0032-calmer-dock-panel.md).
 
 ## Context
 The owner, on 2026-11-22: "when I open the notch from the top, I could easily start typing there without needing to click on the field. also add hotkeys to easily switch the workspace / session from the top. also make it remember the selected session between opens / closes". And, the same day, with a half-typed reply in the open dock: "the notch doesnt close". A draft held the dock open, and nothing the person did in another app reached it: not Esc, not a press beside it.

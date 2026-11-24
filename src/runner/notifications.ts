@@ -24,6 +24,9 @@ export function bodyOf(text: string): string {
 export function toolSummary(toolName: string, input: unknown): string {
   const fields = (typeof input === "object" && input !== null && !Array.isArray(input) ? input : {}) as Record<string, unknown>;
   if (toolName === "Bash" && typeof fields.command === "string") return oneLine(fields.command);
+  // An agent's questions: the first one's text.
+  const first = toolName === "AskUserQuestion" && Array.isArray(fields.questions) ? (fields.questions[0] as { question?: unknown } | undefined)?.question : undefined;
+  if (typeof first === "string") return oneLine(first);
   for (const key of ["file_path", "path", "notebook_path"]) {
     const value = fields[key];
     if (typeof value === "string" && value) return value;

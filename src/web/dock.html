@@ -28,21 +28,32 @@
     </div>
 
     <section id="panel" class="panel layer" aria-label="Sessions" hidden>
+      <!-- The head: the session shown, which is also the switch to the others; the other sessions at
+           work, a dot each; what applies to the one shown now; its "…"; and New task. The switch opens
+           under it only when asked for (a click, or ⌘K). -->
       <header class="panel-head">
-        <select id="workspace" class="select quiet small workspace" aria-label="Workspace">
-          <button><selectedcontent></selectedcontent></button>
-          <option value="">All workspaces</option>
-        </select>
+        <button id="switcher" class="switcher quiet" type="button" aria-expanded="false" aria-controls="sessions-list" title="Switch session (⌘K)">
+          <span id="switcher-dot" class="dot"></span>
+          <span id="title" class="switcher-title"></span>
+          <svg class="chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
+        </button>
+        <span id="live" class="live" role="group" aria-label="Other sessions at work" hidden></span>
         <span id="connection" class="connection muted small" role="status" hidden>reconnecting</span>
+        <button id="more" class="more quiet small" type="button" aria-label="More" aria-haspopup="menu" title="More">…</button>
         <a class="button quiet small new-task" href="/prompt" target="_blank" rel="noopener">New task</a>
       </header>
-      <ul id="sessions" class="sessions"></ul>
+      <div id="sessions-list" class="sessions-list" hidden>
+        <div class="sessions-top">
+          <input id="find" class="input find small" type="search" placeholder="Find a session" aria-label="Find a session by title or workspace" aria-controls="sessions" autocomplete="off" spellcheck="false">
+          <select id="workspace" class="select quiet small workspace" aria-label="Workspace">
+            <button><selectedcontent></selectedcontent></button>
+            <option value="">All workspaces</option>
+          </select>
+        </div>
+        <ul id="sessions" class="sessions"></ul>
+      </div>
       <p id="sessions-empty" class="empty muted small" hidden>No sessions yet. Start one with New task.</p>
       <div id="session" class="session" hidden>
-        <div class="session-head">
-          <h1 id="title" class="session-title strong"></h1>
-          <button id="more" class="more quiet small" type="button" aria-label="More" aria-haspopup="menu" title="More">…</button>
-        </div>
         <div id="scroller" class="scroller">
           <div id="stream" class="stream" role="log" aria-label="Session"></div>
         </div>

@@ -20,4 +20,4 @@ Date: 2026-11-13. Status: active.
 ## Not done here
 - "Always allow" and editing a call's input before allowing it.
 - A toast when an approval opens: notifications are T-0012.
-- `AskUserQuestion` reaches `canUseTool` like any tool and gets the same card; answering its questions in the chat view is not built.
+- `AskUserQuestion` reaches `canUseTool` like any tool and gets the same card; answering its questions in the chat view is not built. (Built since: [D0039](D0039-answering-agent-questions.md).)
