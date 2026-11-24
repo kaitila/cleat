@@ -1,7 +1,8 @@
 // The rename from intuition to holm (D0043): the one-time moves of the folders, the login items and the
 // storage keys, the old environment variables, and the sessions stored under the old source. Temp folders only.
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { CLI, link, unlink } from "../src/cli/link";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { adoptLegacyEnv, moveFolder, storedSource } from "../src/shared/legacy";
@@ -210,6 +211,20 @@ describe("the installed shell", () => {
     await migrateShell({ now, userData, platform: withAlive("linux", () => false), log: () => {}, home: "/nowhere", env, stopOld: async () => {} });
     expect(readFileSync(login.now, "utf8")).toBe("mine");
     expect(existsSync(login.old)).toBe(false);
+  });
+});
+
+describe("the command's link", () => {
+  test("link replaces an intuition link to this checkout with holm; one to elsewhere is left", () => {
+    const dir = temp();
+    symlinkSync(CLI, join(dir, "intuition"));
+    expect(link(dir, { PATH: "" }, () => {})).toBe(0);
+    expect(existsSync(join(dir, "intuition"))).toBe(false);
+    expect(realpathSync(join(dir, "holm"))).toBe(realpathSync(CLI));
+    const other = temp();
+    symlinkSync(join(other, "cli.ts"), join(other, "intuition"));
+    expect(unlink(other, () => {})).toBe(0);
+    expect(lstatSync(join(other, "intuition")).isSymbolicLink()).toBe(true);
   });
 });
 
