@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
-import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_SIZES, DOCK_CHAT_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, type Size, takesMouse, watchMs } from "./dock";
+import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_SIZES, DOCK_CHAT_CHANNEL, DOCK_CHAT_KEY_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, type Size, takesMouse, watchMs } from "./dock";
 import { centred, markBitmap, tileBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
@@ -392,6 +392,27 @@ function chatInDock(sessionId?: string): boolean {
   if (args.selfTest) chatsInDock.push(sessionId ?? "");
   dock.webContents.send(DOCK_CHAT_CHANNEL, sessionId ?? null);
   return true;
+}
+
+/** The sessions-less presses of the chat's hotkey the self-test saw go to the dock. */
+let chatKeysToDock = 0;
+
+/**
+ * The chat's hotkey (D0046): the dock grows into the chat, or, showing it already, puts it away (the
+ * page decides, it knows its state). With no dock on the screen, the chat window opens as the tray's
+ * "Open chat" does, and closes when it is pressed while that window has the keyboard.
+ */
+function chatKey(): void {
+  if (prefs.dock && dockLoaded && dock && !dock.isDestroyed()) {
+    if (args.selfTest) chatKeysToDock++;
+    dock.webContents.send(DOCK_CHAT_KEY_CHANNEL);
+    return;
+  }
+  if (chat && !chat.isDestroyed() && chat.isVisible() && chat.isFocused()) {
+    chat.close();
+    return;
+  }
+  void openChat();
 }
 
 /**
@@ -1243,8 +1264,9 @@ const settingsFile = () => join(app.getPath("userData"), SETTINGS_FILE);
 /** The hotkeys as registered now. Null when none is (not yet, or the first one failed). */
 let activeHotkey: string | null = null;
 let activeSnipHotkey: string | null = null;
+let activeChatHotkey: string | null = null;
 /** The last hotkey of each that could not be registered and was said: said once, not at every settings message. */
-const hotkeySaid: Record<"hotkey" | "snip hotkey", string | null> = { hotkey: null, "snip hotkey": null };
+const hotkeySaid: Record<"hotkey" | "snip hotkey" | "chat hotkey", string | null> = { hotkey: null, "snip hotkey": null, "chat hotkey": null };
 
 /**
  * A hotkey's press, except while the Settings window has the keyboard: there the person records
@@ -1257,14 +1279,14 @@ function unlessSettings(press: () => void): () => void {
   };
 }
 
-/** Registers the two hotkeys of `prefs`. A change moves the shortcut; one that cannot be registered keeps the old one working, and a notification names it. */
+/** Registers the three hotkeys of `prefs`. A change moves the shortcut; one that cannot be registered keeps the old one working, and a notification names it. */
 function registerHotkeys(): void {
   const ops = (press: () => void) => ({
     register: (accelerator: string) => globalShortcut.register(accelerator, press),
     unregister: (accelerator: string) => globalShortcut.unregister(accelerator),
     isRegistered: (accelerator: string) => globalShortcut.isRegistered(accelerator),
   });
-  const one = (which: "hotkey" | "snip hotkey", current: string | null, wanted: string, press: () => void): string | null => {
+  const one = (which: "hotkey" | "snip hotkey" | "chat hotkey", current: string | null, wanted: string, press: () => void): string | null => {
     const { active, failed } = swapHotkey(current, wanted, ops(press));
     if (!failed) hotkeySaid[which] = null;
     else if (hotkeySaid[which] !== failed) {
@@ -1274,13 +1296,15 @@ function registerHotkeys(): void {
     }
     return active;
   };
-  // One takes the other's key as that one moves away (the two traded, say): both are let go first, or each would find the other holding it.
-  if (releaseBoth({ hotkey: activeHotkey, snipHotkey: activeSnipHotkey }, prefs)) {
-    for (const held of [activeHotkey, activeSnipHotkey]) if (held) globalShortcut.unregister(held);
-    activeHotkey = activeSnipHotkey = null;
+  // One takes another's key as that one moves away (two traded, say): all are let go first, or each would find the other holding it.
+  const wanted = { hotkey: prefs.hotkey, snipHotkey: prefs.snipHotkey, chatHotkey: prefs.chatHotkey };
+  if (releaseBoth({ hotkey: activeHotkey, snipHotkey: activeSnipHotkey, chatHotkey: activeChatHotkey }, wanted)) {
+    for (const held of [activeHotkey, activeSnipHotkey, activeChatHotkey]) if (held) globalShortcut.unregister(held);
+    activeHotkey = activeSnipHotkey = activeChatHotkey = null;
   }
   activeHotkey = one("hotkey", activeHotkey, prefs.hotkey, unlessSettings(newTask));
   activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, unlessSettings(() => void snip()));
+  activeChatHotkey = one("chat hotkey", activeChatHotkey, prefs.chatHotkey, unlessSettings(chatKey));
 }
 
 /** Takes the shell's part of the settings: the hotkeys, the dock, start on login, and the tray drawn again. */
@@ -1397,6 +1421,7 @@ function currentReport(): ShellReport {
     startOnLogin: login,
     hotkey: { wanted: prefs.hotkey, active: activeHotkey },
     snipHotkey: { wanted: prefs.snipHotkey, active: activeSnipHotkey },
+    chatHotkey: { wanted: prefs.chatHotkey, active: activeChatHotkey },
     dockTransparent: DOCK_TRANSPARENT,
     screen: OS === "macos" ? systemPreferences.getMediaAccessStatus("screen") : "granted",
   });
@@ -1496,7 +1521,7 @@ async function selfTest(): Promise<SelfTestResult> {
     dockIgnoresMouseBeforeLoad: false, dockIdleBounds: null, dockIdleFocusable: null, dockIdleFocused: null, dockMouseOnIdleIsland: false,
     dockMouseAwayIgnored: false, dockMouseBelowPillIgnored: false, dockPeekBounds: null, dockPeekFocusable: null, dockMouseOnPeekIsland: false,
     dockOpenBounds: null, dockOpenFocusable: null, dockMouseOnOpenIsland: false, dockOtherValueIgnored: false,
-    dockBackBounds: null, dockBackFocusable: null, dockForeignOriginIgnored: false, dockChatBounds: null, dockChatFocusable: null, dockMouseOnChatIsland: false, dockChatSession: null, dockChatNoWindow: false, dockOpenedPromptUrl: null,
+    dockBackBounds: null, dockBackFocusable: null, dockForeignOriginIgnored: false, dockChatBounds: null, dockChatFocusable: null, dockMouseOnChatIsland: false, dockChatSession: null, dockChatNoWindow: false, dockChatKeyToDock: false, dockOpenedPromptUrl: null,
     dockOtherWindowRefused: false, dockIgnoresMouseUnreported: false, dockIgnoresMouseAfterCrash: false,
     dockHiddenWithoutRunner: false, dockShownAgain: false,
     snipHotkeyRegistered: false, snipDisplays: null, snipOverlayBounds: null, snipOverlaysShown: false, snipUrl: null, snipMs: null, snipPhases: null,
@@ -1693,6 +1718,9 @@ async function selfTest(): Promise<SelfTestResult> {
     for (let i = 0; i < 40 && chatsInDock.length === 0; i++) await sleep(100);
     r.dockChatSession = chatsInDock[0] ?? null;
     r.dockChatNoWindow = chat === null;
+    // The chat's hotkey (D0046), pressed: it goes to the dock's page, and no window opens.
+    chatKey();
+    r.dockChatKeyToDock = chatKeysToDock === 1 && chat === null;
     await run(`window.open(${JSON.stringify(promptUrl(real))}); 0`);
     for (let i = 0; i < 40 && !popup?.isVisible(); i++) await sleep(100);
     r.dockOpenedPromptUrl = popup?.webContents.getURL() ?? null;
@@ -1824,7 +1852,8 @@ async function selfTest(): Promise<SelfTestResult> {
 
     // A file as an older shell wrote it, with the self-test's own hotkeys and the dock off. The stub runner has no shell settings yet.
     const file = settingsFile();
-    writeFileSync(file, JSON.stringify({ runnerUrl: settings.runnerUrl, hotkey: SELF_TEST_HOTKEY, snipHotkey: SELF_TEST_SNIP_HOTKEY, dock: false }, null, 2));
+    // The chat's hotkey too, though no older shell wrote one: the self-test must not register the default a running shell holds.
+    writeFileSync(file, JSON.stringify({ runnerUrl: settings.runnerUrl, hotkey: SELF_TEST_HOTKEY, snipHotkey: SELF_TEST_SNIP_HOTKEY, chatHotkey: SELF_TEST_PREFS.chatHotkey, dock: false }, null, 2));
     settings = { ...loadSettings(file), runnerUrl: settings.runnerUrl };
     prefs = { ...SHELL_DEFAULTS, ...settings.legacy, startOnLogin: false };
     // As at the shell's start.
@@ -1833,7 +1862,8 @@ async function selfTest(): Promise<SelfTestResult> {
     // The migration: the file's values go to the runner, come back as its settings, and the file keeps its two keys.
     await until(() => remote?.shell != null && !hasLegacy(settings));
     r.settingsFileKeys = existsSync(file) ? Object.keys(JSON.parse(readFileSync(file, "utf8")) as object).sort() : null;
-    r.settingsHotkeyRegistered = activeHotkey === SELF_TEST_HOTKEY && globalShortcut.isRegistered(SELF_TEST_HOTKEY) && globalShortcut.isRegistered(SELF_TEST_SNIP_HOTKEY);
+    r.settingsHotkeyRegistered = activeHotkey === SELF_TEST_HOTKEY && globalShortcut.isRegistered(SELF_TEST_HOTKEY) && globalShortcut.isRegistered(SELF_TEST_SNIP_HOTKEY)
+      && activeChatHotkey === SELF_TEST_PREFS.chatHotkey && globalShortcut.isRegistered(SELF_TEST_PREFS.chatHotkey);
 
     // A new hotkey: registered without a restart, and the old one released.
     await asPage((s) => withShell(s, { ...shellPart(s), hotkey: SELF_TEST_PREFS.changed }));

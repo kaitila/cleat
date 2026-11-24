@@ -54,8 +54,10 @@ export function parseSettings(text: string): Settings {
   const legacy: LegacyPrefs = {};
   const hotkey = key(o.hotkey);
   const snipHotkey = key(o.snipHotkey);
+  const chatHotkey = key(o.chatHotkey);
   if (hotkey) legacy.hotkey = hotkey;
   if (snipHotkey) legacy.snipHotkey = snipHotkey;
+  if (chatHotkey) legacy.chatHotkey = chatHotkey;
   if (typeof o.dock === "boolean") legacy.dock = o.dock;
   const wsl = parseWsl(o.wsl);
   const runner = parseLocalRunner(o.runner);

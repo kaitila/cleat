@@ -229,7 +229,7 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   const notch: Notch | null = r.dockNotch ?? null;
   need(notch === null || (OS_OF[layout] === "macos" && notch.width >= 40 && notch.height >= 16), `the shell measured a notch ${JSON.stringify(r.dockNotch)} on ${layout}`);
   need(r.dockVisible, "the dock was not shown");
-  need(r.dockBridge === "object:setState,onChat:undefined:undefined", `the page sees more or less than intuitionDock.setState and onChat: ${r.dockBridge}`);
+  need(r.dockBridge === "object:setState,onChat,onChatKey:undefined:undefined", `the page sees more or less than intuitionDock.setState, onChat and onChatKey: ${r.dockBridge}`);
   // The same pure function the shell uses, run here on the display the shell reported.
   const display = isArea(r.primaryDisplay) && r.primaryDisplay.width > 0 && r.primaryDisplay.height > 0 ? r.primaryDisplay : null;
   need(display, `the primary display's bounds are ${JSON.stringify(r.primaryDisplay)}`);
@@ -274,6 +274,7 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   need(r.dockIgnoresMouseUnreported, "a page that loaded and reported no state did not leave the window ignoring the mouse");
   need(r.dockIgnoresMouseAfterCrash, "after the page's process crashed the window did not hide and ignore the mouse");
   need(r.dockForeignOriginIgnored, "setState from a page on another origin changed the dock");
+  need(r.dockChatKeyToDock, "the chat's hotkey with the dock on did not go to the dock's page, or opened a chat window");
   need(r.dockChatSession === STUB_SESSION && r.dockChatNoWindow, `the dock's link to a session grew the dock into the chat on ${JSON.stringify(r.dockChatSession)}${r.dockChatNoWindow ? "" : " and opened a chat window"}, not on ${STUB_SESSION} with no window`);
   need(r.dockOpenedPromptUrl === `${runnerUrl}/prompt`, `the dock's link to /prompt opened ${r.dockOpenedPromptUrl}, not the pop-up on ${runnerUrl}/prompt`);
   need(r.dockOtherWindowRefused, "another new window from the dock was not refused");
@@ -281,7 +282,7 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   need(r.dockShownAgain, "the dock did not load and show again when the runner answered");
 
   // Settings. The migration: the old file's values, and start on login as it was read, sent once, first.
-  const migrated = { hotkey: SELF_TEST_PREFS.hotkey, snipHotkey: SELF_TEST_PREFS.snipHotkey, dock: false, startOnLogin: r.openAtLogin };
+  const migrated = { hotkey: SELF_TEST_PREFS.hotkey, snipHotkey: SELF_TEST_PREFS.snipHotkey, chatHotkey: SELF_TEST_PREFS.chatHotkey, dock: false, startOnLogin: r.openAtLogin };
   need(JSON.stringify(puts[0]?.shell) === JSON.stringify(migrated), `the shell's first PUT /api/settings carried ${JSON.stringify(puts[0]?.shell)}, not the old file's values ${JSON.stringify(migrated)}`);
   need(puts.filter((p) => p.shell && p.shell.hotkey === SELF_TEST_PREFS.hotkey && !p.shell.dock).length === 1, "the migration was sent more than once, or not at all");
   need(JSON.stringify(r.settingsFileKeys) === JSON.stringify(["runnerUrl"]), `after the migration the shell's file has ${JSON.stringify(r.settingsFileKeys)}, not runnerUrl alone`);

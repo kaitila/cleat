@@ -7,9 +7,13 @@
 // file), ShellPrefs is the shell's part of it.
 
 import { defaultHotkeys, shellOs } from "./os";
-import type { PermissionMode, Settings as RunnerSettings, ShellSettings as ShellPrefs, Theme } from "../../src/shared/protocol";
+import type { PermissionMode, Settings, ShellSettings, Theme } from "../../src/shared/protocol";
 
-export type { PermissionMode, RunnerSettings, ShellPrefs, Theme };
+/** The shell's part as the shell holds it: every hotkey there (a file from before the chat's hotkey gets its default). */
+export type ShellPrefs = Required<ShellSettings>;
+/** The whole Settings, the shell's part as the shell holds it. */
+export type RunnerSettings = Omit<Settings, "shell"> & { shell: ShellPrefs | null };
+export type { PermissionMode, Theme };
 
 /** What the shell uses until the runner has said otherwise, and for anything its file never had: Command+Shift on a Mac, Control+Alt elsewhere. */
 export const SHELL_DEFAULTS: Omit<ShellPrefs, "startOnLogin"> = { ...defaultHotkeys(shellOs()), dock: true };
@@ -22,6 +26,7 @@ export const SHELL_DEFAULTS: Omit<ShellPrefs, "startOnLogin"> = { ...defaultHotk
 export const SELF_TEST_PREFS = {
   hotkey: "Control+Alt+Shift+F11",
   snipHotkey: "Control+Alt+Shift+F10",
+  chatHotkey: "Control+Alt+Shift+F9",
   changed: "Control+Alt+Shift+F12",
   invalid: "Control+Alt+Nope",
 } as const;
@@ -39,14 +44,18 @@ export const RECONNECT_MAX_MS = 15_000;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isMode = (v: unknown): v is PermissionMode => v === "auto" || v === "default";
 
-/** The shell's part, or null when it is not one. Hotkeys are trimmed; an empty one is not a hotkey. */
+/**
+ * The shell's part, or null when it is not one. Hotkeys are trimmed; an empty one is not a hotkey.
+ * The chat's hotkey may be missing (settings from before it, D0046): it is then the default.
+ */
 export function parseShellPrefs(v: unknown): ShellPrefs | null {
   if (!isObject(v)) return null;
   const key = (k: unknown) => (typeof k === "string" && k.trim() ? k.trim() : null);
   const hotkey = key(v.hotkey);
   const snipHotkey = key(v.snipHotkey);
-  if (!hotkey || !snipHotkey || typeof v.dock !== "boolean" || typeof v.startOnLogin !== "boolean") return null;
-  return { hotkey, snipHotkey, dock: v.dock, startOnLogin: v.startOnLogin };
+  const chatHotkey = v.chatHotkey === undefined ? SHELL_DEFAULTS.chatHotkey : key(v.chatHotkey);
+  if (!hotkey || !snipHotkey || !chatHotkey || typeof v.dock !== "boolean" || typeof v.startOnLogin !== "boolean") return null;
+  return { hotkey, snipHotkey, chatHotkey, dock: v.dock, startOnLogin: v.startOnLogin };
 }
 
 /** Settings as the runner sent them, or null when they are not (the shell then keeps what it has). */
@@ -102,6 +111,7 @@ export function migratedPrefs(local: Partial<Omit<ShellPrefs, "startOnLogin">>, 
   return {
     hotkey: local.hotkey ?? SHELL_DEFAULTS.hotkey,
     snipHotkey: local.snipHotkey ?? SHELL_DEFAULTS.snipHotkey,
+    chatHotkey: local.chatHotkey ?? SHELL_DEFAULTS.chatHotkey,
     dock: local.dock ?? SHELL_DEFAULTS.dock,
     startOnLogin,
   };
@@ -138,22 +148,26 @@ export function swapHotkey(
 }
 
 /**
- * True when one hotkey is to take the key the other holds now while that one moves to another: the
- * two traded, or one moved onto the other's old key. Both are then released before either registers.
- * A hotkey wanting the key the other keeps is not this: that one is taken, and fails.
+ * True when one hotkey is to take the key another holds now while that one moves to another: two
+ * traded, or one moved onto another's old key. All are then released before any registers.
+ * A hotkey wanting the key another keeps is not this: that one is taken, and fails.
  */
-export function releaseBoth(active: { hotkey: string | null; snipHotkey: string | null }, wanted: { hotkey: string; snipHotkey: string }): boolean {
-  const takes = (want: string, mine: string | null, other: string | null, otherWants: string) => want !== mine && want === other && otherWants !== other;
-  return takes(wanted.hotkey, active.hotkey, active.snipHotkey, wanted.snipHotkey) || takes(wanted.snipHotkey, active.snipHotkey, active.hotkey, wanted.hotkey);
+export function releaseBoth<K extends string>(active: Record<K, string | null>, wanted: Record<K, string>): boolean {
+  const keys = Object.keys(wanted) as K[];
+  return keys.some((mine) => {
+    const want = wanted[mine];
+    if (want === active[mine]) return false;
+    return keys.some((other) => other !== mine && active[other] === want && wanted[other] !== active[other]);
+  });
 }
 
 /** The notification for a hotkey that could not be registered: it names it, and says what still works. */
-export function hotkeyNotice(which: "hotkey" | "snip hotkey", failed: string, active: string | null, wayland = false): { title: string; body: string } {
+export function hotkeyNotice(which: "hotkey" | "snip hotkey" | "chat hotkey", failed: string, active: string | null, wayland = false): { title: string; body: string } {
   const still = active ? `${active} still works.` : `No ${which} works until another is chosen.`;
   // Under Wayland a shortcut can fail although nobody holds it: the tray has both actions.
-  const tray = wayland ? " Under Wayland global shortcuts may not register at all: the tray's New task and Snip do the same." : "";
+  const tray = wayland ? " Under Wayland global shortcuts may not register at all: the tray's New task, Snip and Open chat do the same." : "";
   return {
     title: `intuition: the ${which} could not be set`,
-    body: `${failed} could not be registered: another program holds it, the shell's other hotkey is the same, or it is not a valid shortcut. ${still} Choose another in Settings.${tray}`,
+    body: `${failed} could not be registered: another program holds it, another of the shell's hotkeys is the same, or it is not a valid shortcut. ${still} Choose another in Settings.${tray}`,
   };
 }

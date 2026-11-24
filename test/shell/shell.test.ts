@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, isSnipPage, matchSources, SELF_TEST_CROP, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PATH, SNIP_PRELOAD, snipUrl, toPixels } from "../../shell/src/snip";
-import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_CHAT_CHANNEL, dockWindow, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, type DockState, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
+import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_CHAT_CHANNEL, DOCK_CHAT_KEY_CHANNEL, dockWindow, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, type DockState, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
 import { centred, markBitmap, tileBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, sessionOf, settingsUrl, windowTarget } from "../../shell/src/origin";
@@ -33,7 +33,7 @@ describe("bundle", () => {
     expect(code.length).toBeLessThan(200_000);
   });
 
-  test("the dock's preload is its own small file beside it, and exposes setState and onChat and nothing else", async () => {
+  test("the dock's preload is its own small file beside it, and exposes setState, onChat and onChatKey and nothing else", async () => {
     const out = join(dir, "bundle-preload");
     await buildShell(out);
     expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, SNIP_PRELOAD, BUNDLE].sort());
@@ -48,10 +48,13 @@ describe("bundle", () => {
     const src = readFileSync(join(REPO, "shell", "src", "dock-preload.ts"), "utf8");
     expect(src.match(/exposeInMainWorld\(/g)).toHaveLength(1);
     expect(src).toContain('contextBridge.exposeInMainWorld("intuitionDock", {\n  setState: (state: unknown): void => {\n    ipcRenderer.send(DOCK_CHANNEL, state);\n  },\n');
-    // One way out of the page: a send on the dock's channel. One way in (D0042): the chat's channel,
-    // and what comes in is a session id or null, never the event or anything else the shell sent.
-    expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send", "ipcRenderer.on"]);
+    // One way out of the page: a send on the dock's channel. Two ways in: the chat's channel (D0042),
+    // and what comes in is a session id or null, never the event or anything else the shell sent; and
+    // the chat's hotkey (D0046), which hands the page nothing at all.
+    expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send", "ipcRenderer.on", "ipcRenderer.on"]);
     expect(code).toContain(DOCK_CHAT_CHANNEL);
+    expect(code).toContain(DOCK_CHAT_KEY_CHANNEL);
+    expect(src).toContain("ipcRenderer.on(DOCK_CHAT_KEY_CHANNEL, () => callback());");
     expect(src).toContain("ipcRenderer.on(DOCK_CHAT_CHANNEL, (_event, session: unknown) => {\n      callback(typeof session === \"string\" && session ? session : null);");
   });
 
@@ -205,17 +208,20 @@ describe("the shell's file", () => {
 });
 
 describe("settings from the runner", () => {
-  const shell = { hotkey: "Alt+F9", snipHotkey: "Alt+S", dock: false, startOnLogin: true };
+  const shell = { hotkey: "Alt+F9", snipHotkey: "Alt+S", chatHotkey: "Alt+J", dock: false, startOnLogin: true };
   const good: RunnerSettings = { theme: "dark", permissionMode: "auto", workspaces: [{ name: "a", path: "/a" }, { name: "b", path: "/b", permissionMode: "default" }], shell, port: 4777 };
 
   test("settings as the contract has them are taken; anything else is not", () => {
     expect(parseRunnerSettings(good)).toEqual(good);
     expect(parseRunnerSettings({ ...good, shell: null })).toEqual({ ...good, shell: null });
     expect(parseShellPrefs({ ...shell, hotkey: " Alt+F9 " })).toEqual(shell);
+    // Settings from before the chat's hotkey (D0046): its default.
+    const { chatHotkey: _, ...older } = shell;
+    expect(parseShellPrefs(older)).toEqual({ ...shell, chatHotkey: SHELL_DEFAULTS.chatHotkey });
     for (const bad of [
       null, [], "x", { ...good, theme: "blue" }, { ...good, permissionMode: "bypassPermissions" }, { ...good, port: "4777" }, { ...good, workspaces: {} },
       { ...good, workspaces: [{ name: "a" }] }, { ...good, workspaces: [{ name: "a", path: "/a", permissionMode: "acceptEdits" }] }, { ...good, shell: undefined },
-      { ...good, shell: { ...shell, hotkey: "" } }, { ...good, shell: { ...shell, snipHotkey: 7 } }, { ...good, shell: { ...shell, dock: "yes" } }, { ...good, shell: { ...shell, startOnLogin: undefined } },
+      { ...good, shell: { ...shell, hotkey: "" } }, { ...good, shell: { ...shell, snipHotkey: 7 } }, { ...good, shell: { ...shell, chatHotkey: " " } }, { ...good, shell: { ...shell, dock: "yes" } }, { ...good, shell: { ...shell, startOnLogin: undefined } },
     ]) {
       expect(`${JSON.stringify(bad)} ${parseRunnerSettings(bad)}`).toBe(`${JSON.stringify(bad)} null`);
     }
@@ -246,7 +252,7 @@ describe("settings from the runner", () => {
 
   test("the migration sends the old file's values, the defaults for the rest, and start on login as Windows has it", () => {
     expect(migratedPrefs({}, false)).toEqual({ ...SHELL_DEFAULTS, startOnLogin: false });
-    expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: SHELL_DEFAULTS.snipHotkey, dock: false, startOnLogin: true });
+    expect(migratedPrefs({ hotkey: "Alt+F9", dock: false }, true)).toEqual({ hotkey: "Alt+F9", snipHotkey: SHELL_DEFAULTS.snipHotkey, chatHotkey: SHELL_DEFAULTS.chatHotkey, dock: false, startOnLogin: true });
     // Control+Alt on Windows and Linux, Command+Shift on a Mac (shell/src/os.ts).
     expect(SHELL_DEFAULTS).toEqual({ ...defaultHotkeys(shellOs()), dock: true });
   });
@@ -907,7 +913,7 @@ describe("self-test runner", () => {
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
     noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
     // On 2560x1440 the chat is 1180x860 (chatSize), and the window is as large as that.
-    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock?chat=1180x860", dockNotch: null, dockVisible: true, dockBridge: "object:setState,onChat:undefined:undefined",
+    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock?chat=1180x860", dockNotch: null, dockVisible: true, dockBridge: "object:setState,onChat,onChatKey:undefined:undefined",
     primaryDisplay: display, dockIgnoresMouseBeforeLoad: true, dockIdleBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockIdleFocusable: false, dockIdleFocused: false,
     dockMouseOnIdleIsland: true, dockMouseAwayIgnored: true, dockMouseBelowPillIgnored: true,
     dockPeekBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockPeekFocusable: false, dockMouseOnPeekIsland: true,
@@ -915,7 +921,7 @@ describe("self-test runner", () => {
     dockChatBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockChatFocusable: true, dockMouseOnChatIsland: true,
     dockBackBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockBackFocusable: false, dockForeignOriginIgnored: true,
     dockIgnoresMouseUnreported: true, dockIgnoresMouseAfterCrash: true,
-    dockChatSession: STUB_SESSION, dockChatNoWindow: true, dockOpenedPromptUrl: "http://127.0.0.1:5000/prompt",
+    dockChatSession: STUB_SESSION, dockChatNoWindow: true, dockChatKeyToDock: true, dockOpenedPromptUrl: "http://127.0.0.1:5000/prompt",
     dockOtherWindowRefused: true, dockHiddenWithoutRunner: true, dockShownAgain: true,
     snipHotkeyRegistered: true, snipDisplays: [{ bounds: display, scaleFactor: 1.5 }, { bounds: { x: 2560, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }],
     snipOverlayBounds: [display, { x: 2560, y: 0, width: 1920, height: 1080 }], snipOverlaysShown: true, snipUrl: "http://127.0.0.1:5000/assets/snip.html",
@@ -935,7 +941,7 @@ describe("self-test runner", () => {
   };
   const posts = [{ text: "intuition self-test 1" }, { imagePath }];
   const base = stubSettings(5000);
-  const migration = (startOnLogin: boolean) => withShell(base, { hotkey: SELF_TEST_PREFS.hotkey, snipHotkey: SELF_TEST_PREFS.snipHotkey, dock: false, startOnLogin });
+  const migration = (startOnLogin: boolean) => withShell(base, { hotkey: SELF_TEST_PREFS.hotkey, snipHotkey: SELF_TEST_PREFS.snipHotkey, chatHotkey: SELF_TEST_PREFS.chatHotkey, dock: false, startOnLogin });
   const puts = (startOnLogin = false) => {
     const m = migration(startOnLogin);
     const changed = withShell(m, { ...m.shell!, hotkey: SELF_TEST_PREFS.changed });

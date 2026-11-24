@@ -22,16 +22,19 @@ export interface ReportInput {
   startOnLogin: boolean | null;
   hotkey: { wanted: string; active: string | null };
   snipHotkey: { wanted: string; active: string | null };
+  chatHotkey: { wanted: string; active: string | null };
   dockTransparent: boolean;
   screen: ScreenAccess;
 }
+
+const held = (k: { wanted: string; active: string | null }) => k.active !== null && k.active === k.wanted;
 
 /** The report: a hotkey counts as registered when the one held is the one the settings want. */
 export function shellReport(input: ReportInput): ShellReport {
   const report: ShellReport = {
     os: input.os,
     startOnLogin: input.startOnLogin,
-    hotkeys: { hotkey: input.hotkey.active !== null && input.hotkey.active === input.hotkey.wanted, snipHotkey: input.snipHotkey.active !== null && input.snipHotkey.active === input.snipHotkey.wanted },
+    hotkeys: { hotkey: held(input.hotkey), snipHotkey: held(input.snipHotkey), chatHotkey: held(input.chatHotkey) },
     dockTransparent: input.dockTransparent,
   };
   if (input.os === "macos") report.screenRecording = input.screen;

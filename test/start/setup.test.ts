@@ -283,12 +283,14 @@ describe("setup", () => {
       "Control+K", // new task
       "Control+K", // refused: the same as new task
       "Alt+Shift+S",
+      "Alt+Shift+S", // refused: the same as snip
+      "Alt+Shift+J",
       "default",
       false,
     ]);
     const r = await run({}, ask, { f });
     expect(r.code).toBe(0);
-    expect(ask.refused).toEqual([`no folder at ${join(f.home, "nowhere")}`, "that folder is already picked", "a name, as the pop-up shows it", "alpha is taken", "the new task hotkey is already this"]);
+    expect(ask.refused).toEqual([`no folder at ${join(f.home, "nowhere")}`, "that folder is already picked", "a name, as the pop-up shows it", "alpha is taken", "the new task hotkey is already this", "the snip hotkey is already this"]);
     expect(config(f.env)).toMatchObject({
       permissionMode: "default",
       workspaces: [
@@ -296,7 +298,7 @@ describe("setup", () => {
         { name: "alpha", path: join(f.home, "alpha") },
         { name: "my-site", path: join(f.home, "elsewhere", "site") },
       ],
-      shell: { hotkey: "Control+K", snipHotkey: "Alt+Shift+S", startOnLogin: false },
+      shell: { hotkey: "Control+K", snipHotkey: "Alt+Shift+S", chatHotkey: "Alt+Shift+J", startOnLogin: false },
     });
     expect(r.calls).toEqual(["link default", "installShell", "startRunner", "startShell prompt", "login off"]);
     expect(r.text).toContain("gamma  ~/projects/gamma  (default)");

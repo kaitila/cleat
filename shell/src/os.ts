@@ -13,9 +13,15 @@ export function shellOs(platform: string = process.platform): ShellOs {
   return platform === "win32" ? "windows" : platform === "darwin" ? "macos" : "linux";
 }
 
-/** The two hotkeys' defaults: Command on a Mac where Windows and Linux use Control. */
-export function defaultHotkeys(os: ShellOs): { hotkey: string; snipHotkey: string } {
-  return os === "macos" ? { hotkey: "Command+Shift+Space", snipHotkey: "Command+Shift+S" } : { hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S" };
+/**
+ * The three hotkeys' defaults: Command+Shift on a Mac where Windows and Linux use Control+Alt. The
+ * chat's is J (D0046): beside ⌘K, the pages' own switch, and taken by nothing system-wide on any of
+ * the three. src/web/shortcuts.js has the same for the pages, and a test holds the two together.
+ */
+export function defaultHotkeys(os: ShellOs): { hotkey: string; snipHotkey: string; chatHotkey: string } {
+  return os === "macos"
+    ? { hotkey: "Command+Shift+Space", snipHotkey: "Command+Shift+S", chatHotkey: "Command+Shift+J" }
+    : { hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", chatHotkey: "Control+Alt+J" };
 }
 
 // --- The runner ---

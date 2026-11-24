@@ -24,7 +24,7 @@ export const SettingsSchema = z.object({
   agent: Agent.default(DEFAULT_AGENT),
   workspaces: z.array(z.object({ name: z.string().min(1), path: z.string().min(1), permissionMode: Mode.optional(), agent: Agent.nullish().transform((a) => a ?? undefined) })),
   shell: z
-    .object({ hotkey: z.string().min(1), snipHotkey: z.string().min(1), dock: z.boolean(), startOnLogin: z.boolean() })
+    .object({ hotkey: z.string().min(1), snipHotkey: z.string().min(1), chatHotkey: z.string().min(1).optional(), dock: z.boolean(), startOnLogin: z.boolean() })
     .nullable()
     .default(null),
 });

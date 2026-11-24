@@ -132,9 +132,11 @@ export type Theme = "system" | "light" | "dark";
 
 /** The Windows shell's own settings. The runner only stores them; the shell applies them. */
 export interface ShellSettings {
-  /** Electron accelerators, e.g. "Alt+Space". */
+  /** Electron accelerators, e.g. "Alt+Space": New task, Snip, and the chat in the notch (D0046). No two the same. */
   hotkey: string;
   snipHotkey: string;
+  /** Absent from settings written before it: the shell and the pages then use its default (⌘⇧J on a Mac, Ctrl+Alt+J elsewhere). */
+  chatHotkey?: string;
   dock: boolean;
   startOnLogin: boolean;
 }
@@ -170,8 +172,8 @@ export interface ShellReport {
   os: "windows" | "macos" | "linux";
   /** Whether start on login is set now (Electron's login item, the launch agent or the autostart file); null when it could not be read. */
   startOnLogin: boolean | null;
-  /** Whether each of the two hotkeys of the settings is registered now. False: another program holds it, or the desktop refuses global shortcuts. */
-  hotkeys: { hotkey: boolean; snipHotkey: boolean };
+  /** Whether each hotkey of the settings is registered now. False: another program holds it, or the desktop refuses global shortcuts. `chatHotkey` is absent from a shell from before it. */
+  hotkeys: { hotkey: boolean; snipHotkey: boolean; chatHotkey?: boolean };
   /** False when the dock is an opaque window the island's size (Linux on X11 without a compositor). */
   dockTransparent: boolean;
   /** macOS only: whether the snip may capture the screens. Absent elsewhere. */
