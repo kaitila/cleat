@@ -6,7 +6,7 @@ import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, isSnipPage, matchSources, SELF_TEST_CROP, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PATH, SNIP_PRELOAD, snipUrl, toPixels } from "../../shell/src/snip";
 import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, type DockState, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
-import { centred, iconBitmap } from "../../shell/src/geometry";
+import { centred, markBitmap, tileBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, sessionOf, settingsUrl, windowTarget } from "../../shell/src/origin";
 import { hotkeyNotice, migratedPrefs, parseRunnerSettings, releaseBoth, parseShellPrefs, RECONNECT_MAX_MS, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_WINDOW, SHELL_DEFAULTS, settingsMessage, socketUrl, swapHotkey, withShell } from "../../shell/src/prefs";
@@ -486,11 +486,39 @@ describe("geometry and arguments", () => {
     expect(centred({ x: -1280, y: 100, width: 1280, height: 985 }, 560, 380)).toEqual({ x: -920, y: 403 });
   });
 
-  test("the icon is a disc: opaque in the middle, clear in the corners", () => {
-    const px = iconBitmap(32);
-    expect(px).toHaveLength(32 * 32 * 4);
-    expect(px[(16 * 32 + 16) * 4 + 3]).toBe(255);
-    expect(px[3]).toBe(0);
+  test("the tray's mark is the Ledge: a dot up and to the right, a ledge under it, clear around them", () => {
+    for (const size of [16, 18, 22, 32, 36, 44]) {
+      const px = markBitmap(size);
+      const k = size / 24;
+      const alpha = (x: number, y: number) => px[(Math.floor(y) * size + Math.floor(x)) * 4 + 3]!;
+      expect(px).toHaveLength(size * size * 4);
+      expect(alpha(16.5 * k, 10 * k)).toBe(255); // the dot's centre
+      expect(alpha(12 * k, 18.5 * k)).toBe(255); // the ledge's middle
+      expect(alpha(6 * k, 10 * k)).toBe(0); // left of the dot, over the ledge: empty
+      expect(alpha(0, 0)).toBe(0);
+      expect(alpha(size - 1, size - 1)).toBe(0);
+      // Black only, premultiplied: no colour in it, whatever the size.
+      for (let i = 0; i < px.length; i += 4) expect(px[i]! + px[i + 1]! + px[i + 2]!).toBe(0);
+    }
+  });
+
+  test("the ledge's top and bottom edges sit on whole pixels: no half-covered row across the bar", () => {
+    for (const size of [16, 18, 22, 32, 36, 44]) {
+      const px = markBitmap(size);
+      const column = Math.floor(12 * (size / 24));
+      const rows = Array.from({ length: size }, (_, y) => px[(y * size + column) * 4 + 3]!).filter((_, y) => y > 14 * (size / 24));
+      expect(rows.every((a) => a === 0 || a === 255)).toBe(true);
+    }
+  });
+
+  test("the app icon is the mark in white on a black rounded tile, with clear corners", () => {
+    const size = 32;
+    const px = tileBitmap(size);
+    const at = (x: number, y: number) => [...px.subarray((y * size + x) * 4, (y * size + x) * 4 + 4)];
+    expect(at(0, 0)[3]).toBe(0);
+    expect(at(2, 16)).toEqual([0, 0, 0, 255]); // the tile
+    expect(at(Math.floor(2.4 * 32 / 24 + 16.5 * 0.8 * 32 / 24), Math.floor(1.6 * 32 / 24 + 10 * 0.8 * 32 / 24))).toEqual([255, 255, 255, 255]); // the dot
+    for (let i = 0; i < px.length; i += 4) expect(new Set([px[i], px[i + 1], px[i + 2]]).size).toBe(1); // grey only
   });
 
   test("the command line", () => {
