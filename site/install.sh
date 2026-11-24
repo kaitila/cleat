@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs Cleat: bun if it is missing, then cleat itself, then its setup.
-#   curl -fsSL https://kaitila.github.io/cleat/install.sh | sh
+#   curl -fsSL https://cleat.kaitila.dev/install.sh | sh
 # The repo's one shell script (D0047): it only gets bun onto the machine; everything after that is
 # TypeScript (cleat setup). POSIX sh, so it runs under the sh of macOS, Linux and WSL alike.
 set -eu

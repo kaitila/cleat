@@ -1,6 +1,6 @@
 # Cleat
 
-Website: <https://kaitila.github.io/cleat/>
+Website: <https://cleat.kaitila.dev/>
 
 Hand a task to a Claude Code agent from anywhere on your computer, without opening a terminal.
 
@@ -17,7 +17,7 @@ Cleat runs the agents with the [Claude Code](https://docs.claude.com/en/docs/cla
 In a terminal (on Windows, a WSL terminal):
 
 ```sh
-curl -fsSL https://kaitila.github.io/cleat/install.sh | sh
+curl -fsSL https://cleat.kaitila.dev/install.sh | sh
 ```
 
 That is the whole of it. The [script](site/install.sh) installs [bun](https://bun.sh/) if it is missing (and on Debian or Ubuntu the `unzip` its installer needs), then cleat, then runs `cleat setup` in your terminal. With bun already there, the same is `bun install -g github:kaitila/cleat && cleat setup`. Cleat comes with everything it runs: Claude Code and Codex come with it, inside the agents' own SDKs, and the tray app's Electron is downloaded by setup. No git, Node or npm is needed. What is left is logging in to the agent you use: setup offers to run Claude Code's login (a page in your browser), or later `cleat login` (`cleat login codex` for [Codex](docs/agents.md)). Why it is done this way: [D0045](docs/decisions/D0045-install-with-bun-only.md).

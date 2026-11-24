@@ -20,8 +20,8 @@ const noComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").repla
 /** The repository: the one other place the page links to (links, not loads). */
 const REPO = "https://github.com/kaitila/cleat";
 /** bun's installer, named in the install line (D0045). */
-/** The install line's script, on the site's own address (D0047). */
-const INSTALL_SCRIPT = "https://kaitila.github.io/cleat/install.sh";
+/** The install line's script, on the site's own address (D0047, D0049). */
+const INSTALL_SCRIPT = "https://cleat.kaitila.dev/install.sh";
 /** The SVG namespace in base.css's grain: a name inside a data: URL, not a request. */
 const SVG_NS = "http://www.w3.org/2000/svg";
 
