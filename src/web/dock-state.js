@@ -193,6 +193,20 @@ export function nextPeek(queue, sessions) {
   return { peek: null, queue: rest };
 }
 
+/** How recent a session's start must be for the dock to take it as one the person just started. */
+export const STARTED_MS = 30_000;
+
+/**
+ * True for a session the person just started from this app (the pop-up, the snip, New task): one the
+ * dock had not seen (`known` false), not imported from a terminal, created in the last STARTED_MS.
+ * A session that is only new to the dock (a reconnect, an old one coming back) is not.
+ */
+export function justStarted(session, known, now) {
+  if (known || !session || session.source === "terminal") return false;
+  const at = Date.parse(session.createdAt ?? "");
+  return Number.isFinite(at) && now - at >= -STARTED_MS && now - at <= STARTED_MS;
+}
+
 /**
  * Whether the peek on show is over: after five seconds, except one for an approval, which stays
  * until its session no longer waits (answered here, in the chat view, or its turn ended).

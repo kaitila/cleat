@@ -44,6 +44,7 @@ import {
   inWorkspace,
   islandSize,
   isLive,
+  justStarted,
   liveOthers,
   LIVE_MAX,
   mayClose,
@@ -1401,6 +1402,26 @@ document.addEventListener("keydown", (e) => {
   focusReply(auto);
 });
 
+/**
+ * A task the person just started (the pop-up, the snip, New task) becomes the notch's session: the
+ * next opening shows it, an open dock or chat switches to it at once, and the choice is remembered.
+ * News that arrives after it (a peek) still wins, as for any session.
+ */
+function showStarted(session) {
+  lastPeeked = session.id;
+  saveSession(storage(), session.id);
+  if (state === "open") {
+    // In a workspace the dock is not filtering on: this time the list shows them all.
+    if (workspace && session.workspace !== workspace) {
+      workspace = "";
+      renderList();
+    }
+    select(session.id);
+  } else if (state === "chat") {
+    embed()?.show(session.id);
+  }
+}
+
 // ---------- the chat: the island grown large (D0042) ----------
 
 /** What the chat's page lets the dock ask of it (chat.js, window.holmEmbed), or null until it has loaded. */
@@ -1516,9 +1537,11 @@ function onMessage(message) {
     case "session": {
       const session = message.session;
       if (!session?.id) break;
+      const started = justStarted(session, sessions.has(session.id), Date.now());
       sessions.set(session.id, session);
       renderPill();
       checkPeek();
+      if (started) showStarted(session);
       if (state !== "open") break;
       if (!selected && (!workspace || session.workspace === workspace)) select(session.id);
       renderList();
