@@ -8,6 +8,7 @@ import type { LoginResult } from "../../shell/src/login";
 import { SNIP_PRELOAD } from "../../shell/src/snip";
 import { DEFAULT_SETTINGS, PID_FILE, withWsl } from "../../shell/src/settings";
 import type { WslSettings } from "../../shell/src/wsl";
+import { migrateShell } from "./legacy";
 import { REPO, SHELL_SRC, type ShellPaths } from "./paths";
 import { autostartEntry, autostartFile, currentPlatform, type LocalRunner, type Platform, platformFor, type RunnerLocation, windowsPidAlive } from "./platform";
 
@@ -67,7 +68,12 @@ function needPlatform(platform: Platform, starting: boolean): void {
 /** Copies the bundle and package.json into the shell's folder, and installs Electron there for the shell's OS unless the pinned version already is. */
 export async function install(paths?: ShellPaths, log: (line: string) => void = console.log, platform: Platform = currentPlatform()): Promise<void> {
   needPlatform(platform, false);
-  paths ??= platform.shellPaths();
+  const home = platform.shellPaths();
+  paths ??= home;
+  // Into the layout's own folder (not the self-test's): a shell installed under the old name moves first (legacy.ts).
+  if (paths.home === home.home) {
+    await migrateShell({ now: paths, userData: dirname(platform.settingsFile()), platform, log, stopOld: (old, pid) => stopAndWait(old, pid, undefined, platform) });
+  }
   mkdirSync(paths.app, { recursive: true });
   await buildShell(paths.app);
   copyFileSync(join(SHELL_SRC, "package.json"), join(paths.app, "package.json"));

@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { homedir, release } from "node:os";
 import { dirname, join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences, Tray } from "electron";
+import { dropOldLoginItem } from "./legacy";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
 import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_SIZES, DOCK_CHAT_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, type Size, takesMouse, watchMs } from "./dock";
@@ -1911,6 +1912,8 @@ function start(): void {
     void selfTest().then(done, (e) => done({ errors: [String(e)] }));
     return;
   }
+  // The login item from before the rename (legacy.ts); the new one follows the runner's settings.
+  if (OS === "windows") dropOldLoginItem(app, process.execPath);
   // For `up`, which waits for this process to end before it installs a new bundle over it.
   const pidFile = join(app.getPath("userData"), PID_FILE);
   try {
