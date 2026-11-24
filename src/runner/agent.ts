@@ -71,7 +71,7 @@ export function byAgent(drivers: Record<AgentKind, AgentDriver>): AgentDriver {
   return { run: (input) => drivers[input.agent].run(input) };
 }
 
-/** The fake agent stands in for both agents (INTUITION_FAKE_AGENT=1). */
+/** The fake agent stands in for both agents (HOLM_FAKE_AGENT=1). */
 export function driverFor(config: Config): AgentDriver {
   return config.fakeAgent ? fakeDriver() : byAgent({ claude: claudeDriver(), codex: codexDriver() });
 }

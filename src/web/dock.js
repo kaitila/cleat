@@ -1,7 +1,7 @@
 // The dock: a pill that says what the sessions are doing, a peek when one finishes or needs the
 // person, and, on hover, an open view where a session is read, approved and continued.
 // The contract with the shell is docs/protocol.md, "Dock": the page picks one of four states (the fourth, chat, is the chat view grown out of the notch: D0042) and
-// tells the shell through window.intuitionDock.setState, which is absent in a normal browser.
+// tells the shell through window.holmDock.setState, which is absent in a normal browser.
 // The shell's window never changes size: the page draws the island inside it and animates it alone.
 // Text from the model, from tools and from the person is untrusted: it reaches the page only as
 // text nodes (textContent), never as markup.
@@ -243,7 +243,7 @@ function tellShell(next) {
   if (told === next) return;
   told = next;
   try {
-    window.intuitionDock?.setState(next);
+    window.holmDock?.setState(next);
   } catch {
     // No bridge worth the name: the page works the same without it.
   }
@@ -1486,7 +1486,7 @@ els.expand.addEventListener("click", () => goChat(selected));
 
 // The shell asks for the chat (its tray's Open chat, a link to the chat view anywhere): the island grows into it.
 try {
-  window.intuitionDock?.onChat?.((id) => goChat(typeof id === "string" && id ? id : null));
+  window.holmDock?.onChat?.((id) => goChat(typeof id === "string" && id ? id : null));
 } catch {
   // A bridge without it: the chat is grown into from the page only.
 }

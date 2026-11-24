@@ -1,4 +1,4 @@
-// GET /api/agents: whether each agent can run here, as `intuition doctor` sees it (src/cli/doctor.ts):
+// GET /api/agents: whether each agent can run here, as `holm doctor` sees it (src/cli/doctor.ts):
 // Claude Code installed (`claude --version`) and logged in (`claude auth status`), Codex installed
 // (the binary the SDK runs, `--version`) and logged in (`codex login status`). The settings page
 // shows it beside the agent choice. The commands are the doctor's; their answers are kept a while,

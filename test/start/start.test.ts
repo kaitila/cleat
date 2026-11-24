@@ -1,4 +1,4 @@
-// The runner's start, status, stop and logs commands, run as a person runs them: `bun src/cli.ts <command>`, and `intuition <command>` through a link in a temp folder,
+// The runner's start, status, stop and logs commands, run as a person runs them: `bun src/cli.ts <command>`, and `holm <command>` through a link in a temp folder,
 // against a temp config and data folder, a free port and the fake agent.
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -13,11 +13,11 @@ const REPO = join(import.meta.dir, "..", "..");
 const CLI = join(REPO, "src", "cli.ts");
 
 function folders(port = "0") {
-  const dir = mkdtempSync(join(tmpdir(), "intuition-start-"));
+  const dir = mkdtempSync(join(tmpdir(), "holm-start-"));
   mkdirSync(join(dir, "work"));
-  const env = { INTUITION_CONFIG: join(dir, "config.json"), INTUITION_DATA_DIR: join(dir, "data"), INTUITION_PORT: port, INTUITION_FAKE_AGENT: "1" };
-  writeFileSync(env.INTUITION_CONFIG, JSON.stringify({ workspaces: [{ name: "work", path: join(dir, "work") }] }));
-  return { dir, env, data: env.INTUITION_DATA_DIR };
+  const env = { HOLM_CONFIG: join(dir, "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: port, HOLM_FAKE_AGENT: "1" };
+  writeFileSync(env.HOLM_CONFIG, JSON.stringify({ workspaces: [{ name: "work", path: join(dir, "work") }] }));
+  return { dir, env, data: env.HOLM_DATA_DIR };
 }
 
 async function cli(env: Record<string, string>, ...words: string[]): Promise<{ code: number; out: string }> {
@@ -44,7 +44,7 @@ describe("start, status, stop", () => {
 
   test("start runs the runner in the background, writes its pid and log, and prints the URL once /health answers", async () => {
     const { code, out } = await cli(env, "start");
-    expect(out).toMatch(/^✓ intuition runner on http:\/\/127\.0\.0\.1:\d+ \(pid \d+, log .*runner\.log\)\n$/);
+    expect(out).toMatch(/^✓ holm runner on http:\/\/127\.0\.0\.1:\d+ \(pid \d+, log .*runner\.log\)\n$/);
     expect(code).toBe(0);
     url = out.match(/http:\/\/127\.0\.0\.1:\d+/)![0];
     pid = Number(readFileSync(join(data, PID_FILE), "utf8"));
@@ -54,7 +54,7 @@ describe("start, status, stop", () => {
     expect(pid).not.toBe(process.pid);
     expect(isRunner(pid)).toBe(true);
     expect(await (await fetch(`${url}/health`)).json()).toMatchObject({ ok: true });
-    expect(readFileSync(join(data, LOG_FILE), "utf8")).toContain(`intuition runner on ${url}`);
+    expect(readFileSync(join(data, LOG_FILE), "utf8")).toContain(`holm runner on ${url}`);
   });
 
   test("the runner it started uses the config and the data folder it was given", async () => {
@@ -76,7 +76,7 @@ describe("start, status, stop", () => {
     const { code, out } = await cli(env, "logs");
     expect(code).toBe(0);
     expect(out).toContain(join(data, LOG_FILE));
-    expect(out).toContain(`intuition runner on ${url}`);
+    expect(out).toContain(`holm runner on ${url}`);
   });
 
   test("stop ends the process and removes the pid file; status then says not running", async () => {
@@ -93,8 +93,8 @@ describe("start, status, stop", () => {
     const { code, out } = await cli(env, "start");
     expect(code).toBe(0);
     expect(Number(readFileSync(join(data, PID_FILE), "utf8"))).not.toBe(pid);
-    expect(readFileSync(join(data, LOG_FILE), "utf8").match(/intuition runner on /g)).toHaveLength(2);
-    expect(out).toContain("intuition runner on ");
+    expect(readFileSync(join(data, LOG_FILE), "utf8").match(/holm runner on /g)).toHaveLength(2);
+    expect(out).toContain("holm runner on ");
     expect((await cli(env, "stop")).code).toBe(0);
   });
 });
@@ -102,7 +102,7 @@ describe("start, status, stop", () => {
 describe("a runner that runs older code", () => {
   const { env, data } = folders();
   started.push(env);
-  const as = (build: string) => ({ ...env, INTUITION_BUILD_ID: build });
+  const as = (build: string) => ({ ...env, HOLM_BUILD_ID: build });
   const pidNow = () => Number(readFileSync(join(data, PID_FILE), "utf8"));
   const urlNow = () => readFileSync(join(data, URL_FILE), "utf8").trim();
   const health = async () => (await (await fetch(`${urlNow()}/health`)).json()) as { build: string };
@@ -119,7 +119,7 @@ describe("a runner that runs older code", () => {
     const url = urlNow();
     const { code, out } = await cli(as("two"), "start");
     expect(code).toBe(0);
-    expect(out).toStartWith("✓ intuition runner on ");
+    expect(out).toStartWith("✓ holm runner on ");
     expect(out).toContain(`\n  the runner at ${url} (pid ${pid}) runs older code than this repo's: restarting it\n`);
     expect(isRunner(pid)).toBe(false);
     expect(pidNow()).not.toBe(pid);
@@ -145,7 +145,7 @@ describe("a runner that runs older code", () => {
     expect(out).toBe(
       `▲ the runner at ${urlNow()} (pid ${pid}) runs older code than this repo's, and was kept: restarting it would cut off\n` +
         `    ${title} (work, waiting for Allow or Deny)\n` +
-        "  run `intuition restart` once they are done, or `intuition restart --force` now\n",
+        "  run `holm restart` once they are done, or `holm restart --force` now\n",
     );
     expect(pidNow()).toBe(pid);
     expect(isRunner(pid)).toBe(true);
@@ -160,7 +160,7 @@ describe("a runner that runs older code", () => {
     expect(isRunner(pid)).toBe(true);
     const forced = await cli(as("three"), "restart", "--force");
     expect(forced.code).toBe(0);
-    expect(forced.out).toStartWith("✓ intuition runner on ");
+    expect(forced.out).toStartWith("✓ holm runner on ");
     expect(forced.out).toContain(`\n  restarting anyway (--force), which cuts off\n    ${title} (work, waiting for Allow or Deny)\n  stopped (pid ${pid})\n`);
     expect(isRunner(pid)).toBe(false);
     expect((await health()).build).toBe("three");
@@ -170,13 +170,13 @@ describe("a runner that runs older code", () => {
     const pid = pidNow();
     const { code, out } = await cli(as("three"), "restart");
     expect(code).toBe(0);
-    expect(out).toStartWith("✓ intuition runner on ");
+    expect(out).toStartWith("✓ holm runner on ");
     expect(out).toContain(`\n  stopped (pid ${pid})\n`);
     expect(pidNow()).not.toBe(pid);
     expect((await cli(env, "stop")).code).toBe(0);
     const fresh = await cli(as("four"), "restart");
     expect(fresh.code).toBe(0);
-    expect(fresh.out).toStartWith("✓ intuition runner on ");
+    expect(fresh.out).toStartWith("✓ holm runner on ");
     expect((await health()).build).toBe("four");
   });
 });
@@ -221,7 +221,7 @@ describe("edges", () => {
 
   test("a runner that cannot start: exit 1 with the end of its log, and no pid file", async () => {
     const { env, data } = folders();
-    writeFileSync(env.INTUITION_CONFIG, JSON.stringify({ workspaces: [{ name: "a", path: "/tmp" }, { name: "a", path: "/tmp" }] }));
+    writeFileSync(env.HOLM_CONFIG, JSON.stringify({ workspaces: [{ name: "a", path: "/tmp" }, { name: "a", path: "/tmp" }] }));
     const { code, out } = await cli(env, "start");
     expect(code).toBe(1);
     expect(out).toContain('workspace "a" is listed twice');
@@ -233,26 +233,26 @@ describe("edges", () => {
     for (const words of [["nope"], ["start", "now"], ["restart", "now"], ["restart", "--force", "x"], ["stop", "x"], ["shell", "login"], ["shell", "login", "maybe"], ["shell", "login", "on", "x"], ["link", "a", "b"], ["help", "x"]]) {
       const p = Bun.spawnSync([process.execPath, CLI, ...words], { cwd: REPO, env: { ...process.env, ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
       expect(`${words.join(" ")}: ${p.exitCode}`).toBe(`${words.join(" ")}: 2`);
-      expect(p.stderr.toString()).toContain("USAGE\n  intuition <command>");
+      expect(p.stderr.toString()).toContain("USAGE\n  holm <command>");
       expect(p.stdout.toString()).toBe("");
     }
   });
 
-  test("help, --help and -h print the usage on stdout and exit 0; it names every command as intuition", async () => {
+  test("help, --help and -h print the usage on stdout and exit 0; it names every command as holm", async () => {
     const { env } = folders();
     for (const word of ["help", "--help", "-h"]) {
       const p = Bun.spawnSync([process.execPath, CLI, word], { cwd: REPO, env: { ...process.env, ...env }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
       expect(p.exitCode).toBe(0);
       const out = p.stdout.toString();
-      expect(out).toContain("USAGE\n  intuition <command>");
-      expect(out).toMatch(/\n  intuition +up, or setup/);
+      expect(out).toContain("USAGE\n  holm <command>");
+      expect(out).toMatch(/\n  holm +up, or setup/);
       expect(out).not.toContain("bun src/cli.ts");
       for (const name of ["up", "start", "restart", "stop", "status", "logs", "shell install", "shell login on|off|status", "doctor", "link [dir]", "unlink [dir]", "help"]) expect(out).toContain(`  ${name}`);
     }
   });
 });
 
-// `intuition` alone is never run here: it is `up`, which would install and start the real Windows shell.
+// `holm` alone is never run here: it is `up`, which would install and start the real Windows shell.
 describe("which command the words name", () => {
   const names = ["up", "start", "shell install", "shell login", "link", "help"];
 
@@ -278,7 +278,7 @@ describe("which command the words name", () => {
 
 describe("link and unlink", () => {
   // Always a temp folder: the default, the folder bun is in, is the person's real PATH.
-  const bin = () => mkdtempSync(join(tmpdir(), "intuition-bin-"));
+  const bin = () => mkdtempSync(join(tmpdir(), "holm-bin-"));
   const lines = () => {
     const out: string[] = [];
     return { out, log: (line: string) => void out.push(line) };
@@ -288,14 +288,14 @@ describe("link and unlink", () => {
     expect(defaultDir()).toBe(dirname(process.execPath));
   });
 
-  test("link makes a symlink named intuition to src/cli.ts, which is executable and starts with the bun line", () => {
+  test("link makes a symlink named holm to src/cli.ts, which is executable and starts with the bun line", () => {
     const dir = bin();
     const { out, log } = lines();
     expect(link(dir, { PATH: `/usr/bin:${dir}` }, log)).toBe(0);
-    const path = join(dir, "intuition");
+    const path = join(dir, "holm");
     expect(lstatSync(path).isSymbolicLink()).toBe(true);
     expect(readlinkSync(path)).toBe(CLI);
-    expect(out).toEqual([`${path} -> ${CLI}`, `${dir} is on the PATH: type \`intuition\` in any folder`]);
+    expect(out).toEqual([`${path} -> ${CLI}`, `${dir} is on the PATH: type \`holm\` in any folder`]);
     expect(statSync(CLI).mode & 0o111).toBe(0o111);
     expect(readFileSync(CLI, "utf8").startsWith("#!/usr/bin/env bun\n")).toBe(true);
   });
@@ -305,7 +305,7 @@ describe("link and unlink", () => {
     const { out, log } = lines();
     expect(link(dir, { PATH: "/usr/bin:/bin" }, log)).toBe(0);
     expect(out[1]).toBe(`${dir} is not on the PATH: add it to the PATH, or run link with a folder that is on it`);
-    expect(readlinkSync(join(dir, "intuition"))).toBe(CLI);
+    expect(readlinkSync(join(dir, "holm"))).toBe(CLI);
     expect(link(dir, {}, lines().log)).toBe(0);
   });
 
@@ -321,7 +321,7 @@ describe("link and unlink", () => {
 
   test("link replaces its own link, also one written as a relative path", () => {
     const dir = bin();
-    const path = join(dir, "intuition");
+    const path = join(dir, "holm");
     expect(link(dir, {}, lines().log)).toBe(0);
     expect(link(dir, {}, lines().log)).toBe(0);
     expect(readlinkSync(path)).toBe(CLI);
@@ -343,7 +343,7 @@ describe("link and unlink", () => {
     ];
     for (const [make, what] of cases) {
       const dir = bin();
-      const path = join(dir, "intuition");
+      const path = join(dir, "holm");
       make(path);
       const before = lstatSync(path);
       const linked = lines();
@@ -368,7 +368,7 @@ describe("link and unlink", () => {
 
   test("unlink removes our link, and says so when there is none", () => {
     const dir = bin();
-    const path = join(dir, "intuition");
+    const path = join(dir, "holm");
     link(dir, {}, lines().log);
     const first = lines();
     expect(unlink(dir, first.log)).toBe(0);
@@ -391,43 +391,43 @@ describe("through the link, from another folder", () => {
   // The link is run by name, so its first line finds bun on the PATH, as in a terminal.
   const path = [bin, dirname(process.execPath), process.env.PATH ?? ""].join(delimiter);
 
-  async function intuition(...words: string[]): Promise<{ code: number; out: string }> {
-    const p = Bun.spawn([join(bin, "intuition"), ...words], { cwd: elsewhere, env: { ...process.env, ...env, PATH: path }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  async function holm(...words: string[]): Promise<{ code: number; out: string }> {
+    const p = Bun.spawn([join(bin, "holm"), ...words], { cwd: elsewhere, env: { ...process.env, ...env, PATH: path }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
     return { code, out: out + err };
   }
 
   test("bun src/cli.ts link <dir> makes the command, and says the folder is on the PATH", async () => {
     const { code, out } = await cli({ ...env, PATH: path }, "link", bin);
-    expect(out).toBe(`${join(bin, "intuition")} -> ${CLI}\n${bin} is on the PATH: type \`intuition\` in any folder\n`);
+    expect(out).toBe(`${join(bin, "holm")} -> ${CLI}\n${bin} is on the PATH: type \`holm\` in any folder\n`);
     expect(code).toBe(0);
   });
 
-  test("intuition help, run by its name", async () => {
-    const { code, out } = await intuition("help");
+  test("holm help, run by its name", async () => {
+    const { code, out } = await holm("help");
     expect(code).toBe(0);
-    expect(out).toContain("USAGE\n  intuition <command>");
+    expect(out).toContain("USAGE\n  holm <command>");
   });
 
-  test("intuition start finds the runner in the repo, not beside the link or in the current folder; stop stops it", async () => {
-    const start = await intuition("start");
-    expect(start.out).toMatch(/^✓ intuition runner on http:\/\/127\.0\.0\.1:\d+ /);
+  test("holm start finds the runner in the repo, not beside the link or in the current folder; stop stops it", async () => {
+    const start = await holm("start");
+    expect(start.out).toMatch(/^✓ holm runner on http:\/\/127\.0\.0\.1:\d+ /);
     expect(start.code).toBe(0);
-    const pid = Number(readFileSync(join(env.INTUITION_DATA_DIR, PID_FILE), "utf8"));
+    const pid = Number(readFileSync(join(env.HOLM_DATA_DIR, PID_FILE), "utf8"));
     expect(commandLine(pid)).toContain(join(REPO, "src", "runner", "main.ts"));
     // Its folder: from /proc where there is one (not on a Mac).
     if (existsSync("/proc/self")) expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(REPO);
     const url = start.out.match(/http:\/\/127\.0\.0\.1:\d+/)![0];
     // The pages are served from the repo too.
     expect((await fetch(`${url}/`)).status).toBe(200);
-    expect(await intuition("status")).toEqual({ code: 0, out: `✓ running: ${url} (pid ${pid})\n` });
-    expect(await intuition("stop")).toEqual({ code: 0, out: `✓ stopped (pid ${pid})\n` });
+    expect(await holm("status")).toEqual({ code: 0, out: `✓ running: ${url} (pid ${pid})\n` });
+    expect(await holm("stop")).toEqual({ code: 0, out: `✓ stopped (pid ${pid})\n` });
     expect(isRunner(pid)).toBe(false);
   });
 
-  test("intuition unlink <dir> removes it", async () => {
-    expect(await intuition("unlink", bin)).toEqual({ code: 0, out: `removed ${join(bin, "intuition")}\n` });
-    expect(existsSync(join(bin, "intuition"))).toBe(false);
+  test("holm unlink <dir> removes it", async () => {
+    expect(await holm("unlink", bin)).toEqual({ code: 0, out: `removed ${join(bin, "holm")}\n` });
+    expect(existsSync(join(bin, "holm"))).toBe(false);
   });
 });
 

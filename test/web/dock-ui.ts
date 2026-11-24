@@ -1,9 +1,9 @@
 // Drives the dock in headless Chromium: `bun test/web/dock-ui.ts`.
 // This machine only: it needs the playwright that is installed globally for bun and its browser,
 // and prints a "skipped" line and exits 0 where there is none (and in CI).
-// The runner is real, on a free port with temp folders, with the fake agent (INTUITION_FAKE_AGENT=1),
+// The runner is real, on a free port with temp folders, with the fake agent (HOLM_FAKE_AGENT=1),
 // slowed down so a running session can be seen. The shell is a stand-in: a viewport of the window's
-// one size that never changes, and a window.intuitionDock that records each setState call
+// one size that never changes, and a window.holmDock that records each setState call
 // (docs/protocol.md, "Dock").
 // It measures the island as it is drawn (its clip, found by hit-testing), times the frames of an
 // open and a close, and saves screenshots of every state and a strip of frames through the open and
@@ -101,8 +101,8 @@ const LONG_URL = `https://example.com/${"very-long-path-segment/".repeat(12)}ind
 const LONG_TITLE = `Read ${LONG_URL}`;
 
 const browser = await launch();
-const dir = mkdtempSync(join(tmpdir(), "intuition-dock-ui-"));
-const shots = mkdtempSync(join(tmpdir(), "intuition-dock-shots-"));
+const dir = mkdtempSync(join(tmpdir(), "holm-dock-ui-"));
+const shots = mkdtempSync(join(tmpdir(), "holm-dock-shots-"));
 const hostileId = seed(join(dir, "data"));
 const runner = testRunner({ dir, driver: fakeDriver(STEP_MS) });
 let failed = false;
@@ -116,7 +116,7 @@ function instruments(bridge: boolean): void {
   w.__calls = [];
   // What the shell's preload gives the page: setState and nothing else. The window stays as it is.
   // And onChat, through which the shell grows the island into the chat (D0042): kept, for the test to call as the shell would.
-  if (bridge) w.intuitionDock = { setState: (state: string) => void w.__calls.push({ state, at: Date.now() }), onChat: (callback: (id: string | null) => void) => void (w.__onChat = callback) };
+  if (bridge) w.holmDock = { setState: (state: string) => void w.__calls.push({ state, at: Date.now() }), onChat: (callback: (id: string | null) => void) => void (w.__onChat = callback) };
 
   /** The island as drawn. Its box never changes, so its clip is found by asking what is under a point. */
   w.__shape = () => {
@@ -367,7 +367,7 @@ try {
   check((await d.calls()).map((c) => c.state).join(",") === "idle", "on load the page tells the shell 'idle', once");
   check((await page.locator("#pill").getAttribute("data-tone")) === "none" && (await page.locator("#pill-text").isHidden()) && (await page.locator("#pill-dot").getAttribute("data-status")) === null,
     "with nothing going on the pill is a dim dot alone, without words");
-  check((await page.locator("#pill").getAttribute("aria-label")) === "intuition", "and is named 'intuition' for a screen reader");
+  check((await page.locator("#pill").getAttribute("aria-label")) === "Holm", "and is named 'Holm' for a screen reader");
   check((await page.locator("#peek").isHidden()) && (await page.locator("#panel").isHidden()), "nothing replays on load: no peek for the session that finished before the page connected");
   await page.evaluate(() => document.fonts.ready);
   const quiet = await d.fits("idle");
@@ -509,7 +509,7 @@ try {
   check((await page.locator(".msg.streaming").count()) === 0 && (await page.locator(".msg.assistant").count()) === 1, "the streamed text is replaced by the complete text, once");
   check((await d.text(".tool-row .tool-name")).join(",") === "Write" && (await d.text(".tool-row .tool-line")).join(",") === `${runner.dir}/work/fake.txt`, "the tool call is a one-line row");
   check((await d.lastCall()).state === "open" && (await page.locator("#peek").isHidden()), "no peek while the dock is open: the turn finished and the list shows it");
-  check((await page.locator("#pill-text").textContent()) === "intuition", "and the pill no longer says 'needs you'");
+  check((await page.locator("#pill-text").textContent()) === "Holm", "and the pill no longer says 'needs you'");
 
   // ---- continuing the session ----
   const box = page.locator("#reply-text");
@@ -830,7 +830,7 @@ try {
   await openList(page);
   await workspace.selectOption("");
   await page.locator(".session-row", { hasText: needs }).waitFor({ state: "attached" });
-  check((await d.text(".row-title")).join("|") === allTitles.join("|") && (await page.evaluate(() => localStorage.getItem("intuition.dock.workspace"))) === null, "All workspaces lists them all again, and is remembered as no choice");
+  check((await d.text(".row-title")).join("|") === allTitles.join("|") && (await page.evaluate(() => localStorage.getItem("holm.dock.workspace"))) === null, "All workspaces lists them all again, and is remembered as no choice");
 
   // ---- the agent: a quiet glyph on each row, and the head names it ----
   const codexTitle = "answer this on codex in the dock";
@@ -913,7 +913,7 @@ try {
   check((await colours(k.page)).join() === darkColours.join() && darkColours[0] === "rgba(18, 18, 24, 0.86)", `the island is the same dark in both schemes (${darkColours.join(" on ")})`);
   // The dock loads theme.js, which sets data-theme on <html>; .dark is on <body>, so it still wins.
   for (const forced of ["light", "dark", "system"]) {
-    await k.page.evaluate((t: string) => (window as Any).intuitionTheme.apply(t), forced);
+    await k.page.evaluate((t: string) => (window as Any).holmTheme.apply(t), forced);
     const now = await colours(k.page);
     check(now.join() === darkColours.join(), `and with the theme forced to ${forced} (${now.join(" on ")})`);
   }

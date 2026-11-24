@@ -29,10 +29,10 @@ export interface Workspace {
 }
 
 /**
- * intuition: started by the runner. terminal: a Claude Code session the runner found in a workspace's
+ * holm: started by the runner. terminal: a Claude Code session the runner found in a workspace's
  * transcripts (started in a terminal, or anywhere else) and imported. See docs/protocol.md, "Terminal sessions".
  */
-export type SessionSource = "intuition" | "terminal";
+export type SessionSource = "holm" | "terminal";
 
 export interface SessionMeta {
   /** The runner's id for the session (a UUID). Stable across turns, and across restarts for imported ones. */
@@ -48,7 +48,7 @@ export interface SessionMeta {
   cwd: string;
   /** First line of the first prompt, cut to 80 characters. An imported session's: its custom title, else summary, else first prompt. */
   title: string;
-  /** Where the session came from. The runner always sends it; a session stored before it existed reads as "intuition". */
+  /** Where the session came from. The runner always sends it; a session stored before it existed reads as "holm". */
   source?: SessionSource;
   status: SessionStatus;
   /**
@@ -183,7 +183,7 @@ export type ShellAction = "open_screen_recording";
 
 /** GET /api/platform: this machine's layout, the runner (running, since it answers) and the shell as it last reported. */
 export interface PlatformResponse {
-  /** Null only when INTUITION_PLATFORM names no layout (docs/platforms.md). */
+  /** Null only when HOLM_PLATFORM names no layout (docs/platforms.md). */
   layout: Layout | null;
   runner: { running: true; version: string };
   /**
@@ -242,7 +242,7 @@ export interface ClipboardPostRequest { text?: string; imagePath?: string }
 export interface NotificationsResponse { notifications: Notification[]; latest: number }
 export interface ErrorResponse { error: string }
 /**
- * One agent as `intuition doctor` checks it: installed (its version) and logged in. `detail` is the
+ * One agent as `holm doctor` checks it: installed (its version) and logged in. `detail` is the
  * line to show, `fix` what to do when it can't run (empty when it can).
  */
 export interface AgentStatus { agent: AgentKind; installed: boolean; version: string | null; loggedIn: boolean; detail: string; fix: string }

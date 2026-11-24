@@ -220,7 +220,7 @@ describe("fork", () => {
     const res = await r.post(`/api/sessions/${source.id}/fork`, {});
     expect(res.status).toBe(201);
     const fork = await sessionOf(res);
-    expect(fork).toMatchObject({ title: "the original task (fork)", status: "idle", source: "intuition", workspace: "work" });
+    expect(fork).toMatchObject({ title: "the original task (fork)", status: "idle", source: "holm", workspace: "work" });
     expect(fork.claudeSessionId).not.toBe(source.claudeSessionId);
     expect(t.calls).toContain(`fork ${source.claudeSessionId} -> ${fork.claudeSessionId}`);
     expect(kinds(await eventsOf(r, fork.id))).toEqual(kinds(await eventsOf(r, source.id)));
