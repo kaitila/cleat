@@ -183,6 +183,9 @@
   /* The island's size as drawn. dock.js sets both on the island; until it has, nothing is drawn. */
   --island-w: 0px;
   --island-h: 0px;
+  /* The most it is drawn at, in open and the chat (dock.js sets both there, D0042): elsewhere nothing holds it. */
+  --cap-w: 100vw;
+  --cap-h: 100vh;
   /* A Mac's notch and the wings beside it, as dock.js measures them (?notch=WxH); 0 without one. */
   --notch-w: 0px;
   --notch-h: 0px;

@@ -219,6 +219,27 @@
   .stream-leaving { animation: fade-out var(--dur-out) var(--ease) forwards !important; }
 }
 
+/* Inside the dock, grown into the chat (/?embed=dock, D0042): the page is the island's content, on
+   the notch's black (or the dock's dark glass) that the dock draws behind it. No backdrop, no panels
+   of glass: the sessions and the session are two columns of one surface, a hairline between them.
+   The island's bottom corners are round: the lists and the reply box keep clear of them. */
+/* Dark at its root, as the frame that holds it is (the dock's body.dark): a frame whose scheme differs
+   from its page's is painted opaque, and the notch's black would not show through. */
+:root[data-embed] { color-scheme: dark; }
+:root[data-embed] body { background: transparent; }
+:root[data-embed] .app { gap: 0; padding: 0; }
+:root[data-embed] .sidebar, :root[data-embed] .main { background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; border-radius: 0; }
+:root[data-embed] .sidebar { border-right: var(--hairline) solid var(--line); }
+:root[data-embed] .sidebar-head { padding-top: var(--space-2); }
+:root[data-embed] .sessions { padding-bottom: var(--radius-l); }
+:root[data-embed] .reply { border-top-color: transparent; padding-bottom: var(--space-3); }
+:root[data-embed] .reply textarea { border-color: var(--line); background: var(--surface); }
+:root[data-embed] .reply textarea:focus-visible { border-color: var(--line-strong); outline-color: transparent; }
+:root[data-embed] .head { border-bottom-color: transparent; }
+/* Back to the dock: a square quiet button beside the gear, two arrows drawn inwards. */
+.collapse { width: var(--control); padding: 0; }
+.collapse-mark { width: var(--space-4); height: var(--space-4); fill: none; stroke-width: 1.25; stroke-linecap: round; stroke-linejoin: round; }
+
 /* A slim window: the sessions go above the stream. */
 @media (max-width: 700px) {
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }

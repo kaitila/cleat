@@ -1,6 +1,6 @@
 // The dock: a pill that says what the sessions are doing, a peek when one finishes or needs the
 // person, and, on hover, an open view where a session is read, approved and continued.
-// The contract with the shell is docs/protocol.md, "Dock": the page picks one of three states and
+// The contract with the shell is docs/protocol.md, "Dock": the page picks one of four states (the fourth, chat, is the chat view grown out of the notch: D0042) and
 // tells the shell through window.intuitionDock.setState, which is absent in a normal browser.
 // The shell's window never changes size: the page draws the island inside it and animates it alone.
 // Text from the model, from tools and from the person is untrusted: it reaches the page only as
@@ -28,9 +28,11 @@ import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.j
 import { commandLabel } from "./keys.js";
 import {
   CLOSE_MS,
+  clickAction,
   DOCK_SIZES,
-  DOCK_WINDOW,
+  dockWindow,
   OPEN_MS,
+
   PEEK_MS,
   RECENT_EVENTS,
   asPeek,
@@ -47,6 +49,7 @@ import {
   mayClose,
   nextPeek,
   onIsland,
+  parseChat,
   parseNotch,
   peekLabel,
   peekOver,
@@ -63,8 +66,12 @@ import {
 
 /** A Mac's notch, from the shell (`?notch=WxH`): the island grows out of it. Null without one. */
 const NOTCH = parseNotch(location.search);
+/** How large the island grows into the chat on this display, from the shell (`?chat=WxH`, D0042). */
+const CHAT = parseChat(location.search) ?? DOCK_SIZES.chat;
 /** The most the island covers in each state, out of the notch or not (docs/protocol.md, "Dock"). */
-const SIZES = dockSizes(NOTCH);
+const SIZES = dockSizes(NOTCH, CHAT);
+/** The shell's window: as large as the largest state, for the page's whole life. */
+const WINDOW = dockWindow(CHAT);
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -97,6 +104,9 @@ const els = {
   reply: $("reply"),
   text: $("reply-text"),
   hint: $("reply-hint"),
+  expand: $("expand"),
+  chat: $("chat"),
+  chatFrame: $("chat-frame"),
 };
 /** In the switch, before the title: the agent the session runs on, its glyph, its name as the tooltip. */
 const headAgent = h("span", "session-agent");
@@ -216,7 +226,7 @@ function storage() {
   }
 }
 
-// ---------- the three states ----------
+// ---------- the states ----------
 
 /** What the island shows: "idle", "peek" or "open". */
 let state = "idle";
@@ -239,21 +249,35 @@ function tellShell(next) {
   }
 }
 
-const LAYERS = { idle: els.pill, peek: els.peek, open: els.panel };
+const LAYERS = { idle: els.pill, peek: els.peek, open: els.panel, chat: els.chat };
+
+/**
+ * Whether a layer is off. The chat is never taken out of the layout, only out of sight and reach
+ * (data-off and inert, dock.css): its page stays laid out at its full size, ready to be seen.
+ */
+const isOff = (el) => (el === els.chat ? el.hasAttribute("data-off") : el.hidden);
+function setOff(el, off) {
+  if (el !== els.chat) {
+    el.hidden = off;
+    return;
+  }
+  el.toggleAttribute("data-off", off);
+  el.inert = off;
+}
 
 /** Shows a state's content, or lets it fade out and then takes it away. */
 function show(el, on) {
   if (on) {
     el.classList.remove("leaving");
-    el.hidden = false;
+    setOff(el, false);
     return;
   }
-  if (el.hidden || el.classList.contains("leaving")) return;
+  if (isOff(el) || el.classList.contains("leaving")) return;
   el.classList.add("leaving");
   // Under prefers-reduced-motion nothing runs, and it goes at once.
   void Promise.allSettled(el.getAnimations().map((a) => a.finished)).then(() => {
     if (!el.classList.contains("leaving")) return;
-    el.hidden = true;
+    setOff(el, true);
     el.classList.remove("leaving");
   });
 }
@@ -263,7 +287,7 @@ function show(el, on) {
  * no box changes size, here or in the shell.
  */
 function resize() {
-  const size = islandSize(state, { pill: els.pill.offsetWidth, panel: els.panel.offsetHeight, quiet: els.pill.dataset.tone === "none" }, NOTCH);
+  const size = islandSize(state, { pill: els.pill.offsetWidth, panel: els.panel.offsetHeight, quiet: els.pill.dataset.tone === "none" }, NOTCH, CHAT);
   if (size.width === drawn.width && size.height === drawn.height) return;
   drawn = size;
   // Both the island and its surface: the size is not inherited, so each springs to it (dock.css).
@@ -291,11 +315,56 @@ els.pillDot.addEventListener("animationend", (e) => {
   if (e.animationName === "nudge") delete els.pillDot.dataset.nudge;
 });
 
+/**
+ * The most the island is drawn at (dock.css, --cap-w and --cap-h): open and chat are held inside
+ * their rectangles, so a spring's overshoot flattens there; idle and peek are not held (null).
+ */
+function cap(size) {
+  for (const el of [els.island, els.surface]) {
+    if (size) {
+      el.style.setProperty("--cap-w", `${size.width}px`);
+      el.style.setProperty("--cap-h", `${size.height}px`);
+    } else {
+      el.style.removeProperty("--cap-w");
+      el.style.removeProperty("--cap-h");
+    }
+  }
+}
+
+/** A duration of base.css, in milliseconds (`--dur-soft`, `--lag`). */
+function ms(name) {
+  return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+}
+
+let fromTimer = 0;
+
 /** Changes the state: the content swaps and the island's shape follows. */
 function go(next) {
+  const before = state;
   state = next;
   tellShell(next);
   els.island.dataset.state = next;
+  clearTimeout(fromTimer);
+  delete els.island.dataset.from;
+  if (before === "chat" && next === "open") {
+    // Back down from the chat: the shape shrinks on the soft spring, not held to the open dock's
+    // rectangle until it is inside it (dock.css, [data-from="chat"]).
+    els.island.dataset.from = "chat";
+    cap(null);
+    // Arrived: the height's spring, the later of the two, has ended. A timer in case no transition runs (reduced motion, nothing to move).
+    const arrived = () => {
+      clearTimeout(fromTimer);
+      els.island.removeEventListener("transitionend", onEnd);
+      if (els.island.dataset.from !== "chat") return;
+      delete els.island.dataset.from;
+      if (state === "open") cap(SIZES.open);
+    };
+    const onEnd = (e) => {
+      if (e.target === els.island && e.propertyName === "--island-h") arrived();
+    };
+    els.island.addEventListener("transitionend", onEnd);
+    fromTimer = setTimeout(arrived, 3 * (ms("--dur-soft") + 2 * ms("--lag")) + 200);
+  } else cap(next === "open" || next === "chat" ? SIZES[next] : null);
   for (const [name, el] of Object.entries(LAYERS)) show(el, name === next);
   resize();
 }
@@ -373,8 +442,8 @@ function checkPeek() {
 
 function onNotification(notification) {
   const peek = asPeek(notification);
-  // Open, the list shows it.
-  if (!peek || state === "open") return;
+  // Open, the list shows it; grown into the chat, its sidebar.
+  if (!peek || state === "open" || state === "chat") return;
   queue = enqueue(queue, peek);
   if (!peeking) showPeek();
 }
@@ -880,7 +949,8 @@ async function run(verb, id, action, body) {
 async function act(id, action) {
   const session = sessions.get(id);
   if (!session) return;
-  if (action === "chat") window.open(`/?session=${encodeURIComponent(id)}`, "_blank", "noopener");
+  // The chat is the island grown large, on this session (D0042), not a window.
+  if (action === "chat") goChat(id);
   else if (action === "resume") await copyResume(session);
   else if (action === "pin") await run(session.pinned ? "unpin" : "pin", id, "pin", { pinned: !session.pinned });
   else if (action === "archive") await run(session.archived ? "unarchive" : "archive", id, "archive", { archived: !session.archived });
@@ -1155,8 +1225,15 @@ let closeTimer = 0;
  */
 function over(x, y) {
   const box = els.island.getBoundingClientRect();
-  return onIsland(state, drawn, x - (box.left + box.width / 2), y - box.top, NOTCH);
+  return onIsland(state, drawn, x - (box.left + box.width / 2), y - box.top, NOTCH, CHAT);
 }
+
+/**
+ * True after the chat stepped back down to the open dock (Esc): the pointer may be anywhere the chat
+ * was, so the open dock stays until the pointer has come onto it and left it again, or Esc, a press
+ * beside it or another app's window puts it away.
+ */
+let steppedDown = false;
 
 /** The pointer is on the island, or not. Opening waits a moment: a pointer that brushes past opens nothing. */
 function point(on) {
@@ -1169,8 +1246,10 @@ function point(on) {
     scheduleClose();
     return;
   }
+  steppedDown = false;
   clearTimeout(closeTimer);
-  if (state !== "open") openTimer = setTimeout(() => inside && open(), OPEN_MS);
+  // Hover opens the small dock from the pill or a peek; the chat is grown into by a click (clickAction).
+  if (state === "idle" || state === "peek") openTimer = setTimeout(() => inside && (state === "idle" || state === "peek") && open(), OPEN_MS);
 }
 
 /** True while the workspace switch's list is open: it may hang past the island's edge. */
@@ -1188,7 +1267,7 @@ function holds() {
     pointerInside: inside,
     pointerDown: down,
     // A row's menu, its title being edited, or a find being typed holds it open as a focused reply box does.
-    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || renaming || picking() || (document.hasFocus() && listOpen && els.find.value !== ""),
+    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || renaming || picking() || (document.hasFocus() && listOpen && els.find.value !== "") || steppedDown,
     // A draft holds it open only while the dock has the keyboard: once the person has gone to another
     // app, nothing they could press reaches the dock (not Esc, not a press beside it), so it closes
     // when the pointer is away, and the draft is kept for when it opens again.
@@ -1196,15 +1275,19 @@ function holds() {
   };
 }
 
-function open() {
+/**
+ * Opens the small dock. `onto`: on that session (stepping down from the chat), else on the dock's own
+ * pick (preselect).
+ */
+function open(onto = null) {
   if (state === "open") return;
   clearTimeout(peekTimer);
   // Each opening starts on the workspace the person chose. A session that peeked from another one is
   // shown all the same: this time the list shows them all, and the choice stays for the next.
   workspace = savedWorkspace(storage());
-  const peeked = peeking?.sessionId ?? null;
+  const peeked = onto ?? peeking?.sessionId ?? null;
   if (workspace && peeked && sessions.has(peeked) && sessions.get(peeked).workspace !== workspace) workspace = "";
-  const pick = preselect(listed(), peeked, lastPeeked, savedSession(storage()));
+  const pick = onto && sessions.has(onto) ? onto : preselect(listed(), peeked, lastPeeked, savedSession(storage()));
   // Opened, the peeks are answered by the list.
   peeking = null;
   queue = [];
@@ -1226,7 +1309,9 @@ function open() {
 
 function close() {
   clearTimeout(closeTimer);
-  if (state !== "open") return;
+  if (state !== "open" && state !== "chat") return;
+  if (state === "chat") embed()?.hide();
+  steppedDown = false;
   // Closed under the pointer (Esc): it stays closed until the pointer has left.
   dismissed = inside;
   inside = false;
@@ -1253,8 +1338,8 @@ window.addEventListener("pointerdown", (e) => {
   // The workspace switch's list may hang past the island: a press on it is a press on the dock.
   const on = over(e.clientX, e.clientY) || (e.target instanceof Element && els.workspace.contains(e.target));
   point(on);
-  // A press beside the open dock puts it away at once, whatever is typed in it: the draft is kept.
-  if (state === "open" && !on) close();
+  // A press beside the open dock or the chat puts it away at once, whatever is typed in it: the draft is kept.
+  if ((state === "open" || state === "chat") && !on) close();
   else down = true;
 });
 for (const type of ["pointerup", "pointercancel"]) {
@@ -1267,8 +1352,14 @@ for (const type of ["pointerup", "pointercancel"]) {
 window.addEventListener("blur", () => {
   down = false;
   scheduleClose();
+  focusGoneSoon();
 });
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !e.isComposing && state === "chat") {
+    e.preventDefault();
+    stepDown();
+    return;
+  }
   // Esc in the workspace switch's open list closes the list, not the dock.
   if (e.key !== "Escape" || e.isComposing || state !== "open" || picking()) return;
   e.preventDefault();
@@ -1309,6 +1400,96 @@ document.addEventListener("keydown", (e) => {
   if (listOpen) showList(false);
   focusReply(auto);
 });
+
+// ---------- the chat: the island grown large (D0042) ----------
+
+/** What the chat's page lets the dock ask of it (chat.js, window.holmEmbed), or null until it has loaded. */
+function embed() {
+  try {
+    return els.chatFrame.contentWindow?.holmEmbed ?? null;
+  } catch {
+    return null;
+  }
+}
+/** The session to show once the chat's page is there: asked for before it had loaded ("" for its own pick). */
+let chatWanted = null;
+
+/**
+ * Grows the island into the chat, on a session: the one given, else the one the small dock shows
+ * (open), the one peeking, or the dock's usual pick. The chat's page is already laid out in it; it
+ * comes into sight as the shape grows, and the keyboard goes to its reply box.
+ */
+function goChat(id = null) {
+  clearTimeout(openTimer);
+  clearTimeout(closeTimer);
+  clearTimeout(peekTimer);
+  const pick = id ?? (state === "open" ? selected : preselect(listed(), peeking?.sessionId ?? null, lastPeeked, savedSession(storage())));
+  peeking = null;
+  queue = [];
+  lastPeeked = null;
+  steppedDown = false;
+  if (listOpen) showList(false);
+  menu.close();
+  if (pick) saveSession(storage(), pick);
+  if (state !== "chat") go("chat");
+  // The frame first, so the keyboard is in the chat even while its reply box is off (a turn running).
+  els.chatFrame.focus({ preventScroll: true });
+  const chat = embed();
+  if (chat) chat.show(pick);
+  else chatWanted = pick ?? "";
+}
+
+/** Back down from the chat to the small dock (Esc, its button, the notch's band), on the session the chat shows. */
+function stepDown() {
+  if (state !== "chat") return;
+  const chat = embed();
+  const id = chat?.selected?.() ?? selected;
+  chat?.hide();
+  // Wherever the pointer is, it is on the open dock only once it moves there (point).
+  inside = false;
+  open(typeof id === "string" ? id : null);
+  steppedDown = true;
+}
+
+/** The window lost the keyboard to another app (not to the chat's own frame): the chat is put away, as a press beside it would. */
+function focusGoneSoon() {
+  setTimeout(() => {
+    if (state === "chat" && !document.hasFocus()) close();
+  }, 60);
+}
+
+els.chatFrame.addEventListener("load", () => {
+  const win = els.chatFrame.contentWindow;
+  win?.addEventListener("blur", focusGoneSoon);
+  if (state === "chat" && chatWanted !== null) embed()?.show(chatWanted || null);
+  chatWanted = null;
+});
+
+// The chat's page asks to step back down (its Esc, its button). Only its own frame, on this origin.
+window.addEventListener("message", (e) => {
+  if (e.origin !== location.origin || e.source !== els.chatFrame.contentWindow) return;
+  if (e.data?.holmEmbed === "down") stepDown();
+});
+
+// One click from the notch to the chat (dock-state.js, clickAction): the pill, the peek, the notch's
+// band over the open dock or its head; the band over the chat steps it back down.
+window.addEventListener("click", (e) => {
+  if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || !over(e.clientX, e.clientY)) return;
+  const target = e.target instanceof Element ? e.target : null;
+  const control = target?.closest("button, a, input, select, textarea, label, summary, .menu, [contenteditable]") != null;
+  const head = target?.closest(".panel-head") != null;
+  const action = clickAction(state, { y: e.clientY - els.island.getBoundingClientRect().top, head, control }, NOTCH);
+  if (action === "chat") goChat(state === "peek" ? peeking?.sessionId ?? null : null);
+  else if (action === "down") stepDown();
+});
+els.expand.addEventListener("click", () => goChat(selected));
+
+// The shell asks for the chat (its tray's Open chat, a link to the chat view anywhere): the island grows into it.
+try {
+  window.intuitionDock?.onChat?.((id) => goChat(typeof id === "string" && id ? id : null));
+} catch {
+  // A bridge without it: the chat is grown into from the page only.
+}
 
 // ---------- the connection ----------
 
@@ -1416,8 +1597,8 @@ setInterval(() => {
 
 // The contract's sizes (docs/protocol.md, "Dock"). The island's box is the window; each state's
 // content has its own size and never changes with the island's shape.
-els.island.style.width = `${DOCK_WINDOW.width}px`;
-els.island.style.height = `${DOCK_WINDOW.height}px`;
+els.island.style.width = `${WINDOW.width}px`;
+els.island.style.height = `${WINDOW.height}px`;
 // Out of a notch (dock.css, [data-notch]): the pill spans the notch and its wings, and the peek's
 // line and the panel's content start below the notch's band.
 if (NOTCH) {
@@ -1431,6 +1612,12 @@ els.peek.style.width = `${SIZES.peek.width}px`;
 els.peek.style.height = `${DOCK_SIZES.peek.height}px`;
 els.panel.style.width = `${SIZES.open.width}px`;
 els.panel.style.maxHeight = `${SIZES.open.height}px`;
+els.chat.style.width = `${SIZES.chat.width}px`;
+els.chat.style.height = `${SIZES.chat.height}px`;
 renderPill();
 go("idle");
 connect();
+// The chat's page, loaded once and kept (D0042): soon after the dock's own, so it does not hold up the pill.
+setTimeout(() => {
+  els.chatFrame.src = "/?embed=dock";
+}, 300);

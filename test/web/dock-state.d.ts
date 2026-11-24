@@ -1,6 +1,6 @@
 // Types for src/web/dock-state.js, so the tests typecheck (see chat-format.d.ts for why they live here).
 declare module "*/web/dock-state.js" {
-  export type DockState = "idle" | "peek" | "open";
+  export type DockState = "idle" | "peek" | "open" | "chat";
   interface SessionLike { id: string; status: string; updatedAt: string }
   export interface Peek { kind: "finished" | "needs_approval" | "error"; sessionId: string; title: string; body: string }
   export interface Pill { tone: "none" | "running" | "needs" | "failed"; text: string; status: string | null; failed: boolean }
@@ -10,15 +10,18 @@ declare module "*/web/dock-state.js" {
   export const QUIET_HEIGHT: number;
   export const NOTCH_WING: number;
   export function parseNotch(search: string): Size | null;
-  export function dockSizes(notch: Size | null): Record<DockState, Size>;
+  export function parseChat(search: string): Size | null;
+  export function dockWindow(chat?: Size): Size;
+  export function dockSizes(notch: Size | null, chat?: Size): Record<DockState, Size>;
+  export function clickAction(state: DockState, click: { y: number; head?: boolean; control?: boolean }, notch?: Size | null): "chat" | "down" | null;
   export const PEEK_MS: number;
   export const OPEN_MS: number;
   export const CLOSE_MS: number;
   export const PEEK_MAX: number;
   export const RECENT_EVENTS: number;
-  export function islandRect(state: DockState, notch?: Size | null): { x: number; y: number; width: number; height: number };
-  export function islandSize(state: DockState, measured?: { pill?: number; panel?: number; quiet?: boolean }, notch?: Size | null): Size;
-  export function onIsland(state: DockState, drawn: Size, x: number, y: number, notch?: Size | null): boolean;
+  export function islandRect(state: DockState, notch?: Size | null, chat?: Size): { x: number; y: number; width: number; height: number };
+  export function islandSize(state: DockState, measured?: { pill?: number; panel?: number; quiet?: boolean }, notch?: Size | null, chat?: Size): Size;
+  export function onIsland(state: DockState, drawn: Size, x: number, y: number, notch?: Size | null, chat?: Size): boolean;
   export function pillOf(sessions: Iterable<SessionLike>): Pill;
   export function asPeek(notification: unknown): Peek | null;
   export function enqueue(queue: Peek[], peek: Peek, max?: number): Peek[];

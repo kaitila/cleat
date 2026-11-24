@@ -3,18 +3,38 @@
 import { byActivity } from "./chat-format.js";
 import { commandDigit, commandK, MAC } from "./keys.js";
 
-/** The shell's window, in CSS pixels: one size for the dock's whole life. The same numbers as the shell's DOCK_WINDOW. */
-export const DOCK_WINDOW = { width: 460, height: 480 };
 /**
  * The most the island covers in each state, hanging from the top centre of the window: the same
  * numbers as the shell's DOCK_SIZES. The shell takes the mouse only inside this rectangle, so the
  * island is never drawn outside it. Idle is as narrow as its text, open as short as its content.
+ * Chat is the chat view, the notch grown large (D0042): this size when the shell tells none
+ * (`?chat=WxH`, parseChat).
  */
 export const DOCK_SIZES = {
   idle: { width: 128, height: 22 },
   peek: { width: 380, height: 40 },
-  open: { width: DOCK_WINDOW.width, height: DOCK_WINDOW.height },
+  open: { width: 460, height: 480 },
+  chat: { width: 960, height: 680 },
 };
+
+/** The shell's window for a chat size: as large as the largest state, for the dock's whole life. The same as the shell's dockWindow. */
+export function dockWindow(chat = DOCK_SIZES.chat) {
+  return { width: Math.max(DOCK_SIZES.open.width, chat.width), height: Math.max(DOCK_SIZES.open.height, chat.height) };
+}
+/** The window for the chat's default size: the same numbers as the shell's DOCK_WINDOW. */
+export const DOCK_WINDOW = dockWindow();
+
+/**
+ * The chat's size the shell worked out for its display, from the page's query (`?chat=912x726`, in
+ * CSS pixels), or null: none, or one smaller than the open dock or larger than any screen.
+ */
+export function parseChat(search) {
+  const m = /^(\d{3,4})x(\d{3,4})$/.exec(new URLSearchParams(search).get("chat") ?? "");
+  if (!m) return null;
+  const chat = { width: Number(m[1]), height: Number(m[2]) };
+  const fits = (v, least) => v >= least && v <= 4000;
+  return fits(chat.width, DOCK_SIZES.open.width) && fits(chat.height, DOCK_SIZES.open.height) ? chat : null;
+}
 
 /**
  * Beside a Mac's notch, a wing on each side shows the idle pill's dot (left) and words (right): the
@@ -38,13 +58,14 @@ export function parseNotch(search) {
  * notch: idle is the notch and its wings at the notch's height, peek the peek's line below the
  * notch's band, open as before. The same as the shell's dockSizes.
  */
-export function dockSizes(notch) {
-  if (!notch) return DOCK_SIZES;
+export function dockSizes(notch, chat = DOCK_SIZES.chat) {
+  if (!notch) return { ...DOCK_SIZES, chat };
   const idle = { width: notch.width + 2 * NOTCH_WING, height: notch.height };
   return {
     idle,
     peek: { width: Math.max(DOCK_SIZES.peek.width, idle.width), height: notch.height + DOCK_SIZES.peek.height },
     open: DOCK_SIZES.open,
+    chat,
   };
 }
 
@@ -68,19 +89,19 @@ const KINDS = ["finished", "needs_approval", "error"];
  * The island's rectangle in a state, inside the window: the same as the shell's islandRect. With a
  * notch, idle's is the notch alone: the wings let clicks through to the menu bar.
  */
-export function islandRect(state, notch = null) {
-  const { width, height } = state === "idle" && notch ? notch : dockSizes(notch)[state];
-  return { x: (DOCK_WINDOW.width - width) / 2, y: 0, width, height };
+export function islandRect(state, notch = null, chat = DOCK_SIZES.chat) {
+  const { width, height } = state === "idle" && notch ? notch : dockSizes(notch, chat)[state];
+  return { x: (dockWindow(chat).width - width) / 2, y: 0, width, height };
 }
 
 /**
  * The size the island is drawn at: never more than the state's rectangle. Idle is as wide as the
  * pill's content (`measured.pill`, in pixels) and at least as wide as it is tall, and shorter with nothing going on
  * (`measured.quiet`); open is as tall
- * as the panel's content (`measured.panel`); peek is exactly its rectangle.
+ * as the panel's content (`measured.panel`); peek and chat are exactly their rectangles.
  */
-export function islandSize(state, measured, notch = null) {
-  const sizes = dockSizes(notch);
+export function islandSize(state, measured, notch = null, chat = DOCK_SIZES.chat) {
+  const sizes = dockSizes(notch, chat);
   const most = sizes[state];
   const fit = (value, least, limit) => Math.min(limit, Math.max(least, Math.ceil(Number.isFinite(value) ? value : 0)));
   // With a notch, idle is the notch itself when nothing goes on (black on black: nothing shows), else the notch and its wings.
@@ -98,11 +119,26 @@ export function islandSize(state, measured, notch = null) {
  * is drawn (`drawn`), and, closed, anywhere in the state's rectangle, which is where the shell
  * takes the mouse: the dot of a quiet pill is small, its rectangle is the handle.
  */
-export function onIsland(state, drawn, x, y, notch = null) {
+export function onIsland(state, drawn, x, y, notch = null, chat = DOCK_SIZES.chat) {
   const inside = (size) => y >= 0 && y < size.height && Math.abs(x) <= size.width / 2;
   // Idle under a notch: the notch is the handle, as the shell takes the mouse there only.
   if (state === "idle" && notch) return inside(notch);
-  return inside(drawn) || (state !== "open" && inside(dockSizes(notch)[state]));
+  return inside(drawn) || (state !== "open" && inside(dockSizes(notch, chat)[state]));
+}
+
+/**
+ * What a click on the island does (D0042): "chat" grows it into the chat, "down" steps the chat back
+ * down to the open dock, null leaves it to what was clicked. One click from the notch: on the pill or
+ * the peek; on the open dock, on the notch's band above its head or on the head itself, but not on
+ * one of the head's controls (`control`); on the chat, the notch's band steps it back down. `y` is
+ * from the island's top edge; `head`: the click was on the open dock's head.
+ */
+export function clickAction(state, { y, head = false, control = false }, notch = null) {
+  const band = notch !== null && y >= 0 && y < notch.height;
+  if (state === "idle" || state === "peek") return "chat";
+  if (state === "open") return !control && (band || head) ? "chat" : null;
+  if (state === "chat") return band ? "down" : null;
+  return null;
 }
 
 /**

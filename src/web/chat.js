@@ -40,6 +40,7 @@ import { resumeControl } from "./chat-resume.js";
 import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.js";
 import { renderMarkdown } from "./markdown.js";
 import { answersList, questionDecidedLabel, questionForm, questionsOf } from "./questions.js";
+import { commandK } from "./keys.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -72,6 +73,34 @@ const els = {
 };
 const resume = resumeControl(document);
 els.meta.append(resume.el);
+
+/**
+ * True inside the dock, grown into the chat (`/?embed=dock`, D0042): the page is the island's
+ * content, dark on the notch's black, with no backdrop of its own. The dock shows and hides it
+ * (window.holmEmbed, below), and the page takes the keyboard only while it is shown. A link to
+ * another page opens as a window of the shell (target _blank), never inside the island, and Esc that
+ * nothing here takes steps back down to the small dock.
+ */
+const EMBED = new URLSearchParams(location.search).get("embed") === "dock";
+/** False while the dock does not show the page: it puts the keyboard nowhere. Always true on its own. */
+let active = !EMBED;
+const collapse = $("collapse");
+/** Tells the dock to step back down to its small open view. */
+function stepDown() {
+  try {
+    window.parent.postMessage({ holmEmbed: "down" }, location.origin);
+  } catch {
+    // No dock around it: nothing to step down to.
+  }
+}
+if (EMBED) {
+  document.documentElement.dataset.embed = "dock";
+  document.body.classList.remove("backdrop");
+  document.body.classList.add("dark");
+  for (const a of document.querySelectorAll('a[href="/prompt"], a.settings-link')) a.target = "_blank";
+  collapse.hidden = false;
+  collapse.addEventListener("click", stepDown);
+}
 
 /** An element with a class and text. The text is set as textContent, so it is never parsed. */
 function h(tag, className, text) {
@@ -927,10 +956,11 @@ function renderReply() {
   } else {
     els.hint.textContent = replyError ? `Couldn't send: ${replyError}` : sending ? "Sending." : state.hint;
   }
-  // Back to the box once, at the start and after a turn, unless the person has moved on to something else.
-  if (enabled) {
-    const active = document.activeElement;
-    if (wantFocus && (active === null || active === document.body || active === els.text)) els.text.focus();
+  // Back to the box once, at the start and after a turn, unless the person has moved on to something
+  // else. Inside the dock, only while it shows the page: else the focus waits for it.
+  if (enabled && active) {
+    const focused = document.activeElement;
+    if (wantFocus && (focused === null || focused === document.body || focused === els.text)) els.text.focus({ preventScroll: true });
     wantFocus = false;
   }
 }
@@ -996,7 +1026,8 @@ els.reply.addEventListener("submit", (e) => e.preventDefault());
  * holds it unfolds; a session picked for the person (the newest) leaves the folds alone.
  */
 function select(id, push = false, reveal = true) {
-  if (push) history.pushState(null, "", id ? `/?session=${encodeURIComponent(id)}` : "/");
+  // Inside the dock there is no address bar: its history stays as it is.
+  if (push && !EMBED) history.pushState(null, "", id ? `/?session=${encodeURIComponent(id)}` : "/");
   if (id === selected) return;
   if (selected) {
     if (els.text.value) typed.set(selected, els.text.value);
@@ -1079,7 +1110,7 @@ function onMessage(message) {
       typed.delete(id);
       if (id === selected) {
         const next = pickFor(null);
-        history.replaceState(null, "", next ? `/?session=${encodeURIComponent(next)}` : "/");
+        if (!EMBED) history.replaceState(null, "", next ? `/?session=${encodeURIComponent(next)}` : "/");
         select(next, false, false);
       }
       renderSidebar();
@@ -1139,6 +1170,47 @@ setInterval(() => {
   const now = Date.now();
   for (const [id, row] of rows) row.time.textContent = relativeTime(sessions.get(id)?.updatedAt ?? "", now);
 }, 30_000);
+
+// ---------- inside the dock (D0042) ----------
+
+if (EMBED) {
+  // Esc that nothing on the page took (the search, a menu, a rename and the confirmation take theirs
+  // first): back to the small dock. ⌘K (Ctrl+K off a Mac) finds a session, as in the open dock.
+  document.addEventListener("keydown", (e) => {
+    if (e.defaultPrevented || e.isComposing || menu.isOpen || els.confirm.open) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      stepDown();
+    } else if (commandK(e)) {
+      e.preventDefault();
+      els.search.focus();
+      els.search.select();
+    }
+  });
+  /**
+   * What the dock asks of the page. show: the island grew into it, on a session (its id) or on the
+   * one shown; the keyboard goes to its reply. hide: it shrank away; the keyboard leaves it.
+   * selected: the session shown, for the small dock to step down onto.
+   */
+  window.holmEmbed = {
+    show(id) {
+      active = true;
+      if (typeof id === "string" && id && id !== selected) select(id, false, true);
+      // The stream at its newest, and the keyboard in the reply box (once it is on, if a turn runs).
+      stick = true;
+      follow();
+      wantFocus = true;
+      renderReply();
+    },
+    hide() {
+      active = false;
+      wantFocus = false;
+      menu.close();
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    },
+    selected: () => selected,
+  };
+}
 
 renderSidebar();
 renderHead();

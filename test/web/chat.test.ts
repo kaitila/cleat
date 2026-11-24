@@ -58,7 +58,7 @@ describe("served by the runner", () => {
 
   test("every module chat.js imports is one the runner serves", async () => {
     const imports = [...source("chat.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports).toEqual(["chat-format.js", "chat-manage.js", "chat-resume.js", "agent.js", "markdown.js", "questions.js"]);
+    expect(imports).toEqual(["chat-format.js", "chat-manage.js", "chat-resume.js", "agent.js", "markdown.js", "questions.js", "keys.js"]);
     expect([...source("chat-manage.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     expect([...source("chat-resume.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     for (const file of imports) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
