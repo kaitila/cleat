@@ -22,13 +22,13 @@ import { startServer } from "../src/runner/server";
 const TIMEOUT_MS = 300_000;
 const COUNT = "Count slowly from 1 to 200, one number per line";
 
-const dir = mkdtempSync(join(tmpdir(), "holm-smoke-manage-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-smoke-manage-"));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const configFile = join(dir, "config.json");
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace }] }));
-// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
+// Its own environment, so a CLEAT_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ CLEAT_CONFIG: configFile, CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}`);
 
 const steps: string[] = [];

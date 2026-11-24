@@ -329,7 +329,7 @@ const SHELL_TOPIC = "shell";
 
 /**
  * Starts the runner. `driver` replaces the agent the config asks for, `mounts` the rule for image
- * paths (by default this layout's: /mnt for windows-wsl, <temp>/holm/ on macOS and Linux), and `sync` the transcript sync's reader and timings (all for tests:
+ * paths (by default this layout's: /mnt for windows-wsl, <temp>/cleat/ on macOS and Linux), and `sync` the transcript sync's reader and timings (all for tests:
  * CI has no /mnt/c and no transcripts). With the fake agent there are no transcripts to read, Claude Code's or Codex's.
  * `ops` replaces what renames, forks and deletes transcripts (manage.ts): with the fake agent, nothing does.
  */

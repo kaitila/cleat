@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, normalize } from "node:path";
 import { buildSite, SITE, WEB } from "../scripts/build-site";
 
-const out = mkdtempSync(join(tmpdir(), "holm-site-test-"));
+const out = mkdtempSync(join(tmpdir(), "cleat-site-test-"));
 const files = buildSite(out);
 afterAll(() => rmSync(out, { recursive: true, force: true }));
 const read = (file: string) => readFileSync(join(out, file), "utf8");
@@ -18,10 +18,10 @@ const base = readFileSync(join(WEB, "base.css"), "utf8");
 const noComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "");
 
 /** The repository: the one other place the page links to (links, not loads). */
-const REPO = "https://github.com/kaitila/holm";
+const REPO = "https://github.com/kaitila/cleat";
 /** bun's installer, named in the install line (D0045). */
 /** The install line's script, on the site's own address (D0047). */
-const INSTALL_SCRIPT = "https://kaitila.github.io/holm/install.sh";
+const INSTALL_SCRIPT = "https://kaitila.github.io/cleat/install.sh";
 /** The SVG namespace in base.css's grain: a name inside a data: URL, not a request. */
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -66,7 +66,7 @@ describe("it loads nothing from outside its own folder", () => {
     }
   });
 
-  test("every local reference is relative and is a file in the build, so the page works under /holm/", () => {
+  test("every local reference is relative and is a file in the build, so the page works under /cleat/", () => {
     const local = [
       ...[...noComments(html).matchAll(/\s(?:href|src|srcset)="([^"]*)"/g)].map((m) => ["index.html", m[1]!] as const),
       ...files.filter((f) => f.endsWith(".css")).flatMap((f) => [...noComments(read(f)).matchAll(/url\("?([^")]+)"?\)/g)].map((m) => [f, m[1]!] as const)),
@@ -185,12 +185,12 @@ describe("the install script (D0047)", () => {
     expect({ code: parsed.exitCode, err: parsed.stderr.toString() }).toEqual({ code: 0, err: "" });
   });
 
-  test("gets bun only when it is missing, installs holm from GitHub, and runs setup on the terminal", () => {
+  test("gets bun only when it is missing, installs cleat from GitHub, and runs setup on the terminal", () => {
     expect(script).toContain("if ! command -v bun >/dev/null 2>&1; then");
     expect(script).toContain("curl -fsSL https://bun.sh/install | bash");
-    expect(script).toContain("bun install -g github:kaitila/holm");
-    expect(script).toContain("holm setup </dev/tty");
-    expect(script).toContain("holm setup --yes");
+    expect(script).toContain("bun install -g github:kaitila/cleat");
+    expect(script).toContain("cleat setup </dev/tty");
+    expect(script).toContain("cleat setup --yes");
     // Nothing else is fetched or run: the one other URL in it is the line's own, in a comment.
     const urls = [...script.matchAll(/https?:\/\/[^\s"')]+/g)].map((m) => m[0]);
     expect([...new Set(urls)].sort()).toEqual(["https://bun.sh/install", INSTALL_SCRIPT]);

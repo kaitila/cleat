@@ -5,9 +5,9 @@ import type { Area } from "./geometry";
 import { sameOrigin } from "./origin";
 
 /** The bridge's three calls, one channel each. */
-export const SNIP_CAPTURE = "holm-snip:capture";
-export const SNIP_CROP = "holm-snip:crop";
-export const SNIP_CLOSE = "holm-snip:close";
+export const SNIP_CAPTURE = "cleat-snip:capture";
+export const SNIP_CROP = "cleat-snip:crop";
+export const SNIP_CLOSE = "cleat-snip:close";
 /** The preload's bundle, beside main.cjs in the app folder. */
 export const SNIP_PRELOAD = "snip-preload.cjs";
 /** The overlay page, served by the runner's /assets/ route. */

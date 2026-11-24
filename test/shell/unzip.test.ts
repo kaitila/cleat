@@ -67,7 +67,7 @@ function zipOf(items: Item[], { badCrc = false } = {}): Uint8Array {
   return new Uint8Array(Buffer.concat([...locals, ...centrals, end]));
 }
 
-const temp = () => mkdtempSync(join(tmpdir(), "holm-unzip-"));
+const temp = () => mkdtempSync(join(tmpdir(), "cleat-unzip-"));
 
 /** What Electron's macOS zip looks like, in small: an executable, a framework of symlinks, a version file. */
 const APP: Item[] = [

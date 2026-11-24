@@ -66,7 +66,7 @@ interface Settings {
   port: number;
 }
 
-const dir = mkdtempSync(join(tmpdir(), "holm-settings-ui-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-settings-ui-"));
 for (const name of ["alpha", "beta"]) mkdirSync(join(dir, name));
 const shots = join(dir, "screenshots");
 mkdirSync(shots);
@@ -454,7 +454,7 @@ try {
   const cached = await cachedCtx.newPage();
   await cached.addInitScript(() => {
     try {
-      if (!sessionStorage.getItem("seeded")) localStorage.setItem("holm.theme", "dark");
+      if (!sessionStorage.getItem("seeded")) localStorage.setItem("cleat.theme", "dark");
       sessionStorage.setItem("seeded", "1");
     } catch {}
   }, undefined);
@@ -471,7 +471,7 @@ try {
     const snip = await snipCtx.newPage();
     const grey = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560"><rect width="900" height="560" fill="#7a8494"/><rect x="80" y="60" width="420" height="260" fill="#e9edf2"/></svg>')}`;
     await snip.addInitScript((capture: string) => {
-      (window as unknown as Record<string, unknown>).holmSnip = { getCapture: async () => capture, crop: async () => "", close: () => {} };
+      (window as unknown as Record<string, unknown>).cleatSnip = { getCapture: async () => capture, crop: async () => "", close: () => {} };
     }, grey);
     await snip.goto(`${url}/assets/snip.html`);
     await snip.waitForFunction(() => (window as unknown as { snipReady?: Promise<boolean> }).snipReady?.then((ok) => ok), undefined, { timeout: 5000 }).catch(() => {});

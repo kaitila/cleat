@@ -18,13 +18,13 @@ const TIMEOUT_MS = 180_000;
 const FIRST = "Remember the word heron. Reply with exactly: ok";
 const SECOND = "Which word did I ask you to remember? Answer with that one word.";
 
-const dir = mkdtempSync(join(tmpdir(), "holm-smoke-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-smoke-"));
 const workspace = join(dir, "workspace");
 mkdirSync(workspace);
 const configFile = join(dir, "config.json");
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace }] }));
-// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
+// Its own environment, so a CLEAT_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ CLEAT_CONFIG: configFile, CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}`);
 
 const seen = {

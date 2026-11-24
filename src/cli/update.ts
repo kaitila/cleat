@@ -1,4 +1,4 @@
-// `holm update` and `holm login` (D0045).
+// `cleat update` and `cleat login` (D0045).
 // update: a git checkout pulls and runs `bun install`; an install made by `bun install -g` (the README's line)
 // installs the package again from GitHub. Then `up`, in a new process, so the new code restarts what is older.
 // login: the agent's own login, run on this terminal: the Agent SDK's Claude Code (`auth login`), or Codex (`login`).
@@ -8,7 +8,7 @@ import { claudeBinary } from "../runner/agent-claude";
 import { codexBinary } from "../runner/agent-codex";
 
 /** Where `bun install -g` gets the app: the repository's default branch on GitHub. */
-export const PACKAGE = "github:kaitila/holm";
+export const PACKAGE = "github:kaitila/cleat";
 
 /** The folder the app runs from: a git checkout, or the package bun installed globally. */
 export const APP = join(import.meta.dir, "..", "..");
@@ -16,9 +16,9 @@ export const APP = join(import.meta.dir, "..", "..");
 /** The app's package name (package.json's), as `bun remove --global` takes it. */
 export function packageName(app = APP): string {
   try {
-    return (JSON.parse(readFileSync(join(app, "package.json"), "utf8")) as { name?: string }).name ?? "holm";
+    return (JSON.parse(readFileSync(join(app, "package.json"), "utf8")) as { name?: string }).name ?? "cleat";
   } catch {
-    return "holm";
+    return "cleat";
   }
 }
 

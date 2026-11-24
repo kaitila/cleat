@@ -153,7 +153,7 @@ export class Manage {
         workspace: source.workspace,
         cwd: source.cwd,
         title,
-        source: "holm",
+        source: "cleat",
         status: "idle",
         createdAt: now,
         updatedAt: now,

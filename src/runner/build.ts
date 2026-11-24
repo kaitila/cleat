@@ -22,7 +22,7 @@ function files(path: string): string[] {
 /**
  * A hash over the names and contents of the files in SOURCES. It changes whenever one of them does
  * (a pull, a checkout, an edit), and not when a file is only touched. `override` replaces it: the
- * tests' HOLM_BUILD_ID, read in config.ts.
+ * tests' CLEAT_BUILD_ID, read in config.ts.
  */
 export function buildId(override?: string | null, repo = REPO): string {
   if (override) return override;

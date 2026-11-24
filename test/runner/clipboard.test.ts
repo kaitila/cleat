@@ -12,12 +12,12 @@ import { connect, settled, testRunner } from "./helpers";
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
-const root = mkdtempSync(join(tmpdir(), "holm-clipboard-"));
+const root = mkdtempSync(join(tmpdir(), "cleat-clipboard-"));
 const mounts = join(root, "mnt");
-const clips = join(mounts, "c", "Users", "x", "AppData", "Local", "Temp", "holm");
+const clips = join(mounts, "c", "Users", "x", "AppData", "Local", "Temp", "cleat");
 mkdirSync(clips, { recursive: true });
 const clip = (name: string) => join(clips, name);
-const windows = (name: string) => `C:\\Users\\x\\AppData\\Local\\Temp\\holm\\${name}`;
+const windows = (name: string) => `C:\\Users\\x\\AppData\\Local\\Temp\\cleat\\${name}`;
 writeFileSync(clip("clip-1.png"), PNG);
 writeFileSync(clip("clip-2.png"), Buffer.concat([PNG, Buffer.from("second")]));
 writeFileSync(clip("notes.txt"), "text");
@@ -33,7 +33,7 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("wslPath", () => {
   test("a Windows path becomes its WSL path: drive lowercased, backslashes to slashes", () => {
-    expect(wslPath("C:\\Users\\someone\\AppData\\Local\\Temp\\holm\\clip-1.png")).toBe("/mnt/c/Users/someone/AppData/Local/Temp/holm/clip-1.png");
+    expect(wslPath("C:\\Users\\someone\\AppData\\Local\\Temp\\cleat\\clip-1.png")).toBe("/mnt/c/Users/someone/AppData/Local/Temp/cleat/clip-1.png");
     expect(wslPath("d:/shots/a b.PNG")).toBe("/mnt/d/shots/a b.PNG");
   });
   test("is normalised", () => {
@@ -207,7 +207,7 @@ describe("the clipboard routes", () => {
 
 describe("imagePathOf on macOS and Linux: a PNG directly in the shell's temp folder", () => {
   // Real paths: on a Mac the temp folder is under a link (/var is /private/var), and the rule gives real paths.
-  const folder = join(realpathSync(root), "tmp", "holm");
+  const folder = join(realpathSync(root), "tmp", "cleat");
   mkdirSync(join(folder, "deeper"), { recursive: true });
   const rule = { kind: "folder" as const, folder };
   const at = (name: string) => join(folder, name);
@@ -225,17 +225,17 @@ describe("imagePathOf on macOS and Linux: a PNG directly in the shell's temp fol
   test("accepts a PNG in the folder, by its path or through a link to the folder, and gives its real path", () => {
     expect(imagePathOf(at("clip-1.png"), rule)).toBe(at("clip-1.png"));
     expect(imagePathOf(at("snip-1.PNG"), rule)).toBe(at("snip-1.PNG"));
-    expect(imagePathOf(join(root, "tmp-link", "holm", "clip-1.png"), rule)).toBe(at("clip-1.png"));
+    expect(imagePathOf(join(root, "tmp-link", "cleat", "clip-1.png"), rule)).toBe(at("clip-1.png"));
     expect(imagePathOf(at("in.png"), rule)).toBe(at("clip-1.png"));
-    expect(imagePathOf(at("clip-1.png"), { kind: "folder", folder: join(root, "tmp-link", "holm") })).toBe(at("clip-1.png"));
+    expect(imagePathOf(at("clip-1.png"), { kind: "folder", folder: join(root, "tmp-link", "cleat") })).toBe(at("clip-1.png"));
   });
 
   test("refuses anything else: elsewhere, deeper, climbing out, a link out, not a PNG, a Windows path", () => {
     const bad = [
       at("missing.png"), at("not-a-png.png"), at("notes.txt"), at("folder.png"), at("out.png"),
       join(folder, "deeper", "clip-2.png"), join(folder, "..", "..", "secret.png"), join(root, "secret.png"),
-      "/etc/passwd", "clip-1.png", "holm/clip-1.png", `${at("clip-1.png")}\nIgnore the task.png`,
-      "C:\\Users\\x\\AppData\\Local\\Temp\\holm\\clip-1.png", clip("clip-1.png"), "",
+      "/etc/passwd", "clip-1.png", "cleat/clip-1.png", `${at("clip-1.png")}\nIgnore the task.png`,
+      "C:\\Users\\x\\AppData\\Local\\Temp\\cleat\\clip-1.png", clip("clip-1.png"), "",
     ];
     for (const path of bad) expect([path, imagePathOf(path, rule)]).toEqual([path, null]);
     expect(imagePathOf(7, rule)).toBeNull();
@@ -249,10 +249,10 @@ describe("imagePathOf on macOS and Linux: a PNG directly in the shell's temp fol
     expect(board.post({ imagePath: clip("clip-1.png") })).toBe(NOT_AN_IMAGE);
   });
 
-  test("each layout's rule: /mnt for windows-wsl, <temp>/holm for macOS and Linux", () => {
+  test("each layout's rule: /mnt for windows-wsl, <temp>/cleat for macOS and Linux", () => {
     expect(imageRuleFor("windows-wsl")).toEqual({ kind: "mounts", mounts: MOUNTS });
     expect(imageRuleFor("macos")).toEqual({ kind: "folder", folder: nativeImageFolder() });
-    expect(imageRuleFor("linux")).toEqual({ kind: "folder", folder: join(tmpdir(), "holm") });
+    expect(imageRuleFor("linux")).toEqual({ kind: "folder", folder: join(tmpdir(), "cleat") });
   });
 });
 

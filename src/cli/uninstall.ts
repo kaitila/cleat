@@ -1,4 +1,4 @@
-// `holm uninstall`: undoes `setup`. Start at login off, the shell stopped and removed, the runner
+// `cleat uninstall`: undoes `setup`. Start at login off, the shell stopped and removed, the runner
 // stopped, the command unlinked. The config and the sessions stay unless --purge.
 import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
@@ -106,7 +106,7 @@ export async function uninstall(options: UninstallOptions, platform: Platform, a
       if (existsSync(folder) && readdirSync(folder).length === 0) rmSync(folder, { recursive: true, force: true });
     });
   } else {
-    log(`kept the config (${configPath(env)}) and the sessions: \`holm uninstall --purge\` removes them too`);
+    log(`kept the config (${configPath(env)}) and the sessions: \`cleat uninstall --purge\` removes them too`);
   }
   log(failed ? "uninstall finished, with the failures above" : "uninstalled. Delete the cloned folder to remove the rest");
   return failed ? 1 : 0;

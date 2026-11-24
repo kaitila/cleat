@@ -1,4 +1,4 @@
-// `holm setup`: from a fresh install (bun install -g, or a clone) to a running app, as a guided flow (docs/decisions/D0030).
+// `cleat setup`: from a fresh install (bun install -g, or a clone) to a running app, as a guided flow (docs/decisions/D0030).
 // 1. Requirements: a spinner per check. 2. Workspaces. 3. Hotkeys. 4. Permissions. 5. Start at login.
 // Then the work, a spinner per step and a checklist, and an outro with what to do next.
 // Every answer is asked before anything is written; the config is written once, atomically, at the start of the work.
@@ -236,7 +236,7 @@ export function unanswered(options: SetupOptions): string[] {
   return missing;
 }
 
-/** True when there is no config yet: plain `holm` then runs setup. */
+/** True when there is no config yet: plain `cleat` then runs setup. */
 export function firstRun(env: Env = process.env): boolean {
   return !existsSync(configPath(env));
 }
@@ -257,7 +257,7 @@ export interface Actions {
   startShell(prompt: boolean): void;
   /** Turns start at login on or off; returns whether it is on. */
   login(on: boolean): Promise<boolean>;
-  /** Runs the agent's own login on this terminal (`holm login`); returns its exit code. Optional: without it setup only says the command. */
+  /** Runs the agent's own login on this terminal (`cleat login`); returns its exit code. Optional: without it setup only says the command. */
   agentLogin?(agent: "claude" | "codex"): Promise<number>;
 }
 
@@ -311,7 +311,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
     return CANCELLED;
   };
 
-  ui.intro(`holm ${context.version ?? ""} setup`.replace(/\s+/g, " "));
+  ui.intro(`cleat ${context.version ?? ""} setup`.replace(/\s+/g, " "));
   ui.line(c.dim(layoutLine(platform)));
 
   // 1. Requirements.
@@ -328,7 +328,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
     const again = await ask.select({ message: "Once they are fixed", options: [{ value: true, label: "Check again" }, { value: false, label: "Quit" }], initial: true });
     if (again === CANCEL) return cancelled();
     if (!again) {
-      ui.outro("run `holm setup` again once they are fixed");
+      ui.outro("run `cleat setup` again once they are fixed");
       return 1;
     }
   }
@@ -337,7 +337,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
     const now = !options.yes && interactive && actions.agentLogin ? await ask.confirm({ message: "Log in to Claude Code now? (it opens a page in your browser)", initial: true }) : false;
     if (now === CANCEL) return cancelled();
     const loggedIn = now && (await actions.agentLogin!("claude")) === 0 && (await requirements(ui, platform, probes)).some((ch) => ch.name === "Claude Code login" && ch.ok);
-    if (!loggedIn) ui.line(`${ui.mark("warn")} sessions fail until you log in: run ${c.cyan("holm login")} (or ${c.cyan("holm login codex")} for Codex)`);
+    if (!loggedIn) ui.line(`${ui.mark("warn")} sessions fail until you log in: run ${c.cyan("cleat login")} (or ${c.cyan("cleat login codex")} for Codex)`);
   }
 
   // A missing config is not written here (loadConfig would write the default one): nothing is, until every answer is in.
@@ -347,7 +347,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
     current = existsSync(path) ? loadConfig(env).settings : SettingsSchema.parse(DEFAULT_CONFIG);
   } catch (e) {
     ui.line(`${ui.mark("fail")} the config cannot be read: ${errorText(e)}`);
-    ui.outro("correct it or move it away, then run `holm setup` again");
+    ui.outro("correct it or move it away, then run `cleat setup` again");
     return 1;
   }
 
@@ -435,7 +435,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
   ui.step(5, "Start at login");
   let startOnLogin = options.login ?? true;
   if (options.login === undefined && !options.yes) {
-    const on = await ask.confirm({ message: "Start holm when you log in?", initial: true });
+    const on = await ask.confirm({ message: "Start cleat when you log in?", initial: true });
     if (on === CANCEL) return cancelled();
     startOnLogin = on;
   }
@@ -455,9 +455,9 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
       return true;
     },
     () => ({ state: "ok", text: `config written  ${c.dim(tilde(path, home))}` }),
-    (e) => ({ state: "fail", text: `config not written: ${errorText(e)}`, more: ["retry: holm setup"] }),
+    (e) => ({ state: "fail", text: `config not written: ${errorText(e)}`, more: ["retry: cleat setup"] }),
   );
-  record("config written", written === undefined ? "fail" : "ok", "holm setup");
+  record("config written", written === undefined ? "fail" : "ok", "cleat setup");
   if (written === undefined) return finish(ui, results, 1);
 
   const linkLines: string[] = [];
@@ -478,10 +478,10 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
       "Installing the shell",
       async (update) => (await actions.installShell(update), true),
       () => ({ state: "ok", text: "shell installed" }),
-      (e) => ({ state: "fail", text: `shell not installed: ${errorText(e)}`, more: ["retry: holm shell install"] }),
+      (e) => ({ state: "fail", text: `shell not installed: ${errorText(e)}`, more: ["retry: cleat shell install"] }),
     );
     shellReady = done === true;
-    record("shell installed", shellReady ? "ok" : "fail", "holm shell install");
+    record("shell installed", shellReady ? "ok" : "fail", "cleat shell install");
   }
 
   const runnerLines: string[] = [];
@@ -492,11 +492,11 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
       code === 0
         ? { state: "ok", text: `runner started  ${c.dim(/https?:\/\/\S+/.exec(runnerLines.join(" "))?.[0]?.replace(/[),]$/, "") ?? "")}` }
         : code === KEPT
-          ? { state: "warn", text: "runner kept (it runs older code, and sessions are in the way)", more: [...runnerLines, "retry: holm restart"] }
-          : { state: "fail", text: "runner not started", more: [...runnerLines, "retry: holm start"] },
-    (e) => ({ state: "fail", text: `runner not started: ${errorText(e)}`, more: ["retry: holm start"] }),
+          ? { state: "warn", text: "runner kept (it runs older code, and sessions are in the way)", more: [...runnerLines, "retry: cleat restart"] }
+          : { state: "fail", text: "runner not started", more: [...runnerLines, "retry: cleat start"] },
+    (e) => ({ state: "fail", text: `runner not started: ${errorText(e)}`, more: ["retry: cleat start"] }),
   );
-  record("runner started", code === 0 ? "ok" : code === KEPT ? "warn" : "fail", "holm start");
+  record("runner started", code === 0 ? "ok" : code === KEPT ? "warn" : "fail", "cleat start");
 
   if (shellReady) {
     // --yes is for scripts: the shell starts, but nobody is there for a pop-up.
@@ -504,10 +504,10 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
       "Starting the shell",
       async () => (actions.startShell(!options.yes), true),
       () => ({ state: "ok", text: options.yes ? "shell started" : "shell started, opening the pop-up" }),
-      (e) => ({ state: "fail", text: `shell not started: ${errorText(e)}`, more: ["retry: holm shell start"] }),
+      (e) => ({ state: "fail", text: `shell not started: ${errorText(e)}`, more: ["retry: cleat shell start"] }),
     );
-    record("shell started", started ? "ok" : "fail", "holm shell start");
-    const retry = `holm shell login ${startOnLogin ? "on" : "off"}`;
+    record("shell started", started ? "ok" : "fail", "cleat shell start");
+    const retry = `cleat shell login ${startOnLogin ? "on" : "off"}`;
     const on = await ui.task(
       "Setting start at login",
       () => actions.login(startOnLogin),
@@ -520,21 +520,21 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
     ui.line(`${ui.mark("skip")} shell not started  ${c.dim(`(${why})`)}`);
     ui.line(`${ui.mark("skip")} login item not set  ${c.dim(`(${why})`)}`);
     if (!unavailable) {
-      record("shell started", "fail", "holm shell start");
-      record("login item set", "fail", `holm shell login ${startOnLogin ? "on" : "off"}`);
+      record("shell started", "fail", "cleat shell start");
+      record("login item set", "fail", `cleat shell login ${startOnLogin ? "on" : "off"}`);
     }
   }
 
   const url = code === 0 || code === KEPT ? await actions.runnerUrl().catch(() => null) : null;
   const exit = results.some((r) => r.state === "fail") ? 1 : code === KEPT ? KEPT : 0;
   const next = [
-    `${c.bold("Done.")} ${exit === 0 ? "holm is set up." : "Some steps need another try (above)."}`,
+    `${c.bold("Done.")} ${exit === 0 ? "cleat is set up." : "Some steps need another try (above)."}`,
     "",
     ...padded([hotkey, snipHotkey, chatHotkey].map((k) => keycaps(k, c, ui.term.color))).map((k, i) => `${k}  ${["a new task, from anywhere", "snip a part of the screen", "the chat in the notch, and back"][i]}`),
     "",
-    unavailable ? `chat: ${url ?? "holm start, then open the URL it prints"}` : `chat: the tray icon${url ? `, or ${url}` : ""}`,
+    unavailable ? `chat: ${url ?? "cleat start, then open the URL it prints"}` : `chat: the tray icon${url ? `, or ${url}` : ""}`,
     `settings: the tray menu${url ? `, or ${url}/settings` : ""}`,
-    `${c.cyan("holm doctor")} checks everything`,
+    `${c.cyan("cleat doctor")} checks everything`,
   ];
   return finish(ui, results, exit, next);
 }
@@ -601,9 +601,9 @@ function finish(ui: Ui, results: { title: string; state: State; retry?: string }
   if (failed.length > 0) {
     ui.line();
     ui.line(`${ui.mark("fail")} ${ui.c.bold(`${failed.length === 1 ? "one step" : `${failed.length} steps`} to try again`)}`);
-    for (const r of failed) ui.line(`  ${r.title.replace(/ (written|linked|installed|started|set)$/, "")}: ${ui.c.cyan(r.retry ?? "holm setup")}`);
+    for (const r of failed) ui.line(`  ${r.title.replace(/ (written|linked|installed|started|set)$/, "")}: ${ui.c.cyan(r.retry ?? "cleat setup")}`);
   }
-  ui.outro((next ?? ["Setup stopped: run `holm setup` again once the step above is fixed."]).join("\n"));
+  ui.outro((next ?? ["Setup stopped: run `cleat setup` again once the step above is fixed."]).join("\n"));
   return exit;
 }
 

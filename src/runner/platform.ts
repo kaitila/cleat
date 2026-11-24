@@ -27,7 +27,7 @@ export function parseReport(value: unknown): ShellReport | { error: string } {
   return report;
 }
 
-/** The layout, or null on a platform holm has no layout for (or a bad HOLM_PLATFORM): the runner still answers. */
+/** The layout, or null on a platform cleat has no layout for (or a bad CLEAT_PLATFORM): the runner still answers. */
 export function layoutOrNull(env: Record<string, string | undefined> = process.env): Layout | null {
   try {
     return detectLayout(env);

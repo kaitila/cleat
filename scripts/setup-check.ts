@@ -4,7 +4,7 @@
 // In a temp folder it makes a home with two projects in it, clones this repo's HEAD, runs `bun install` and
 // `bun src/cli.ts setup --yes --workspace <each> --link-dir <a temp bin>` with HOME set to the temp home, then checks
 // that the link is there, that the config has the two workspaces, that the shell is installed and runs, and that
-// `holm doctor`, run through the link, reports every check green. Last it runs `holm uninstall --purge` and
+// `cleat doctor`, run through the link, reports every check green. Last it runs `cleat uninstall --purge` and
 // checks that it removed the link, the shell, start at login and the config, and removes the temp folder.
 //
 // The temp home moves everything: the config, the data folder, the shell's folders and start at login. The runner gets
@@ -30,10 +30,10 @@ if (layout === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) 
 }
 
 const realHome = homedir();
-const dir = mkdtempSync(join(tmpdir(), "holm-setup-check-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-setup-check-"));
 const home = join(dir, "home");
 const bin = join(dir, "bin");
-const clone = join(dir, "holm");
+const clone = join(dir, "cleat");
 const workspaces = [join(home, "projects", "website"), join(home, "notes")];
 mkdirSync(join(workspaces[0]!, ".git"), { recursive: true });
 mkdirSync(workspaces[1]!, { recursive: true });
@@ -57,13 +57,13 @@ mkdirSync(join(appData, shellName), { recursive: true });
 writeFileSync(join(appData, shellName, "settings.json"), JSON.stringify({ runnerUrl: `http://127.0.0.1:${port}` }, null, 2) + "\n");
 
 const env: Record<string, string> = {};
-for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith("HOLM_") && !k.startsWith("XDG_CONFIG") && !k.startsWith("XDG_DATA")) env[k] = v;
+for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith("CLEAT_") && !k.startsWith("XDG_CONFIG") && !k.startsWith("XDG_DATA")) env[k] = v;
 Object.assign(env, {
   HOME: home,
   PATH: `${bin}:${process.env.PATH ?? ""}`,
-  HOLM_PORT: String(port),
-  HOLM_FAKE_AGENT: "1",
-  ...(detectLayout() === "windows-wsl" ? { HOLM_PLATFORM: "linux" } : {}),
+  CLEAT_PORT: String(port),
+  CLEAT_FAKE_AGENT: "1",
+  ...(detectLayout() === "windows-wsl" ? { CLEAT_PLATFORM: "linux" } : {}),
   // The downloads are kept in the real caches, so a second run does not fetch them again.
   BUN_INSTALL_CACHE_DIR: process.env.BUN_INSTALL_CACHE_DIR ?? join(realHome, ".bun", "install", "cache"),
 });
@@ -82,9 +82,9 @@ const check = (ok: boolean, what: string) => {
   console.log(`${ok ? "ok  " : "FAIL"}  ${what}`);
   if (!ok) bad.push(what);
 };
-const linkPath = join(bin, "holm");
-const configFile = join(home, ".config", "holm", "config.json");
-const app = layout === "macos" ? join(home, "Library", "Application Support", "holm", "shell") : join(home, ".local", "share", "holm", "shell");
+const linkPath = join(bin, "cleat");
+const configFile = join(home, ".config", "cleat", "config.json");
+const app = layout === "macos" ? join(home, "Library", "Application Support", "cleat", "shell") : join(home, ".local", "share", "cleat", "shell");
 
 try {
   const head = Bun.spawnSync(["git", "-C", REPO, "rev-parse", "HEAD"], { stdout: "pipe" }).stdout.toString().trim();
@@ -116,7 +116,7 @@ try {
   check(existsSync(pidFile), "the shell runs (it wrote its pid)");
 
   // doctor --json, the form for scripts. Codex is the optional second agent: a temp home has no Codex login.
-  const doctor = await run(["holm", "doctor", "--json"], home);
+  const doctor = await run(["cleat", "doctor", "--json"], home);
   let report: { checks: { name: string; ok: boolean }[] } = { checks: [] };
   try {
     report = JSON.parse(doctor.out);
@@ -124,20 +124,20 @@ try {
     // Not JSON: the check below fails.
   }
   const red = report.checks.filter((c) => !c.ok && !c.name.startsWith("Codex"));
-  check(doctor.code === 0 && report.checks.length > 0 && red.length === 0, `\`holm doctor\`, through the link, reports every check green${red.length ? ` (not: ${red.map((c) => c.name).join(", ")})` : ""}`);
+  check(doctor.code === 0 && report.checks.length > 0 && red.length === 0, `\`cleat doctor\`, through the link, reports every check green${red.length ? ` (not: ${red.map((c) => c.name).join(", ")})` : ""}`);
 } catch (e) {
   bad.push(e instanceof Error ? e.message : String(e));
   console.log(`FAIL  ${bad.at(-1)}`);
 } finally {
   if (keep) {
-    console.log(`kept: ${dir}. HOME=${home} PATH=${bin}:$PATH holm uninstall --purge removes it`);
+    console.log(`kept: ${dir}. HOME=${home} PATH=${bin}:$PATH cleat uninstall --purge removes it`);
   } else {
     if (existsSync(linkPath)) {
-      const un = await run(["holm", "uninstall", "--purge", "--link-dir", bin], home);
-      check(un.code === 0, "`holm uninstall --purge` exited 0");
+      const un = await run(["cleat", "uninstall", "--purge", "--link-dir", bin], home);
+      check(un.code === 0, "`cleat uninstall --purge` exited 0");
       check(!existsSync(linkPath), "uninstall removed the link");
       check(!existsSync(app), "uninstall removed the shell");
-      check(!existsSync(join(home, ".config", "autostart", "holm.desktop")) || layout === "macos", "uninstall turned start at login off");
+      check(!existsSync(join(home, ".config", "autostart", "cleat.desktop")) || layout === "macos", "uninstall turned start at login off");
       check(!existsSync(configFile), "uninstall --purge removed the config");
     }
     rmSync(dir, { recursive: true, force: true });

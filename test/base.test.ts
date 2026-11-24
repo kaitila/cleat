@@ -5,15 +5,15 @@ import { join } from "node:path";
 import { loadConfig } from "../src/runner/config";
 import { startServer } from "../src/runner/server";
 
-const dir = mkdtempSync(join(tmpdir(), "holm-test-"));
-const env = { HOLM_CONFIG: join(dir, "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" };
+const dir = mkdtempSync(join(tmpdir(), "cleat-test-"));
+const env = { CLEAT_CONFIG: join(dir, "config.json"), CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" };
 
 describe("config", () => {
-  test("writes the default file with no workspaces: the first run and holm setup ask for them", () => {
+  test("writes the default file with no workspaces: the first run and cleat setup ask for them", () => {
     const config = loadConfig(env);
     expect(config.workspaces).toEqual([]);
-    expect(JSON.parse(readFileSync(env.HOLM_CONFIG, "utf8")).workspaces).toEqual([]);
-    expect(loadConfig({ ...env, HOLM_CONFIG: join(dir, "c2.json") }).port).toBe(0);
+    expect(JSON.parse(readFileSync(env.CLEAT_CONFIG, "utf8")).workspaces).toEqual([]);
+    expect(loadConfig({ ...env, CLEAT_CONFIG: join(dir, "c2.json") }).port).toBe(0);
   });
 });
 

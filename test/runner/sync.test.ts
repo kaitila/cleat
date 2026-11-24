@@ -212,7 +212,7 @@ describe("importing terminal sessions", () => {
     await Bun.sleep(150);
     const sessions = await sessionsOf(r);
     expect(sessions).toHaveLength(1);
-    expect(sessions[0]).toMatchObject({ id: session.id, source: "holm", status: "idle", lastSeq: 3 });
+    expect(sessions[0]).toMatchObject({ id: session.id, source: "cleat", status: "idle", lastSeq: 3 });
     expect(kinds(await eventsFrom(r, session.id))).toEqual(["user", "assistant_text", "result"]);
   });
 
@@ -226,7 +226,7 @@ describe("importing terminal sessions", () => {
     const stored = (JSON.parse(readFileSync(file, "utf8")) as SessionMeta[]).map(({ source: _, ...s }) => s);
     writeFileSync(file, JSON.stringify(stored));
     const second = runner(t, { dir: first.dir });
-    expect((await sessionsOf(second)).find((s) => s.id === session.id)?.source).toBe("holm");
+    expect((await sessionsOf(second)).find((s) => s.id === session.id)?.source).toBe("cleat");
   });
 });
 
@@ -277,14 +277,14 @@ describe("replying to a session open in a terminal", () => {
     const socket = await socketOf(r);
     t.write("term-1", workPath(r), [user("in the terminal"), assistant("yes")]);
     const session = await terminalSession(r);
-    const refused = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from holm" });
+    const refused = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from cleat" });
     expect(refused.status).toBe(409);
     expect(((await refused.json()) as { error: string }).error).toBe(OPEN_IN_TERMINAL);
     expect(OPEN_IN_TERMINAL).toContain("it looks open in a terminal");
     // Nothing was stored for the refused reply, but the history was read so a reply follows it.
     expect(kinds(await eventsFrom(r, session.id))).toEqual(["user", "assistant_text", "result"]);
-    expect((await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from holm", force: "yes" })).status).toBe(400);
-    const forced = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from holm", force: true });
+    expect((await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from cleat", force: "yes" })).status).toBe(400);
+    const forced = await r.post(`/api/sessions/${session.id}/messages`, { prompt: "from cleat", force: true });
     expect(forced.status).toBe(202);
     // The runner's own turn is no terminal turn.
     expect(((await forced.json()) as { session: SessionMeta }).session.terminalTurn).toBeUndefined();

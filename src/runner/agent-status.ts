@@ -1,4 +1,4 @@
-// GET /api/agents: whether each agent can run here, as `holm doctor` sees it (src/cli/doctor.ts):
+// GET /api/agents: whether each agent can run here, as `cleat doctor` sees it (src/cli/doctor.ts):
 // Claude Code installed (the Agent SDK's own binary, else `claude`: `--version`) and logged in (`auth status`), Codex installed
 // (the binary the SDK runs, `--version`) and logged in (`codex login status`). The settings page
 // shows it beside the agent choice. The commands are the doctor's; their answers are kept a while,
@@ -33,10 +33,10 @@ export const machineOutput: Output = async (cmd) => {
 export async function claudeStatus(output: Output, binary: string | null = null): Promise<AgentStatus> {
   const cmd = binary ?? "claude";
   const version = firstLine(await output([cmd, "--version"]));
-  if (version === null) return { agent: "claude", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "holm update installs it again with the app, then log in: holm login" };
+  if (version === null) return { agent: "claude", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "cleat update installs it again with the app, then log in: cleat login" };
   const status = await output([cmd, "auth", "status"]);
   const loggedIn = status !== null && /"loggedIn"\s*:\s*true/.test(status);
-  return { agent: "claude", installed: true, version, loggedIn, detail: loggedIn ? `${version}, logged in` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: holm login" };
+  return { agent: "claude", installed: true, version, loggedIn, detail: loggedIn ? `${version}, logged in` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: cleat login" };
 }
 
 const firstLine = (text: string | null) => text?.split("\n")[0]?.trim() || null;
@@ -45,10 +45,10 @@ const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 /** Codex's status: the doctor's "Codex" and "Codex login" checks. */
 export async function codexStatus(output: Output, binary: string | null): Promise<AgentStatus> {
   const version = binary === null ? null : firstLine(await output([binary, "--version"]));
-  if (version === null) return { agent: "codex", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "holm update installs it again with the app, then log in: holm login codex" };
+  if (version === null) return { agent: "codex", installed: false, version: null, loggedIn: false, detail: "Not installed", fix: "cleat update installs it again with the app, then log in: cleat login codex" };
   const status = firstLine(await output([binary!, "login", "status"]));
   const loggedIn = status !== null && /^logged in/i.test(status);
-  return { agent: "codex", installed: true, version, loggedIn, detail: loggedIn ? `${version}, ${lower(status!)}` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: holm login codex" };
+  return { agent: "codex", installed: true, version, loggedIn, detail: loggedIn ? `${version}, ${lower(status!)}` : `${version}, not logged in`, fix: loggedIn ? "" : "Log in: cleat login codex" };
 }
 
 /** What the route answers with: a function the server calls for each GET. */

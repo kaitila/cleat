@@ -1,13 +1,13 @@
 #!/bin/sh
-# Installs Holm: bun if it is missing, then holm itself, then its setup.
-#   curl -fsSL https://kaitila.github.io/holm/install.sh | sh
+# Installs Cleat: bun if it is missing, then cleat itself, then its setup.
+#   curl -fsSL https://kaitila.github.io/cleat/install.sh | sh
 # The repo's one shell script (D0047): it only gets bun onto the machine; everything after that is
-# TypeScript (holm setup). POSIX sh, so it runs under the sh of macOS, Linux and WSL alike.
+# TypeScript (cleat setup). POSIX sh, so it runs under the sh of macOS, Linux and WSL alike.
 set -eu
 
 say() { printf '%s\n' "$*"; }
 fail() {
-  printf 'holm install: %s\n' "$*" >&2
+  printf 'cleat install: %s\n' "$*" >&2
   exit 1
 }
 
@@ -39,15 +39,15 @@ if ! command -v bun >/dev/null 2>&1; then
   curl -fsSL https://bun.sh/install | bash
 fi
 
-say "Installing holm"
-bun install -g github:kaitila/holm
+say "Installing cleat"
+bun install -g github:kaitila/cleat
 
 # Setup asks its questions in the terminal; without one it takes every default.
 if tty_ok; then
-  holm setup </dev/tty
+  cleat setup </dev/tty
 else
-  holm setup --yes
+  cleat setup --yes
 fi
 
 say ""
-say "Holm is installed. If this terminal doesn't know the holm command yet, open a new one."
+say "Cleat is installed. If this terminal doesn't know the cleat command yet, open a new one."

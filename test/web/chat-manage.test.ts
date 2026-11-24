@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { archivedLine, canDelete, canFork, canStop, deleteConfirm, FOLDED_KEY, grouped, isFolded, menuItems, ordered, readFolded, showHeadings, visible, workspacesOf, writeFolded } from "../../src/web/chat-manage.js";
 
 const at = (minutes: number) => new Date(Date.UTC(2026, 10, 15, 12, minutes)).toISOString();
-const s = (id: string, extra: Record<string, unknown> = {}) => ({ id, status: "idle", updatedAt: at(0), title: id, workspace: "work", source: "holm", claudeSessionId: `c-${id}`, ...extra });
+const s = (id: string, extra: Record<string, unknown> = {}) => ({ id, status: "idle", updatedAt: at(0), title: id, workspace: "work", source: "cleat", claudeSessionId: `c-${id}`, ...extra });
 
 describe("the list", () => {
   test("pinned first, then the newest activity first", () => {
@@ -95,7 +95,7 @@ describe("what a session offers", () => {
     expect(canStop(s("a"))).toBe(false);
   });
 
-  test("Delete only for a session holm started, between turns; a terminal session has no Delete at all", () => {
+  test("Delete only for a session cleat started, between turns; a terminal session has no Delete at all", () => {
     expect(canDelete(s("a"))).toBe(true);
     expect(canDelete(s("a", { status: "error" }))).toBe(true);
     expect(canDelete(s("a", { status: "running" }))).toBe(false);

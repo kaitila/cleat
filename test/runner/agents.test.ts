@@ -19,11 +19,11 @@ afterAll(async () => {
 });
 
 function configWith(file: unknown) {
-  const dir = mkdtempSync(join(tmpdir(), "holm-agent-"));
+  const dir = mkdtempSync(join(tmpdir(), "cleat-agent-"));
   dirs.push(dir);
   const path = join(dir, "config.json");
   writeFileSync(path, JSON.stringify(file));
-  return () => loadConfig({ HOLM_CONFIG: path, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" });
+  return () => loadConfig({ CLEAT_CONFIG: path, CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" });
 }
 
 describe("config agent", () => {
@@ -145,7 +145,7 @@ describe("settings agent", () => {
     const after = (await res.json()) as Settings;
     expect(after.agent).toBe("codex");
     expect(after.workspaces.map((w) => w.agent)).toEqual(["claude", undefined]);
-    const file = JSON.parse(readFileSync(r.env.HOLM_CONFIG!, "utf8"));
+    const file = JSON.parse(readFileSync(r.env.CLEAT_CONFIG!, "utf8"));
     expect(file.agent).toBe("codex");
     expect(file.workspaces[0].agent).toBe("claude");
     expect("agent" in file.workspaces[1]).toBe(false);

@@ -1,10 +1,10 @@
 {
-  "name": "holm",
+  "name": "cleat",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "holm": "src/cli.ts"
+    "cleat": "src/cli.ts"
   },
   "scripts": {
     "start": "bun src/runner/main.ts",

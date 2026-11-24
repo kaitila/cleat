@@ -180,7 +180,7 @@ describe("the rest of the helpers", () => {
   });
   test("the terminal mark is for sessions whose source is terminal", () => {
     expect(startedInTerminal({ source: "terminal" })).toBe(true);
-    expect(startedInTerminal({ source: "holm" })).toBe(false);
+    expect(startedInTerminal({ source: "cleat" })).toBe(false);
     expect(startedInTerminal({})).toBe(false);
   });
   test("the runner's OPEN_IN_TERMINAL 409 is told apart from other refusals", () => {

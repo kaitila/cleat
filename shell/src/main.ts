@@ -118,7 +118,7 @@ function ensureRunner(): Promise<boolean> {
     const how = runnerSpawn(OS, settings, process.env.SystemRoot);
     if (args.selfTest || !how) return false;
     // An array of arguments and no shell. windowsHide: wsl.exe is a console program, and no console window may flash.
-    // A local runner is a detached child of its own: `holm start` hands off to the runner and exits, and the runner outlives the shell.
+    // A local runner is a detached child of its own: `cleat start` hands off to the runner and exits, and the runner outlives the shell.
     const child = spawn(how.file, how.args, { stdio: "ignore", windowsHide: true, shell: false, detached: how.detached });
     child.on("error", (e) => console.error("starting the runner failed", e));
     if (how.detached) child.unref();
@@ -147,7 +147,7 @@ function runnerDown(): void {
   // The self-test checks that no window opens; it does not put a toast on the person's screen.
   if (args.selfTest) return;
   const how = runnerDownHint(OS, runnerSpawn(OS, settings) !== null);
-  notify("Holm: the runner is not running", `Nothing answers at ${settings.runnerUrl}. ${how}`);
+  notify("Cleat: the runner is not running", `Nothing answers at ${settings.runnerUrl}. ${how}`);
 }
 
 // --- Start on login ---
@@ -232,7 +232,7 @@ async function writeClipboard(clip: Clip): Promise<void> {
 /** Reads the clipboard, saves an image as a PNG in the temp folder, and posts the capture to the runner. */
 async function captureClipboard(): Promise<{ capture: Capture; posted: boolean }> {
   const clip = await readClipboard();
-  const capture: Capture = clip.kind === "image" ? { kind: "image", path: saveClip(join(app.getPath("temp"), "holm"), clip.png) } : clip;
+  const capture: Capture = clip.kind === "image" ? { kind: "image", path: saveClip(join(app.getPath("temp"), "cleat"), clip.png) } : clip;
   let posted = false;
   // Read first, posted once the runner is there: the shell may be starting it.
   if (!(await ensureRunner())) return { capture, posted };
@@ -326,7 +326,7 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
         fullscreenable: false,
         alwaysOnTop: true,
         skipTaskbar: true,
-        title: "Holm",
+        title: "Cleat",
         webPreferences: WEB_PREFERENCES,
       });
       win.on("closed", () => {
@@ -433,7 +433,7 @@ async function openChat(sessionId?: string, inactive = false): Promise<void> {
       chat.focus();
       return;
     }
-    const win = new BrowserWindow({ ...CHAT, show: false, title: "Holm", icon: icon(), autoHideMenuBar: true, webPreferences: WEB_PREFERENCES });
+    const win = new BrowserWindow({ ...CHAT, show: false, title: "Cleat", icon: icon(), autoHideMenuBar: true, webPreferences: WEB_PREFERENCES });
     win.on("closed", () => {
       if (chat === win) chat = null;
     });
@@ -468,7 +468,7 @@ async function openSettings(inactive = false): Promise<BrowserWindow | null> {
     return null;
   }
   try {
-    const win = new BrowserWindow({ ...SETTINGS_WINDOW, show: false, title: "Holm settings", icon: icon(), autoHideMenuBar: true, webPreferences: WEB_PREFERENCES });
+    const win = new BrowserWindow({ ...SETTINGS_WINDOW, show: false, title: "Cleat settings", icon: icon(), autoHideMenuBar: true, webPreferences: WEB_PREFERENCES });
     win.on("closed", () => {
       if (settingsWindow === win) settingsWindow = null;
     });
@@ -515,7 +515,7 @@ function trayMenu(): Menu {
 
 function createTray(): Tray {
   const t = new Tray(trayIcon());
-  t.setToolTip("Holm");
+  t.setToolTip("Cleat");
   t.setContextMenu(trayMenu());
   t.on("double-click", () => void openChat());
   return t;
@@ -594,7 +594,7 @@ function overlayWindow(display: Electron.Display): BrowserWindow {
     alwaysOnTop: true,
     skipTaskbar: true,
     backgroundColor: OPAQUE_BACKGROUND,
-    title: "Holm snip",
+    title: "Cleat snip",
     // Not throttled while hidden: the page waits, loaded, for the key, and must draw at once.
     webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) },
   });
@@ -772,7 +772,7 @@ async function onSnipCapture(event: Electron.IpcMainInvokeEvent): Promise<string
   return o.view;
 }
 
-/** crop(rect): the selection cut from the full capture at device pixels, saved as %TEMP%\holm\snip-<time>.png. */
+/** crop(rect): the selection cut from the full capture at device pixels, saved as %TEMP%\cleat\snip-<time>.png. */
 async function onSnipCrop(event: Electron.IpcMainInvokeEvent, value: unknown): Promise<{ path: string } | { error: string }> {
   const o = overlayOf(event);
   if (!o || !snipShown) return { error: "refused" };
@@ -787,7 +787,7 @@ async function onSnipCrop(event: Electron.IpcMainInvokeEvent, value: unknown): P
     const got = cut.getSize();
     if (got.width !== plan.output.width || got.height !== plan.output.height) cut = cut.resize({ ...plan.output, quality: "best" });
     // The one place a snip is written: under the Windows temp folder, named from the clock, never from the page.
-    return { path: saveClip(join(app.getPath("temp"), "holm"), cut.toPNG(), new Date(), "snip") };
+    return { path: saveClip(join(app.getPath("temp"), "cleat"), cut.toPNG(), new Date(), "snip") };
   } catch (e) {
     console.error("saving the snip failed", e);
     return { error: e instanceof Error ? e.message : String(e) };
@@ -989,7 +989,7 @@ function giveKeyboardBack(win: BrowserWindow): void {
   }
   if (!keyboardSink || keyboardSink.isDestroyed()) {
     const { x, y, height } = screen.getPrimaryDisplay().bounds;
-    keyboardSink = new BrowserWindow({ x, y: y + height - 1, width: 1, height: 1, type: "panel", show: false, frame: false, transparent: true, hasShadow: false, opacity: 0, focusable: false, skipTaskbar: true, title: "Holm keyboard", webPreferences: WEB_PREFERENCES });
+    keyboardSink = new BrowserWindow({ x, y: y + height - 1, width: 1, height: 1, type: "panel", show: false, frame: false, transparent: true, hasShadow: false, opacity: 0, focusable: false, skipTaskbar: true, title: "Cleat keyboard", webPreferences: WEB_PREFERENCES });
     keyboardSink.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     keyboardSink.setIgnoreMouseEvents(true);
   }
@@ -1069,7 +1069,7 @@ function createDock(): BrowserWindow {
     // non-activating panel: it takes the keyboard when open without making the shell the active app.
     type: OS === "macos" ? "panel" : "toolbar",
     focusable: false,
-    title: "Holm dock",
+    title: "Cleat dock",
     webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) },
   });
   // On a Mac: on every Space, and beside full-screen apps.
@@ -1320,7 +1320,7 @@ function applyPrefs(next: ShellPrefs): void {
     try {
       if (startsOnLogin() !== next.startOnLogin) setStartOnLogin(next.startOnLogin);
     } catch (e) {
-      notify("Holm: start on login was not changed", e instanceof Error ? e.message : String(e));
+      notify("Cleat: start on login was not changed", e instanceof Error ? e.message : String(e));
     }
   }
   tray?.setContextMenu(trayMenu());
@@ -1386,7 +1386,7 @@ function applySettings(next: RunnerSettings): void {
 async function changePrefs(change: Partial<ShellPrefs>): Promise<void> {
   const current = await fetchSettings();
   let error: string | null;
-  if (!current) error = `The runner at ${settings.runnerUrl} did not give its settings, which it keeps: it is not running, or older than the shell. In WSL: holm up, then try again.`;
+  if (!current) error = `The runner at ${settings.runnerUrl} did not give its settings, which it keeps: it is not running, or older than the shell. In WSL: cleat up, then try again.`;
   else {
     let login = false;
     try {
@@ -1396,7 +1396,7 @@ async function changePrefs(change: Partial<ShellPrefs>): Promise<void> {
     }
     error = await saveShell(current, { ...(current.shell ?? migratedPrefs(settings.legacy, login)), ...change });
   }
-  if (error) notify("Holm: the setting was not changed", error);
+  if (error) notify("Cleat: the setting was not changed", error);
   // Drawn again from what is so now, whichever way it went.
   tray?.setContextMenu(trayMenu());
 }
@@ -1557,7 +1557,7 @@ async function selfTest(): Promise<SelfTestResult> {
     t.destroy();
   });
   await step("text", async () => {
-    const marker = `holm self-test ${Date.now()}`;
+    const marker = `cleat self-test ${Date.now()}`;
     await clipboard.writeText(marker);
     const { capture, posted } = await captureClipboard();
     r.textCaptured = capture.kind === "text" && capture.text === marker;
@@ -1662,11 +1662,11 @@ async function selfTest(): Promise<SelfTestResult> {
     r.primaryDisplay = display;
     r.primaryWorkArea = screen.getPrimaryDisplay().workArea;
     const run = (code: string) => win.webContents.executeJavaScript(code, true);
-    r.dockBridge = String(await run("typeof window.holmDock + ':' + Object.keys(window.holmDock ?? {}).join(',') + ':' + typeof window.require + ':' + typeof window.process"));
+    r.dockBridge = String(await run("typeof window.cleatDock + ':' + Object.keys(window.cleatDock ?? {}).join(',') + ':' + typeof window.require + ':' + typeof window.process"));
     /** Asks through the page, as the page would, and waits for the shell to take it (or not). */
     const ask = async (state: string, expect: DockState | null) => {
       const before = { state: dockState, focusable: win.isFocusable() };
-      await run(`window.holmDock.setState(${JSON.stringify(state)}); 0`);
+      await run(`window.cleatDock.setState(${JSON.stringify(state)}); 0`);
       // A refused call changes nothing: there is nothing to wait for but time.
       for (let i = 0; i < (expect ? 30 : 6) && !(expect && dockState === expect); i++) await sleep(100);
       return { bounds: win.getBounds(), focusable: win.isFocusable(), unchanged: dockState === before.state && win.isFocusable() === before.focusable };
@@ -1808,21 +1808,21 @@ async function selfTest(): Promise<SelfTestResult> {
     const first = opened.overlays[0]!;
     r.snipUrl = first.win.webContents.getURL();
     const run = (code: string) => first.win.webContents.executeJavaScript(code, true);
-    r.snipBridge = String(await run("typeof window.holmSnip + ':' + Object.keys(window.holmSnip ?? {}).sort().join(',') + ':' + typeof window.require + ':' + typeof window.process"));
+    r.snipBridge = String(await run("typeof window.cleatSnip + ':' + Object.keys(window.cleatSnip ?? {}).sort().join(',') + ':' + typeof window.require + ':' + typeof window.process"));
     // A known rectangle: the PNG's size is checked in WSL.
     const { width, height } = first.display.bounds;
     r.snipCropRect = SELF_TEST_CROP;
-    if (opened.captured) r.snipCropPath = String(await run(`window.holmSnip.crop(${JSON.stringify(r.snipCropRect)})`));
+    if (opened.captured) r.snipCropPath = String(await run(`window.cleatSnip.crop(${JSON.stringify(r.snipCropRect)})`));
     // Anything but a rectangle of finite numbers inside the display is refused, whatever the capture.
     const bad = [
       "{ x: -1, y: 0, width: 10, height: 10 }", `{ x: 0, y: 0, width: ${width + 1}, height: 10 }`, `{ x: 0, y: ${height - 5}, width: 10, height: 10 }`,
       "{ x: NaN, y: 0, width: 10, height: 10 }", "{ x: 0, y: 0, width: Infinity, height: 10 }", '{ x: "0", y: 0, width: 10, height: 10 }',
       "{ x: 0, y: 0, width: 0.5, height: 10 }", "{ x: 0, y: 0, width: 10, height: 10, path: 'C:/x.png' }", "null", "[0, 0, 10, 10]", "'C:/Windows/x.png'",
     ];
-    const answers = await run(`Promise.all([${bad.join(", ")}].map((rect) => window.holmSnip.crop(rect).then(() => "saved", () => "refused")))`);
+    const answers = await run(`Promise.all([${bad.join(", ")}].map((rect) => window.cleatSnip.crop(rect).then(() => "saved", () => "refused")))`);
     r.snipBadRectsRefused = Array.isArray(answers) && answers.length === bad.length && answers.every((a) => a === "refused");
     // The page's close() takes every overlay.
-    void run("window.holmSnip.close(); 0").catch(() => {});
+    void run("window.cleatSnip.close(); 0").catch(() => {});
     for (let i = 0; i < 30 && opened.overlays.some((o) => !o.win.isDestroyed()); i++) await sleep(100);
     // New overlays are made at once for the next key, hidden: the ones that were up are gone.
     r.snipClosed = !snipShown && opened.overlays.every((o) => o.win.isDestroyed()) && overlays.every((o) => !o.win.isVisible());
@@ -1991,7 +1991,7 @@ async function sayLinuxNotices(): Promise<void> {
 function shouldRun(): boolean {
   if (args.selfTest) {
     // Its own user data, and no single-instance lock: it runs beside a running shell without touching it.
-    app.setPath("userData", join(app.getPath("temp"), "holm", "self-test-data"));
+    app.setPath("userData", join(app.getPath("temp"), "cleat", "self-test-data"));
     return true;
   }
   return app.requestSingleInstanceLock() && !args.quit;

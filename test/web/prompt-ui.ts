@@ -66,16 +66,16 @@ function check(name: string, ok: boolean, detail = ""): void {
 // A throwaway config: one workspace whose folder is missing (first, so the default has to skip it)
 // and two that exist, so "the chosen one" and "the last used one" differ from "the first". beta runs
 // on Codex, so the agent switch follows the workspace.
-const dir = mkdtempSync(join(tmpdir(), "holm-prompt-ui-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-prompt-ui-"));
 for (const name of ["alpha", "beta"]) mkdirSync(join(dir, name));
 const env = {
-  HOLM_CONFIG: join(dir, "config.json"),
-  HOLM_DATA_DIR: join(dir, "data"),
-  HOLM_PORT: "0",
-  HOLM_FAKE_AGENT: "1",
+  CLEAT_CONFIG: join(dir, "config.json"),
+  CLEAT_DATA_DIR: join(dir, "data"),
+  CLEAT_PORT: "0",
+  CLEAT_FAKE_AGENT: "1",
 };
 writeFileSync(
-  env.HOLM_CONFIG,
+  env.CLEAT_CONFIG,
   JSON.stringify({ workspaces: ["gone", "alpha", "beta"].map((name) => ({ name, path: join(dir, name), ...(name === "beta" ? { agent: "codex" } : {}) })) }),
 );
 const runner = startServer(loadConfig(env));
@@ -88,8 +88,8 @@ function windowsTempPng(): string | null {
     const users = "/mnt/c/Users";
     const temp = readdirSync(users).map((u) => join(users, u, "AppData", "Local", "Temp")).find((t) => existsSync(t));
     if (!temp) return null;
-    mkdirSync(join(temp, "holm"), { recursive: true });
-    const folder = mkdtempSync(join(temp, "holm", "prompt-ui-"));
+    mkdirSync(join(temp, "cleat"), { recursive: true });
+    const folder = mkdtempSync(join(temp, "cleat", "prompt-ui-"));
     const chunk = (type: string, data: Buffer) => {
       const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
       const out = Buffer.alloc(body.length + 8);

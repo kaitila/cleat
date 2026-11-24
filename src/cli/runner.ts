@@ -1,5 +1,5 @@
 // The runner as a background process: start, stop, status and logs.
-// Its pid, its URL and its log live in the data folder, so HOLM_DATA_DIR moves all three.
+// Its pid, its URL and its log live in the data folder, so CLEAT_DATA_DIR moves all three.
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, join } from "node:path";
@@ -169,7 +169,7 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
   const running = recorded(f);
   if (running) {
     if (!(await waitFor(() => answers(running.url), START_MS))) {
-      log(`pid ${running.pid} is a runner but nothing answers at ${running.url}: run \`holm stop\`, then start again`);
+      log(`pid ${running.pid} is a runner but nothing answers at ${running.url}: run \`cleat stop\`, then start again`);
       return 1;
     }
     if ((await buildOf(running.url)) === want) {
@@ -181,7 +181,7 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
       log(
         `the runner at ${running.url} (pid ${running.pid}) runs older code than this repo's, and was kept: restarting it would cut off\n` +
           `${describeSessions(blocked)}\n` +
-          "run `holm restart` once they are done, or `holm restart --force` now",
+          "run `cleat restart` once they are done, or `cleat restart --force` now",
       );
       return KEPT;
     }
@@ -208,7 +208,7 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
   try {
     child = Bun.spawn(runnerCommand(Boolean(options.loginEnv)), {
       cwd: REPO,
-      env: { ...env, HOLM_PORT: String(port) },
+      env: { ...env, CLEAT_PORT: String(port) },
       stdin: "ignore",
       stdout: out,
       stderr: out,
@@ -235,7 +235,7 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
   }
   writeFileSync(f.pid, `${child.pid}\n`);
   writeFileSync(f.url, `${url}\n`);
-  log(`holm runner on ${url} (pid ${child.pid}, log ${f.log})`);
+  log(`cleat runner on ${url} (pid ${child.pid}, log ${f.log})`);
   return 0;
 }
 
@@ -286,7 +286,7 @@ export async function restart(env: Env = process.env, log: Log = console.log, op
       log(
         `the runner at ${running.url} (pid ${running.pid}) was kept: restarting it would cut off\n` +
           `${describeSessions(blocked)}\n` +
-          "run `holm restart` once they are done, or `holm restart --force` now",
+          "run `cleat restart` once they are done, or `cleat restart --force` now",
       );
       return KEPT;
     }

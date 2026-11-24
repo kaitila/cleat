@@ -72,8 +72,8 @@ export function runnerSpawn(os: ShellOs, where: { wsl?: WslSettings; runner?: Lo
 export function runnerDownHint(os: ShellOs, tried: boolean): string {
   const where = os === "windows" ? "in WSL" : "in a terminal";
   return tried
-    ? `The shell tried to start it and it did not come up. ${os === "windows" ? "In WSL" : "In a terminal"}: holm start, and holm logs`
-    : `Start it ${where}: holm up`;
+    ? `The shell tried to start it and it did not come up. ${os === "windows" ? "In WSL" : "In a terminal"}: cleat start, and cleat logs`
+    : `Start it ${where}: cleat up`;
 }
 
 // --- The dock ---
@@ -154,11 +154,11 @@ const COMPOSITED = /\b(GNOME|KDE|Cinnamon|Budgie|Pantheon|Unity|Deepin|COSMIC|XF
  * Whether the dock's window can be transparent. Windows and macOS: always. Linux: under Wayland (the
  * compositor is the display server; XWayland included), or on X11 with a desktop that composites. A bare
  * window manager on X11 paints a transparent window black, so the dock is then an opaque window the
- * island's size. HOLM_DOCK_OPAQUE=1 or 0 overrides the guess.
+ * island's size. CLEAT_DOCK_OPAQUE=1 or 0 overrides the guess.
  */
 export function dockTransparent(os: ShellOs, env: Env = process.env): boolean {
-  if (env.HOLM_DOCK_OPAQUE === "1") return false;
-  if (env.HOLM_DOCK_OPAQUE === "0") return true;
+  if (env.CLEAT_DOCK_OPAQUE === "1") return false;
+  if (env.CLEAT_DOCK_OPAQUE === "0") return true;
   if (os !== "linux") return true;
   return Boolean(env.WAYLAND_DISPLAY) || env.XDG_SESSION_TYPE === "wayland" || COMPOSITED.test(env.XDG_CURRENT_DESKTOP ?? "");
 }
@@ -196,13 +196,13 @@ export function linuxNotices(env: Env, enabledExtensions: string | null): { titl
   const out: { title: string; body: string }[] = [];
   if (isGnome(env) && enabledExtensions !== null && !hasAppIndicator(enabledExtensions)) {
     out.push({
-      title: "Holm: GNOME shows no tray icon",
+      title: "Cleat: GNOME shows no tray icon",
       body: "GNOME needs the AppIndicator extension for the tray: install gnome-shell-extension-appindicator and enable it (gnome-extensions enable appindicatorsupport@rgcjonas.gmail.com). The hotkeys work without it.",
     });
   }
   if (linuxOzone(env) === "wayland") {
     out.push({
-      title: "Holm: the hotkeys may not work under Wayland",
+      title: "Cleat: the hotkeys may not work under Wayland",
       body: "There is no DISPLAY, so the shell runs on Wayland, where global shortcuts may not register. Use the tray's New task and Snip, or start the shell with XWayland (DISPLAY set).",
     });
   }
@@ -216,8 +216,8 @@ export const SCREEN_RECORDING_PANE = "x-apple.systempreferences:com.apple.prefer
 
 /** What the shell says when macOS has not given it Screen Recording: the snip cannot see the screens. */
 export const SCREEN_RECORDING_NOTICE = {
-  title: "Holm: the snip needs Screen Recording",
-  body: "macOS has not given holm (Electron) Screen Recording, so a snip shows nothing. Allow it in System Settings > Privacy & Security > Screen Recording, then quit and start the shell again. Click to open that pane.",
+  title: "Cleat: the snip needs Screen Recording",
+  body: "macOS has not given cleat (Electron) Screen Recording, so a snip shows nothing. Allow it in System Settings > Privacy & Security > Screen Recording, then quit and start the shell again. Click to open that pane.",
 } as const;
 
 /** True when the snip can capture the screens: anything but macOS, or macOS with Screen Recording granted. */
