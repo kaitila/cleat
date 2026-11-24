@@ -1100,7 +1100,14 @@ try {
     check(await p.evaluate(() => !document.getElementById("panel")!.hidden), "Esc closes the switch and the dock stays open");
     // Another session at work shows as a dot beside the switch; a press shows it (D0040).
     const askTitle = "please ask me which colour";
+    const before = await title();
     await runner.startSession(askTitle);
+    // A task just started becomes the notch's session at once.
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t, askTitle);
+    check(true, "a task just started is shown in the open dock at once");
+    // Back on the one before, the new one is a chip beside the switch while it waits.
+    await p.locator(".sessions .session-row", { hasText: before }).evaluate((el: HTMLElement) => el.click());
+    await p.waitForFunction((t: string) => document.getElementById("title")?.textContent === t, before);
     await p.locator('#live .live-session[aria-label^="please ask me"] .dot[data-status="waiting_approval"]').waitFor();
     check((await p.locator("#live .live-session").first().getAttribute("aria-label"))?.startsWith("please ask me") === true, "a session that waits for the person is a dot beside the switch, first");
     await kb.settle("open");

@@ -39,6 +39,8 @@ import {
   dockKey,
   dockOrder,
   liveOthers,
+  justStarted,
+  STARTED_MS,
   savedSession,
   saveSession,
   stepSession,
@@ -492,6 +494,19 @@ describe("the open dock's hotkeys", () => {
     const order = dockOrder([session("a", "waiting_approval"), session("b", "running"), session("c", "idle"), session("d", "running"), session("e", "running"), session("f", "running"), session("g", "error")]);
     expect(liveOthers(order, "b").map((s) => s.id)).toEqual(["a", "d"]);
     expect(liveOthers(order, null, 4).map((s) => s.id)).toEqual(["a", "b", "d", "e"]);
+  });
+
+  test("a session the person just started is one the dock hadn't seen, made here in the last 30 seconds", () => {
+    const now = Date.parse(at(0));
+    const made = (minutesAgo: number, source?: string) => ({ createdAt: at(minutesAgo), ...(source ? { source } : {}) });
+    expect(justStarted(made(0), false, now)).toBe(true);
+    expect(justStarted(made(0, "intuition"), false, now)).toBe(true);
+    expect(justStarted(made(0), true, now)).toBe(false);
+    expect(justStarted(made(0, "terminal"), false, now)).toBe(false);
+    expect(justStarted(made(1), false, now)).toBe(false);
+    expect(justStarted({ createdAt: new Date(now - STARTED_MS + 1).toISOString() }, false, now)).toBe(true);
+    expect(justStarted({}, false, now)).toBe(false);
+    expect(justStarted(null, false, now)).toBe(false);
   });
 
   test("a step stops at either end of the list; from outside it, down starts at the top and up at the bottom", () => {
