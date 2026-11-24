@@ -13,7 +13,7 @@ import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalSh
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
 import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_SIZES, DOCK_CHAT_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, type Size, takesMouse, watchMs } from "./dock";
-import { centred, iconBitmap } from "./geometry";
+import { centred, markBitmap, tileBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
 import { hotkeyNotice, migratedPrefs, releaseBoth, parseRunnerSettings, reconnectMs, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PATH, SETTINGS_WINDOW, SHELL_DEFAULTS, type ShellPrefs, settingsMessage, swapHotkey, withShell } from "./prefs";
@@ -27,6 +27,8 @@ import { RUNNER_START_MS } from "./wsl";
 const POPUP = { width: 560, height: 380 };
 const CHAT = { width: 1100, height: 720 };
 const ICON_SIZE = 32;
+/** The tray icon's size in points: the Ledge alone in a Mac's menu bar, its tile in a taskbar or panel. */
+const TRAY_POINTS = { mac: 18, other: 16 } as const;
 const OS = shellOs();
 /** False on a Linux X11 desktop without a compositor: the dock is then an opaque window the island's size. */
 const DOCK_TRANSPARENT = dockTransparent(OS);
@@ -59,15 +61,25 @@ let dock: BrowserWindow | null = null;
 
 type Clip = { kind: "image"; png: Buffer } | { kind: "text"; text: string } | { kind: "empty" };
 
+/** The app's icon (windows, notifications): the Ledge in white on a black tile (D0044). */
 function icon() {
-  return nativeImage.createFromBitmap(iconBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE });
+  return nativeImage.createFromBitmap(tileBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE });
 }
 
-/** The tray's icon. On a Mac, a template image for the menu bar: 16 points at 2x, drawn by macOS from its alpha in the bar's colour. */
+/**
+ * The tray's icon, drawn at 1x and 2x. On a Mac, the Ledge alone as a template image: macOS draws it
+ * from its alpha in the menu bar's colour. Elsewhere nothing tints it, so it is the app icon's tile,
+ * whose black reads on a light taskbar and whose white mark reads on a dark one.
+ */
 function trayIcon() {
-  if (OS !== "macos") return icon();
-  const image = nativeImage.createFromBitmap(iconBitmap(ICON_SIZE), { width: ICON_SIZE, height: ICON_SIZE, scaleFactor: 2 });
-  image.setTemplateImage(true);
+  const mac = OS === "macos";
+  const points = mac ? TRAY_POINTS.mac : TRAY_POINTS.other;
+  const image = nativeImage.createEmpty();
+  for (const scaleFactor of [1, 2]) {
+    const px = points * scaleFactor;
+    image.addRepresentation({ scaleFactor, width: px, height: px, buffer: mac ? markBitmap(px) : tileBitmap(px) });
+  }
+  if (mac) image.setTemplateImage(true);
   return image;
 }
 
