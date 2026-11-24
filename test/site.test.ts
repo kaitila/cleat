@@ -162,7 +162,10 @@ describe("every colour, font and spring is a base.css token", () => {
     expect(html).not.toMatch(/\bbackdrop\b|class="[^"]*\bglass\b/);
     expect(html).toMatch(/<figure id="island" class="island dark"/);
     expect(css).toContain("background: var(--notch)");
-    for (const layer of ["idle", "peek", "open"]) expect(html).toContain(`data-layer="${layer}"`);
+    for (const layer of ["idle", "peek", "open", "chat"]) expect(html).toContain(`data-layer="${layer}"`);
+    // Light only, whatever the visitor's system says.
+    expect(html).toMatch(/<html lang="en" data-theme="light">/);
+    expect(html).toContain('<meta name="color-scheme" content="light">');
     expect(html).toMatch(/<button[^>]*class="quiet small copy"/);
   });
 });
@@ -196,7 +199,7 @@ describe("the install script (D0047)", () => {
 
 describe("what it says", () => {
   test("the keys are the app's defaults, a Mac's in the markup and Ctrl+Alt for the others", () => {
-    expect([...html.matchAll(/<kbd data-other="([^"]+)">([^<]+)<\/kbd>/g)].map((m) => `${m[2]}/${m[1]}`)).toEqual(["Cmd/Ctrl", "Shift/Alt", "Cmd/Ctrl", "Shift/Alt"]);
+    expect([...html.matchAll(/<kbd data-other="([^"]+)">([^<]+)<\/kbd>/g)].map((m) => `${m[2]}/${m[1]}`)).toEqual(["Cmd/Ctrl", "Shift/Alt", "Cmd/Ctrl", "Shift/Alt", "Cmd/Ctrl", "Shift/Alt"]);
     expect(js).toContain('querySelectorAll("kbd[data-other]")');
   });
 

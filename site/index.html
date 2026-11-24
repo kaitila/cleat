@@ -1,11 +1,11 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Holm</title>
   <meta name="description" content="Claude Code and Codex agents from the notch. A key hands off a task with your clipboard or a snip of the screen; every session lives in the notch until it needs you.">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
   <link rel="preload" href="fonts/geist-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="base.css">
@@ -17,7 +17,7 @@
        sample sessions (site.js): a session runs, it asks, the dock opens, Allow, it closes. -->
   <main class="screen">
   <div class="stage">
-    <figure id="island" class="island dark" data-state="idle" role="img" aria-label="The notch at the top of the screen: two sessions running in its wings, then a peek that one needs you, then the open dock with that session, its steps and an Allow for the command it waits on.">
+    <figure id="island" class="island dark" data-state="idle" role="img" aria-label="The notch at the top of the screen: two sessions running in its wings, then a peek that one needs you, then the open dock with that session, its steps and an Allow for the command it waits on, then the same notch grown into the whole chat: the sessions by workspace beside the conversation.">
       <div class="wings layer" data-layer="idle" aria-hidden="true">
         <span class="dot" data-status="running"></span>
         <span class="wing-text">2 running</span>
@@ -54,6 +54,28 @@
         </div>
         <div class="reply">Reply</div>
       </div>
+
+      <div class="chat layer" data-layer="chat" aria-hidden="true" hidden>
+        <aside class="side">
+          <p class="side-head">billing-api</p>
+          <p class="side-row" aria-current="true"><span class="dot" data-status="running"></span><span>Fix the invoice date test</span></p>
+          <p class="side-row"><span class="dot"></span><span>Retry failed webhooks</span></p>
+          <p class="side-head">website</p>
+          <p class="side-row"><span class="dot" data-status="running"></span><span>Changelog for 2.4</span></p>
+          <p class="side-row"><span class="dot"></span><span>Pricing page copy</span></p>
+          <p class="side-row"><span class="dot"></span><span>Dark mode tokens</span></p>
+        </aside>
+        <div class="conv">
+          <p class="conv-title"><svg class="glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 2.25v11.5M2.25 8h11.5M3.93 3.93l8.14 8.14M12.07 3.93l-8.14 8.14"/></svg><span>Fix the invoice date test</span></p>
+          <p class="you">The invoice test fails on the 31st. Why?</p>
+          <p>The fixture builds its dates in local time, so on the 31st they roll into the next month. Building them in UTC, then running the tests.</p>
+          <p class="step"><span>Read</span> src/invoices/dates.ts</p>
+          <p class="step"><span>Edit</span> test/fixtures.ts</p>
+          <p class="step"><span>Bash</span> bun test invoices · 12 passed</p>
+          <p>Fixed: the fixture now builds every date in UTC, and the month-end case has a test of its own.</p>
+          <div class="reply">Reply</div>
+        </div>
+      </div>
     </figure>
   </div>
 
@@ -65,7 +87,9 @@
     <dl class="keys">
       <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>Space</kbd></dt><dd>A task, with your clipboard attached</dd></div>
       <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>S</kbd></dt><dd>A task about part of the screen</dd></div>
-      <div><dt><span class="hover">Hover</span></dt><dd>Every session: read, reply, allow</dd></div>
+      <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>J</kbd></dt><dd>The whole chat, grown out of the notch</dd></div>
+      <div><dt><span class="hover">Hover</span></dt><dd>Every session at a glance: read, reply, allow</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Every other key, inside the app</dd></div>
     </dl>
 
     <div class="install">
