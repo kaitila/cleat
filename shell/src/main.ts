@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalShortcut, ipcMain, Menu, nativeImage, type NativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences, Tray } from "electron";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
-import { acceptedState, DOCK_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, takesMouse, watchMs } from "./dock";
+import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_SIZES, DOCK_CHAT_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, type Size, takesMouse, watchMs } from "./dock";
 import { centred, markBitmap, tileBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
@@ -379,8 +379,28 @@ function newTask(): void {
   void openPopup();
 }
 
-/** Opens the chat view, on one session when given its id. `inactive`: without taking the focus (the self-test). */
+/** The sessions the self-test saw the shell hand the dock to grow into the chat with ("" for the page's own pick). */
+const chatsInDock: string[] = [];
+
+/**
+ * Grows the dock into the chat (D0042), on one session when given its id: the chat is the notch
+ * grown large, not a window of its own. False when there is no dock on the screen to grow: the dock
+ * is off, or its page is not loaded.
+ */
+function chatInDock(sessionId?: string): boolean {
+  if (!prefs.dock || !dockLoaded || !dock || dock.isDestroyed()) return false;
+  if (args.selfTest) chatsInDock.push(sessionId ?? "");
+  dock.webContents.send(DOCK_CHAT_CHANNEL, sessionId ?? null);
+  return true;
+}
+
+/**
+ * Opens the chat view, on one session when given its id: in the dock, which grows into it, while
+ * the dock is on the screen; else in a window of its own. `inactive`: without taking the focus (the
+ * self-test).
+ */
 async function openChat(sessionId?: string, inactive = false): Promise<void> {
+  if (chatInDock(sessionId)) return;
   if (!(await ensureRunner())) return runnerDown();
   const url = chatUrl(settings.runnerUrl, sessionId);
   try {
@@ -790,8 +810,18 @@ let notchMeasured: Promise<void> | null = null;
 function firstNotch(): Promise<void> {
   notchMeasured ??= measureNotch().then((notch) => {
     dockNotch = notch;
+    dockChat = currentChat();
   });
   return notchMeasured;
+}
+
+/** How large the island grows into the chat on the primary display (D0042), as last worked out: with the notch, as the window's place and the page's address depend on it. */
+let dockChat: Size = DOCK_SIZES.chat;
+
+/** The chat's size for the primary display as it is now, from the area the dock hangs in. */
+function currentChat(): Size {
+  const display = screen.getPrimaryDisplay();
+  return chatSize(dockArea(OS, display.bounds, display.workArea, dockNotch));
 }
 
 /**
@@ -835,7 +865,7 @@ function measureNotchOnce(): Promise<Notch | null> {
  */
 function dockPlace(): Electron.Rectangle {
   const display = screen.getPrimaryDisplay();
-  return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch));
+  return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch), dockChat);
 }
 
 /**
@@ -848,7 +878,7 @@ function setDockLevel(win: BrowserWindow): void {
 
 /** The window's bounds: its one place, or for an opaque dock the island of the state the page last reported, at the top centre of that place. */
 function dockWindowBounds(): Electron.Rectangle {
-  return DOCK_TRANSPARENT ? dockPlace() : opaqueDockBounds(dockPlace(), islandRect(dockState ?? "idle"));
+  return DOCK_TRANSPARENT ? dockPlace() : opaqueDockBounds(dockPlace(), islandRect(dockState ?? "idle", null, dockChat));
 }
 
 /** Puts the dock's window in its place. Called for a change of display, and for an opaque dock's change of state only (fitOpaqueDock). */
@@ -885,8 +915,8 @@ function watchDockMouse(): number {
   const cursor = dockCursor();
   // A page that has reported nothing, or a window that is not shown, takes nothing.
   const state = dockLoaded ? dockState : null;
-  setDockMouse(win, takesMouse(bounds, state, cursor, dockNotch));
-  return watchMs(bounds, state, cursor, dockNotch);
+  setDockMouse(win, takesMouse(bounds, state, cursor, dockNotch, dockChat));
+  return watchMs(bounds, state, cursor, dockNotch, dockChat);
 }
 
 /** Looks at the cursor now and again after a while, for as long as the shell runs. */
@@ -1073,7 +1103,7 @@ async function loadDock(): Promise<void> {
     const late = new Promise<"late">((resolve) => {
       timer = setTimeout(() => resolve("late"), DOCK_LOAD_MS);
     });
-    const loaded = await Promise.race([win.loadURL(dockUrl(settings.runnerUrl, dockNotch)), late]).finally(() => clearTimeout(timer));
+    const loaded = await Promise.race([win.loadURL(dockUrl(settings.runnerUrl, dockNotch, dockChat)), late]).finally(() => clearTimeout(timer));
     if (loaded === "late") {
       // Its page process is stuck: the window goes, and the next check starts over in a new one.
       if (dock === win) closeDock();
@@ -1081,7 +1111,7 @@ async function loadDock(): Promise<void> {
     }
     if (win.isDestroyed() || dock !== win) return;
     // A runner without the page answers 404 with a body, which loads: that is not the dock.
-    if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl, dockNotch)} answered ${dockStatus}`);
+    if (dockStatus < 200 || dockStatus >= 300) throw new Error(`${dockUrl(settings.runnerUrl, dockNotch, dockChat)} answered ${dockStatus}`);
     dockLoaded = true;
     staleRunnerSaid = false;
     // Never activated: showing the dock takes nothing from what the person is doing.
@@ -1142,9 +1172,11 @@ let remeasuring: Promise<void> = Promise.resolve();
 async function remeasureNotch(): Promise<void> {
   placeDock();
   await firstNotch();
-  const before = JSON.stringify(dockNotch);
+  const before = JSON.stringify([dockNotch, dockChat]);
   dockNotch = await measureNotch();
-  if (JSON.stringify(dockNotch) === before) return;
+  // Another display, resolution or scale may also give the chat another size: the page draws it.
+  dockChat = currentChat();
+  if (JSON.stringify([dockNotch, dockChat]) === before) return;
   if (dock && !dock.isDestroyed()) setDockLevel(dock);
   placeDock();
   if (dockLoaded) {
@@ -1464,7 +1496,7 @@ async function selfTest(): Promise<SelfTestResult> {
     dockIgnoresMouseBeforeLoad: false, dockIdleBounds: null, dockIdleFocusable: null, dockIdleFocused: null, dockMouseOnIdleIsland: false,
     dockMouseAwayIgnored: false, dockMouseBelowPillIgnored: false, dockPeekBounds: null, dockPeekFocusable: null, dockMouseOnPeekIsland: false,
     dockOpenBounds: null, dockOpenFocusable: null, dockMouseOnOpenIsland: false, dockOtherValueIgnored: false,
-    dockBackBounds: null, dockBackFocusable: null, dockForeignOriginIgnored: false, dockOpenedChatUrl: null, dockOpenedPromptUrl: null,
+    dockBackBounds: null, dockBackFocusable: null, dockForeignOriginIgnored: false, dockChatBounds: null, dockChatFocusable: null, dockMouseOnChatIsland: false, dockChatSession: null, dockChatNoWindow: false, dockOpenedPromptUrl: null,
     dockOtherWindowRefused: false, dockIgnoresMouseUnreported: false, dockIgnoresMouseAfterCrash: false,
     dockHiddenWithoutRunner: false, dockShownAgain: false,
     snipHotkeyRegistered: false, snipDisplays: null, snipOverlayBounds: null, snipOverlaysShown: false, snipUrl: null, snipMs: null, snipPhases: null,
@@ -1571,13 +1603,14 @@ async function selfTest(): Promise<SelfTestResult> {
     const display = screen.getPrimaryDisplay().bounds;
     // The notch as the shell measures it at start: the place, the rectangles and the page's address follow it.
     dockNotch = await measureNotch();
+    dockChat = currentChat();
     r.dockNotch = dockNotch;
     // Where the transparent window is, and the island is found from, for an opaque dock too.
     const windowAt = dockPlace();
     /** A point on the screen from one inside the dock's window. */
     const spot = (x: number, y: number): Electron.Point => ({ x: windowAt.x + x, y: windowAt.y + y });
     const middle = (state: DockState) => {
-      const island = islandRect(state, dockNotch);
+      const island = islandRect(state, dockNotch, dockChat);
       return spot(Math.floor(island.x + island.width / 2), Math.floor(island.height / 2));
     };
     /** Puts the made-up cursor somewhere and waits for the loop to have looked. Returns whether the window ignores the mouse. */
@@ -1634,6 +1667,13 @@ async function selfTest(): Promise<SelfTestResult> {
     // Another value: refused, still open.
     const other = await ask("huge", null);
     r.dockOtherValueIgnored = other.unchanged && other.focusable;
+    // Grown into the chat (D0042): the same window, still focusable, and the cursor far below the open
+    // dock's rectangle, inside the chat's, is taken.
+    const grown = await ask("chat", "chat");
+    r.dockChatBounds = grown.bounds;
+    r.dockChatFocusable = grown.focusable;
+    const deep = islandRect("chat", dockNotch, dockChat);
+    r.dockMouseOnChatIsland = !(await cursorAt(spot(Math.floor(deep.x + 8), Math.floor(deep.height - 8))));
     const back = await ask("idle", "idle");
     r.dockBackBounds = back.bounds;
     r.dockBackFocusable = back.focusable;
@@ -1648,11 +1688,11 @@ async function selfTest(): Promise<SelfTestResult> {
       settings = { ...settings, runnerUrl: real };
     }
 
-    // The dock's links: the chat on a session, the pop-up, and nothing else.
+    // The dock's links: the chat on a session, which the dock itself grows into (no window), the pop-up, and nothing else.
     await run(`window.open(${JSON.stringify(chatUrl(real, "self-test-session"))}); 0`);
-    for (let i = 0; i < 40 && !chat?.isVisible(); i++) await sleep(100);
-    r.dockOpenedChatUrl = chat?.webContents.getURL() ?? null;
-    chat?.destroy();
+    for (let i = 0; i < 40 && chatsInDock.length === 0; i++) await sleep(100);
+    r.dockChatSession = chatsInDock[0] ?? null;
+    r.dockChatNoWindow = chat === null;
     await run(`window.open(${JSON.stringify(promptUrl(real))}); 0`);
     for (let i = 0; i < 40 && !popup?.isVisible(); i++) await sleep(100);
     r.dockOpenedPromptUrl = popup?.webContents.getURL() ?? null;

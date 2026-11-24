@@ -5,7 +5,7 @@
 // It installs the shell, starts a stub runner, runs Electron with --self-test and checks every field it wrote.
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, normalize } from "node:path";
-import { dockBounds, type DockState, islandRect, type Notch } from "../../shell/src/dock";
+import { chatSize, DOCK_SIZES, dockBounds, type DockState, islandRect, type Notch } from "../../shell/src/dock";
 import { dockArea, opaqueDockBounds, windowMaterial } from "../../shell/src/os";
 import { cropPlan, SELF_TEST_CROP } from "../../shell/src/snip";
 import type { Area } from "../../shell/src/geometry";
@@ -228,10 +228,8 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   // A notch is the shell's to measure (AppKit, only on a Mac); judged here as sensible, then used for the rest.
   const notch: Notch | null = r.dockNotch ?? null;
   need(notch === null || (OS_OF[layout] === "macos" && notch.width >= 40 && notch.height >= 16), `the shell measured a notch ${JSON.stringify(r.dockNotch)} on ${layout}`);
-  const dockAt = notch ? `${runnerUrl}/dock?notch=${notch.width}x${notch.height}` : `${runnerUrl}/dock`;
-  need(r.dockUrl === dockAt, `the dock loaded ${r.dockUrl}, not ${dockAt}`);
   need(r.dockVisible, "the dock was not shown");
-  need(r.dockBridge === "object:setState:undefined:undefined", `the page sees more or less than intuitionDock.setState: ${r.dockBridge}`);
+  need(r.dockBridge === "object:setState,onChat:undefined:undefined", `the page sees more or less than intuitionDock.setState and onChat: ${r.dockBridge}`);
   // The same pure function the shell uses, run here on the display the shell reported.
   const display = isArea(r.primaryDisplay) && r.primaryDisplay.width > 0 && r.primaryDisplay.height > 0 ? r.primaryDisplay : null;
   need(display, `the primary display's bounds are ${JSON.stringify(r.primaryDisplay)}`);
@@ -241,10 +239,16 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   const workArea = isArea(r.primaryWorkArea) ? r.primaryWorkArea : display;
   const inside = (a: Area, b: Area) => a.x >= b.x && a.y >= b.y && a.x + a.width <= b.x + b.width && a.y + a.height <= b.y + b.height;
   need(workArea && display && inside(workArea, display), `the primary display's work area is ${JSON.stringify(r.primaryWorkArea)}, not inside its bounds ${JSON.stringify(display)}`);
-  const place = display && workArea ? dockBounds(dockArea(OS_OF[layout], display, workArea, notch)) : null;
+  const area = display && workArea ? dockArea(OS_OF[layout], display, workArea, notch) : null;
+  // How large the island grows into the chat on this display (D0042): the window is as large as that.
+  const chat = area ? chatSize(area) : DOCK_SIZES.chat;
+  const place = area ? dockBounds(area, chat) : null;
+  const query = [...(notch ? [`notch=${notch.width}x${notch.height}`] : []), `chat=${chat.width}x${chat.height}`].join("&");
+  const dockAt = `${runnerUrl}/dock?${query}`;
+  need(r.dockUrl === dockAt, `the dock loaded ${r.dockUrl}, not ${dockAt}`);
   need(typeof r.dockTransparent === "boolean", `the shell did not say whether the dock was transparent: ${JSON.stringify(r.dockTransparent)}`);
   const at = (bounds: unknown, when: string, state: DockState = "idle") => {
-    const want = place && (r.dockTransparent === false ? opaqueDockBounds(place, islandRect(state)) : place);
+    const want = place && (r.dockTransparent === false ? opaqueDockBounds(place, islandRect(state, null, chat)) : place);
     need(want && isArea(bounds) && bounds.x === want.x && bounds.y === want.y && bounds.width === want.width && bounds.height === want.height,
       `${when}, the dock's window is at ${JSON.stringify(bounds)}, not ${r.dockTransparent === false ? `the ${state} island` : "its one place"} at the top centre of the primary display, ${JSON.stringify(want)}`);
   };
@@ -262,12 +266,15 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   need(r.dockOpenFocusable === true, "the dock is not focusable in open");
   need(r.dockMouseOnOpenIsland, "open: the cursor on the island was not taken, or away from it was not ignored");
   need(r.dockOtherValueIgnored, "setState with a value that is not a state changed the dock");
+  at(r.dockChatBounds, 'after setState("chat")', "chat");
+  need(r.dockChatFocusable === true, "the dock is not focusable grown into the chat");
+  need(r.dockMouseOnChatIsland, "chat: the cursor near the chat's bottom corner was not taken");
   at(r.dockBackBounds, 'after setState("idle")');
   need(r.dockBackFocusable === false, "the dock is still focusable back in idle");
   need(r.dockIgnoresMouseUnreported, "a page that loaded and reported no state did not leave the window ignoring the mouse");
   need(r.dockIgnoresMouseAfterCrash, "after the page's process crashed the window did not hide and ignore the mouse");
   need(r.dockForeignOriginIgnored, "setState from a page on another origin changed the dock");
-  need(r.dockOpenedChatUrl === `${runnerUrl}/?session=${STUB_SESSION}`, `the dock's link to a session opened ${r.dockOpenedChatUrl}, not ${runnerUrl}/?session=${STUB_SESSION}`);
+  need(r.dockChatSession === STUB_SESSION && r.dockChatNoWindow, `the dock's link to a session grew the dock into the chat on ${JSON.stringify(r.dockChatSession)}${r.dockChatNoWindow ? "" : " and opened a chat window"}, not on ${STUB_SESSION} with no window`);
   need(r.dockOpenedPromptUrl === `${runnerUrl}/prompt`, `the dock's link to /prompt opened ${r.dockOpenedPromptUrl}, not the pop-up on ${runnerUrl}/prompt`);
   need(r.dockOtherWindowRefused, "another new window from the dock was not refused");
   need(r.dockHiddenWithoutRunner, "the dock was not hidden when the runner stopped answering (or hid at the first missed check)");

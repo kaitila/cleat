@@ -77,8 +77,15 @@ export interface SelfTestResult {
   dockBackFocusable: boolean | null;
   /** setState from a page whose origin is not the runner's changed nothing. */
   dockForeignOriginIgnored: boolean;
-  /** The chat window's URL after the dock's page opened /?session=<id> in a new window. */
-  dockOpenedChatUrl: string | null;
+  /** After the page called setState("chat"): the same bounds, focusable (D0042). */
+  dockChatBounds: Area | null;
+  dockChatFocusable: boolean | null;
+  /** Chat: a point near the chat's bottom left corner, far outside the open dock's rectangle, was taken. */
+  dockMouseOnChatIsland: boolean;
+  /** The session the shell told the dock to grow into the chat on after its page opened /?session=<id> in a new window ("" for none). */
+  dockChatSession: string | null;
+  /** And no chat window of its own was opened for it. */
+  dockChatNoWindow: boolean;
   /** The pop-up's URL after the dock's page opened /prompt in a new window. */
   dockOpenedPromptUrl: string | null;
   /** New windows from the dock to another of the runner's paths and to another origin opened nothing. */

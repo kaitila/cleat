@@ -3,7 +3,16 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOCK_SIZES, dockBounds, dockSizes, islandRect, movesDock, NOTCH_WING, takesMouse } from "../../shell/src/dock";
+import { chatSize, DOCK_SIZES, dockBounds as placeFor, dockSizes as sizesFor, islandRect as rectFor, movesDock, NOTCH_WING, type Notch, takesMouse as mouseFor } from "../../shell/src/dock";
+import type { Area } from "../../shell/src/geometry";
+
+// The placement below is checked with a chat no larger than the open dock, so the window is the open
+// dock's 460x480, as it was before the chat (D0042); each test checks the chat's own size once too.
+const SMALL = DOCK_SIZES.open;
+const dockBounds = (area: Area) => placeFor(area, SMALL);
+const dockSizes = (notch: Pick<Notch, "width" | "height"> | null) => sizesFor(notch, SMALL);
+const islandRect = (state: Parameters<typeof rectFor>[0], notch: Notch | null = null) => rectFor(state, notch, SMALL);
+const takesMouse = (win: Area, state: Parameters<typeof mouseFor>[1], cursor: { x: number; y: number }, notch: Notch | null = null) => mouseFor(win, state, cursor, notch, SMALL);
 import { autostartEntry, autostartFile, LAUNCH_AGENT, launchAgentFile, launchAgentPlist } from "../../shell/src/login";
 import {
   ACRYLIC_BUILD, CLEAR, defaultHotkeys, dockArea, dockNotchOf, NOTCH_PROBE, STAND_IN_NOTCH_HEIGHT, STAND_IN_NOTCH_WIDTH, parseNotch, materialOptions, windowMaterial, windowsBuild, dockTransparent, hasAppIndicator, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, parseLocalRunner,
@@ -82,6 +91,8 @@ describe("the dock per OS", () => {
   test("a Mac's dock hangs below the menu bar, centred on the display; elsewhere from the very top edge", () => {
     expect(dockArea("macos", bounds, workArea)).toEqual({ x: 0, y: 38, width: 1512, height: 944 });
     expect(dockBounds(dockArea("macos", bounds, workArea))).toEqual({ x: 526, y: 38, width: 460, height: 480 });
+    // With the chat the area gives (D0042): 936x716 below the menu bar, centred the same.
+    expect(placeFor(dockArea("macos", bounds, workArea), chatSize(dockArea("macos", bounds, workArea)))).toEqual({ x: 288, y: 38, width: 936, height: 716 });
     // Centred on the display, not on a work area the Dock app narrowed from the side.
     expect(dockArea("macos", bounds, { ...workArea, x: 80, width: 1432 }).x).toBe(0);
     for (const os of ["windows", "linux"] as const) expect(dockArea(os, bounds, workArea)).toEqual(bounds);
@@ -137,8 +148,14 @@ describe("the dock per OS", () => {
 
   test("out of a notch, idle is the notch and its wings, peek its line below the notch, and the mouse is taken on the notch alone in idle", () => {
     const notch = { x: 666.5, width: 179, height: 38 };
-    expect(dockSizes(null)).toEqual(DOCK_SIZES);
-    expect(dockSizes(notch)).toEqual({ idle: { width: 179 + 2 * NOTCH_WING, height: 38 }, peek: { width: 380, height: 78 }, open: DOCK_SIZES.open });
+    expect(sizesFor(null)).toEqual(DOCK_SIZES);
+    expect(sizesFor(notch)).toEqual({ idle: { width: 179 + 2 * NOTCH_WING, height: 38 }, peek: { width: 380, height: 78 }, open: DOCK_SIZES.open, chat: DOCK_SIZES.chat });
+    expect(dockSizes(notch).chat).toEqual(SMALL);
+    // Grown into the chat out of the notch: the chat's whole rectangle takes the mouse, far below the open dock's.
+    const chat = chatSize(dockArea("macos", bounds, workArea, notch));
+    const big = placeFor(dockArea("macos", bounds, workArea, notch), chat);
+    expect(mouseFor(big, "chat", { x: big.x + 10, y: chat.height - 10 }, notch, chat)).toBe(true);
+    expect(mouseFor(big, "open", { x: big.x + 10, y: chat.height - 10 }, notch, chat)).toBe(false);
     expect(islandRect("idle", notch)).toEqual({ x: (460 - 179) / 2, y: 0, width: 179, height: 38 });
     expect(islandRect("peek", notch)).toEqual({ x: 40, y: 0, width: 380, height: 78 });
     const win = dockBounds(dockArea("macos", bounds, workArea, notch));
@@ -163,6 +180,9 @@ describe("the dock per OS", () => {
 
   test("an opaque dock is the state's island at the top centre of the transparent window's place", () => {
     const place = dockBounds(bounds);
+    // Grown into the chat, an opaque dock is the chat's whole rectangle, the transparent window's place.
+    const chat = chatSize(bounds);
+    expect(opaqueDockBounds(placeFor(bounds, chat), rectFor("chat", null, chat))).toEqual(placeFor(bounds, chat));
     expect(opaqueDockBounds(place, islandRect("idle"))).toEqual({ x: place.x + 166, y: 0, width: 128, height: 22 });
     expect(opaqueDockBounds(place, islandRect("peek"))).toEqual({ x: place.x + 40, y: 0, width: 380, height: 40 });
     expect(opaqueDockBounds(place, islandRect("open"))).toEqual(place);

@@ -42,6 +42,8 @@
         <span id="connection" class="connection muted small" role="status" hidden>reconnecting</span>
         <button id="more" class="more quiet small" type="button" aria-label="More" aria-haspopup="menu" title="More">…</button>
         <a class="button quiet small new-task" href="/prompt" target="_blank" rel="noopener">New task</a>
+        <!-- The chat, the island grown large (D0042): as a click on the notch's band or the head does. -->
+        <button id="expand" class="expand quiet small" type="button" aria-label="Open the chat" title="Open the chat"><svg class="expand-mark" viewBox="0 0 16 16" stroke="currentColor" aria-hidden="true"><path d="M10 2.5h3.5V6M13.5 2.5 9 7M6 13.5H2.5V10M2.5 13.5 7 9" /></svg></button>
       </header>
       <div id="sessions-list" class="sessions-list" hidden>
         <div class="sessions-top">
@@ -63,6 +65,12 @@
           <p id="reply-hint" class="reply-hint muted small" role="status" hidden></p>
         </form>
       </div>
+    </section>
+
+    <!-- The chat (D0042): the chat view itself, /?embed=dock, loaded once and kept, laid out at its
+         full size while hidden, so growing into it draws what is already there. dock.js sets its src. -->
+    <section id="chat" class="chat layer" aria-label="Chat" data-off inert>
+      <iframe id="chat-frame" class="chat-frame" title="Chat"></iframe>
     </section>
     </div>
   </main>

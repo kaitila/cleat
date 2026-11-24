@@ -28,18 +28,21 @@ body { display: flex; justify-content: center; align-items: flex-start; }
    top is the screen's edge: the clip's top inset is always 0, so no spring moves it. Its bottom
    corners are as round as half its height allows, up to the floating radius: a pill when idle or
    peeking, a drop when open, and they follow the spring with the shape. */
+/* The size drawn is the spring's, but never more than the state's rectangle (--cap-w and --cap-h,
+   set by dock.js for open and the chat): a spring that overshoots flattens against the rectangle's
+   edge, as it did against the window's when the window was the open dock's size. */
 .island {
   position: relative;
   flex: none;
   background: var(--glass-rim);
-  clip-path: inset(0 calc((100% - var(--island-w)) / 2) calc(100% - var(--island-h)) calc((100% - var(--island-w)) / 2) round 0 0 min(var(--island-h) / 2, var(--radius-l)) min(var(--island-h) / 2, var(--radius-l)));
+  clip-path: inset(0 calc((100% - min(var(--island-w), var(--cap-w))) / 2) calc(100% - min(var(--island-h), var(--cap-h))) calc((100% - min(var(--island-w), var(--cap-w))) / 2) round 0 0 min(var(--island-h) / 2, var(--cap-h) / 2, var(--radius-l)) min(var(--island-h) / 2, var(--cap-h) / 2, var(--radius-l)));
   cursor: default;
 }
 .surface {
   position: absolute;
   inset: 0;
   background: var(--glass-float);
-  clip-path: inset(0 calc((100% - var(--island-w)) / 2 + var(--hairline)) calc(100% - var(--island-h) + var(--hairline)) calc((100% - var(--island-w)) / 2 + var(--hairline)) round 0 0 calc(min(var(--island-h) / 2, var(--radius-l)) - var(--hairline)) calc(min(var(--island-h) / 2, var(--radius-l)) - var(--hairline)));
+  clip-path: inset(0 calc((100% - min(var(--island-w), var(--cap-w))) / 2 + var(--hairline)) calc(100% - min(var(--island-h), var(--cap-h)) + var(--hairline)) calc((100% - min(var(--island-w), var(--cap-w))) / 2 + var(--hairline)) round 0 0 calc(min(var(--island-h) / 2, var(--cap-h) / 2, var(--radius-l)) - var(--hairline)) calc(min(var(--island-h) / 2, var(--cap-h) / 2, var(--radius-l)) - var(--hairline)));
 }
 /* Shrinking: it gathers back into the pill on the soft spring, narrowing a moment before it rises. */
 .island, .island > .surface {
@@ -51,6 +54,16 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .island:is([data-state="peek"], [data-state="open"]),
 .island:is([data-state="peek"], [data-state="open"]) > .surface {
   transition: --island-h var(--dur-bouncy) var(--ease-bouncy), --island-w var(--dur-bouncy) var(--ease-bouncy) var(--lag), opacity var(--motion) var(--ease);
+}
+/* Growing into the chat (D0042): the same drop, larger, on the soft spring, which hardly overshoots:
+   a panel that size wobbling reads as a toy. Down first, then out a moment later. */
+.island[data-state="chat"], .island[data-state="chat"] > .surface {
+  transition: --island-h var(--dur-soft) var(--ease-soft), --island-w var(--dur-soft) var(--ease-soft) calc(var(--lag) * 2), opacity var(--motion) var(--ease);
+}
+/* Back down from the chat to the open dock: the reverse, in first and then up, on the same spring;
+   no bounce on the way down (data-from, set by dock.js until the shape has arrived). */
+.island[data-state="open"][data-from="chat"], .island[data-state="open"][data-from="chat"] > .surface {
+  transition: --island-w var(--dur-soft) var(--ease-soft), --island-h var(--dur-soft) var(--ease-soft) calc(var(--lag) * 2), opacity var(--motion) var(--ease);
 }
 /* With nothing going on the sliver all but disappears: shorter (dock.js), and the whole of it faint. */
 .island[data-state="idle"][data-tone="none"] { opacity: var(--island-quiet); }
@@ -76,6 +89,16 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .peek.layer[data-kind="needs_approval"] > .dot {
   animation: slide-in var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 3) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--lag) * 3) backwards, nudge var(--dur-bouncy) var(--ease-gentle) calc(var(--lag) * 3 + var(--dur-gentle));
 }
+/* The chat: always laid out at its full size, only not seen while off (data-off, and inert), so its
+   page is ready the moment the island grows. It comes in like the panel, from a little small at the
+   top, as the shape is most of the way there; no blur on a surface that large, only the fade. */
+.chat.layer { transform-origin: 50% 0; animation: layer-pop var(--dur-soft) var(--ease-soft) calc(var(--lag) * 3) backwards, fade-in calc(var(--dur-fade) * 2) var(--ease) calc(var(--lag) * 4) backwards; }
+.chat.layer[data-off] { visibility: hidden; animation: none; }
+.chat.layer.leaving { animation: chat-out var(--dur-out) var(--ease) forwards; }
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes chat-out { to { opacity: 0; transform: scale(var(--pop)); } }
+.chat { display: flex; flex-direction: column; }
+.chat-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: transparent; }
 /* Idle: the pill fades in as the shape gathers. */
 .pill.layer { animation: layer-fade var(--dur-fade) var(--ease) calc(var(--dur-soft) / 3) backwards; }
 .layer.leaving { transform-origin: 50% 0; animation: layer-out var(--dur-out) var(--ease) forwards; pointer-events: none; }
@@ -131,7 +154,7 @@ body { display: flex; justify-content: center; align-items: flex-start; }
 .island[data-notch] .pill { justify-content: flex-start; padding-inline: var(--space-3); }
 .island[data-notch] .pill-text { order: 2; margin-inline-start: auto; max-width: calc(var(--wing) - var(--space-3)); }
 .island[data-notch] .peek.layer { top: var(--notch-h); }
-.island[data-notch] .panel { padding-top: var(--notch-h); }
+.island[data-notch] .panel, .island[data-notch] .chat { padding-top: var(--notch-h); }
 
 /* Idle: a sliver. A dot alone when nothing is going on; a few quiet words when something runs;
    colour only when a session needs the person or failed. */
@@ -167,6 +190,11 @@ button.switcher[aria-expanded="true"] { background: var(--hover); }
 .panel-head .stop, .panel-head .more { flex: none; }
 /* New task at the far right, whatever else is in the head. */
 .panel-head .new-task { flex: none; margin-left: auto; }
+/* The chat (D0042): a square quiet button at the head's end, two arrows drawn outwards. The head's
+   empty part and the notch's band above it do the same on a click. */
+.expand { flex: none; width: var(--control-s); padding: 0; color: var(--muted); }
+.expand:hover { color: var(--text); }
+.expand-mark { flex: none; width: var(--space-3); height: var(--space-3); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 /* Beside the switch, the other sessions at work (D0040): a small chip each, waiting first, its dot and
    the start of its title. A press shows it. One that newly waits nudges its dot once. The switch's
    own title gives way first, then the chips. */

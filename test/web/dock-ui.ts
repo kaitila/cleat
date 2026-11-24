@@ -15,6 +15,7 @@ import { fakeDriver } from "../../src/runner/agent-fake";
 import { Store } from "../../src/runner/store";
 import { DOCK_SIZES, DOCK_WINDOW, type DockState, dockSizes } from "../../shell/src/dock";
 import { testRunner } from "../runner/helpers";
+import { RECENT_EVENTS } from "../../src/web/dock-state.js";
 import { MARKDOWN_EXPECTED, markdownProblems, seedMarkdown } from "./markdown-sample";
 import { assistantEntry, MemoryTranscripts, userEntry } from "./chat-transcripts";
 
@@ -114,7 +115,8 @@ function instruments(bridge: boolean): void {
   const w = window as Any;
   w.__calls = [];
   // What the shell's preload gives the page: setState and nothing else. The window stays as it is.
-  if (bridge) w.intuitionDock = { setState: (state: string) => void w.__calls.push({ state, at: Date.now() }) };
+  // And onChat, through which the shell grows the island into the chat (D0042): kept, for the test to call as the shell would.
+  if (bridge) w.intuitionDock = { setState: (state: string) => void w.__calls.push({ state, at: Date.now() }), onChat: (callback: (id: string | null) => void) => void (w.__onChat = callback) };
 
   /** The island as drawn. Its box never changes, so its clip is found by asking what is under a point. */
   w.__shape = () => {
@@ -251,12 +253,13 @@ async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, r
         const shape = (window as Any).__shape() as { left: number; top: number; width: number; height: number };
         if (shape.width <= 0 || shape.height <= 0) why.push("nothing is drawn");
         if (shape.width > most.width || shape.height > most.height) why.push(`the island is drawn ${shape.width}x${shape.height}, more than ${most.width}x${most.height}`);
-        if (exact && (shape.width !== most.width || shape.height !== most.height)) why.push(`the island is drawn ${shape.width}x${shape.height}, not ${most.width}x${most.height}`);
+        // To half a pixel: the hit test finds an edge to a quarter pixel, and at the window's own edge (the chat fills it) a half is lost.
+        if (exact && (Math.abs(shape.width - most.width) > 0.5 || Math.abs(shape.height - most.height) > 0.5)) why.push(`the island is drawn ${shape.width}x${shape.height}, not ${most.width}x${most.height}`);
         if (Math.abs(shape.left + shape.width / 2 - box.width / 2) > 0.5) why.push(`the island's middle is at ${shape.left + shape.width / 2}, not ${box.width / 2}`);
         if (win && shape.left < rect.x) why.push(`the island starts at ${shape.left}, left of ${rect.x}`);
         // Everything the state shows lies inside what is drawn, except what a scrolling box holds.
         const layer = document.getElementById(view)!;
-        if (layer.hidden || layer.classList.contains("leaving")) why.push(`#${view} is not shown`);
+        if (layer.hidden || layer.hasAttribute("data-off") || layer.classList.contains("leaving")) why.push(`#${view} is not shown`);
         for (const el of [layer, ...layer.querySelectorAll("*")]) {
           if (el.closest(".scroller > *, .sessions > *") || (el as HTMLElement).offsetParent === null) continue;
           const b = el.getBoundingClientRect();
@@ -266,7 +269,7 @@ async function dock(colorScheme: "light" | "dark", { bridge = true, scale = 2, r
         }
         return why;
       },
-      [sizes[state], { x: (DOCK_WINDOW.width - sizes[state].width) / 2, y: 0 }, bridge ? DOCK_WINDOW : null, state === "idle" ? "pill" : state === "peek" ? "peek" : "panel", state === "peek" || (notch !== null && state === "idle")] as const,
+      [sizes[state], { x: (DOCK_WINDOW.width - sizes[state].width) / 2, y: 0 }, bridge ? DOCK_WINDOW : null, state === "idle" ? "pill" : state === "peek" ? "peek" : state === "chat" ? "chat" : "panel", state === "peek" || state === "chat" || (notch !== null && state === "idle")] as const,
     ) as Promise<string[]>;
   const fits = async (state: DockState) => {
     const why = await wrong(state);
@@ -444,7 +447,7 @@ try {
   // ---- the session's actions: a quiet "…" in its head ----
   {
     const heads = await page.locator(".panel-head > :not([hidden])").evaluateAll((els: Element[]) => els.map((el) => el.id || el.className));
-    check(heads.join(",") === "switcher,stop quiet small,more,button quiet small new-task", `the head is the session's switch, Stop while it runs, "…" and New task (${heads.join(", ")})`);
+    check(heads.join(",") === "switcher,stop quiet small,more,button quiet small new-task,expand", `the head is the session's switch, Stop while it runs, "…", New task and the chat's button (${heads.join(", ")})`);
     check((await page.locator("#switcher #title").textContent()) !== "" && (await page.locator("#switcher .session-agent svg").count()) === 1, "the switch shows the session's title and its agent's glyph");
     await page.locator("#more").click();
     const items = await d.text(".menu:not([hidden]) .menu-item");
@@ -455,11 +458,19 @@ try {
     check((await page.locator(".menu:not([hidden])").count()) === 0, "a second press on '…' puts its menu away");
     await page.locator("#more").click();
     await page.locator(".menu:not([hidden])").waitFor();
-    const [popup] = await Promise.all([d.context.waitForEvent("page"), page.locator(".menu-item", { hasText: "Open in chat" }).click()]);
-    await popup.waitForLoadState("domcontentloaded").catch(() => {});
-    check(new URL(popup.url()).pathname === "/" && new URL(popup.url()).searchParams.get("session") === waiting.id, "'Open in chat' opens a new window on /?session=<id>");
-    await popup.close();
+    const pagesBefore = d.context.pages().length;
+    await page.locator(".menu-item", { hasText: "Open in chat" }).click();
+    await d.settle("chat");
+    check((await d.lastCall()).state === "chat" && d.context.pages().length === pagesBefore, "'Open in chat' grows the island into the chat, and the shell is told 'chat': no new window (D0042)");
+    const inChat = page.frameLocator("#chat-frame");
+    await inChat.locator("#title", { hasText: needs }).waitFor();
+    await inChat.locator(".approval button", { hasText: "Allow" }).waitFor();
+    check(true, "the chat shows the same session, with its approval waiting to be answered there");
     check((await page.locator(".menu:not([hidden])").count()) === 0 && (await page.locator("#more").getAttribute("aria-expanded")) === "false", "and the menu is gone");
+    // Esc in the chat steps back down to the small dock, on the same session.
+    await page.keyboard.press("Escape");
+    await d.settle("open");
+    check((await d.lastCall()).state === "open" && (await page.locator("#title").textContent()) === needs, "Esc in the chat steps back down to the open dock, on the same session");
     await d.hover();
   }
 
@@ -1194,6 +1205,152 @@ try {
     await n.context.close();
   }
 
+  // ================= the chat: the notch grown large, one click away (D0042) =================
+  {
+    // A session longer than the open dock draws (its last RECENT_EVENTS): the chat has all of it.
+    const longTitle = "turn 1 of a long one";
+    const long = await runner.startSession(longTitle);
+    const api = async (path: string, body?: unknown) => (await fetch(`${runner.url}${path}`, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {})).json() as Promise<Any>;
+    const status = async () => ((await api("/api/sessions")).sessions as { id: string; status: string }[]).find((s) => s.id === long.id)?.status;
+    const turnEnds = async () => {
+      for (let i = 0; i < 100 && (await status()) !== "idle"; i++) await new Promise((r) => setTimeout(r, 100));
+    };
+    await turnEnds();
+    for (let turn = 2; ((await api(`/api/sessions/${long.id}/events`)).events as unknown[]).length <= RECENT_EVENTS + 4; turn++) {
+      await api(`/api/sessions/${long.id}/messages`, { prompt: `turn ${turn} of a long one` });
+      await turnEnds();
+    }
+    const total = ((await api(`/api/sessions/${long.id}/events`)).events as { kind: string }[]);
+    const users = total.filter((e) => e.kind === "user").length;
+    check(total.length > RECENT_EVENTS, `a session of ${total.length} events, ${users} of them the person's: more than the open dock draws (${RECENT_EVENTS})`);
+
+    for (const [scheme, notch] of [["dark", { width: 179, height: 32 }], ["light", { width: 179, height: 32 }], ["dark", null]] as const) {
+      const where = `${scheme}, ${notch ? "out of the notch" : "without a notch"}`;
+      const c = await dock(scheme, { notch });
+      const { page: p } = c;
+      await p.goto(`${runner.url}/dock${notch ? `?notch=${notch.width}x${notch.height}` : ""}`);
+      await p.locator("#pill").waitFor();
+      await p.evaluate(() => document.fonts.ready);
+      await c.settle("idle");
+      // The chat's page is loaded and laid out from the start, out of sight: nothing of it is seen or reached.
+      await p.waitForFunction(() => ((document.getElementById("chat-frame") as HTMLIFrameElement).contentWindow as Any)?.holmEmbed !== undefined);
+      check(await p.evaluate(() => {
+        const chat = document.getElementById("chat")!;
+        return chat.inert && getComputedStyle(chat).visibility === "hidden" && chat.getBoundingClientRect().height > 400;
+      }), `${where}: the chat's page is loaded from the start, laid out at its size, out of sight and inert`);
+
+      // ---- one click: on the idle notch, before the hover has opened anything ----
+      const top = Math.max(4, Math.floor((notch?.height ?? DOCK_SIZES.idle.height) / 2));
+      const clickedAt = Date.now();
+      await p.mouse.click(c.middle, top);
+      await c.settle("chat");
+      const states = (await c.calls()).map((x) => x.state);
+      check(states.at(-1) === "chat" && Date.now() - clickedAt < 2000, `${where}: one click on the notch grows it into the chat (${states.slice(-3).join(" → ")})`);
+      const grown = await c.fits("chat");
+      check(Math.abs(grown.width - DOCK_SIZES.chat.width) <= 0.5 && Math.abs(grown.height - DOCK_SIZES.chat.height) <= 0.5, `${where}: the chat is the island grown to ${grown.width}x${grown.height}, the window's whole size`);
+      const frame = p.frameLocator("#chat-frame");
+      check(await p.evaluate(() => document.activeElement?.id === "chat-frame"), `${where}: the keyboard is in the chat`);
+      // The colour: the notch's own black (or the dock's dark glass) shows through the chat's page.
+      const through = await p.evaluate(() => {
+        const doc = (document.getElementById("chat-frame") as HTMLIFrameElement).contentDocument!;
+        return [getComputedStyle(doc.body).backgroundColor, getComputedStyle(doc.querySelector(".sidebar")!).backgroundColor, getComputedStyle(doc.documentElement).colorScheme];
+      });
+      check(through[0] === "rgba(0, 0, 0, 0)" && through[1] === "rgba(0, 0, 0, 0)" && through[2] === "dark", `${where}: the chat's page draws no ground of its own (${through.join(", ")})`);
+      if (notch) {
+        const frameTop = await p.evaluate(() => document.getElementById("chat-frame")!.getBoundingClientRect().top);
+        check(frameTop >= notch.height, `${where}: the chat starts below the notch's band, at ${frameTop}px`);
+      }
+
+      // ---- what the chat view gives: the sessions, grouped and searchable, the whole conversation ----
+      await frame.locator(".session-title", { hasText: longTitle }).click();
+      await frame.locator("#title", { hasText: longTitle }).waitFor();
+      await frame.locator(".msg.user", { hasText: "turn 1 of a long one" }).first().waitFor();
+      const shownUsers = await frame.locator(".msg.user").count();
+      check(shownUsers === users, `${where}: the chat shows the whole conversation, all ${shownUsers} of the person's messages, from the first`);
+      check((await frame.locator(".group-head:not([hidden])").count()) >= 2 && (await frame.locator("#search").isVisible()) && (await frame.locator("#reply-text").isVisible()),
+        `${where}: with the sessions grouped by workspace, the search, and the reply box`);
+      await frame.locator("#scroller").evaluate((el: Element) => (el.scrollTop = el.scrollHeight));
+      await p.waitForTimeout(150);
+      await c.shot(notch ? "chat-notch" : "chat");
+      await frame.locator("#search").fill("turn");
+      check((await frame.locator(".session-title").allTextContents()).join("|") === longTitle, `${where}: the search finds a session by a word of its title (${(await frame.locator(".session-title").allTextContents()).join(" | ")})`);
+      await frame.locator("#search").fill("");
+      // A link that would leave the page opens a window of the shell, never inside the island.
+      check((await frame.locator("a.new-task").getAttribute("target")) === "_blank" && (await frame.locator("a.settings-link").getAttribute("target")) === "_blank", `${where}: New task and Settings open as windows, not inside the island`);
+
+      // ---- Esc steps down, one step at a time ----
+      await frame.locator("#reply-text").focus();
+      await p.keyboard.press("Escape");
+      await c.settle("open");
+      check((await c.lastCall()).state === "open" && (await p.locator("#title").textContent()) === longTitle, `${where}: Esc steps back down to the open dock, on the session the chat showed`);
+      const dockUsers = await p.locator("#stream .msg.user").count();
+      check(dockUsers < users, `${where}: which draws only the newest of it (${dockUsers} of ${users} messages)`);
+      await c.fits("open");
+      // Stepped down, the pointer is where the chat was, off the small dock: it stays until Esc, not closing under the person's eyes.
+      await p.mouse.move(c.middle, DOCK_SIZES.open.height + 120);
+      await p.waitForTimeout(700);
+      check((await c.lastCall()).state === "open", `${where}: the open dock stays after stepping down, with the pointer below it`);
+      await p.keyboard.press("Escape");
+      await c.settle("idle");
+      check((await c.lastCall()).state === "idle", `${where}: a second Esc closes it`);
+
+      // ---- from the open dock: its head, or the notch's band over it ----
+      await c.hover();
+      await p.locator("#panel").waitFor();
+      await c.settle("open");
+      await p.mouse.click(c.middle, notch ? Math.floor(notch.height / 2) : 4);
+      await c.settle("chat");
+      check((await c.lastCall()).state === "chat", `${where}: a click on the ${notch ? "notch's band" : "head"} of the open dock grows it into the chat`);
+      // The collapse button inside the chat steps down too, and the head's button grows it again.
+      await frame.locator("#collapse").click();
+      await c.settle("open");
+      check((await c.lastCall()).state === "open", `${where}: the chat's own button steps back down`);
+      await p.locator("#expand").click();
+      await c.settle("chat");
+      check((await c.lastCall()).state === "chat", `${where}: the head's button grows it into the chat again`);
+
+      // ---- the motion, both ways: never outside the chat's rectangle, always hanging from the top, no blank frame ----
+      await p.keyboard.press("Escape");
+      await c.settle("open");
+      const up = await recorded(c, "chat", () => p.locator("#expand").click());
+      const down = await recorded(c, "open", () => p.keyboard.press("Escape"));
+      for (const [name, frames] of [["growing into the chat", up], ["stepping back down", down]] as const) {
+        const outside = frames.filter((f) => f.width > DOCK_SIZES.chat.width + 0.5 || f.height > DOCK_SIZES.chat.height + 0.5);
+        const blank = frames.filter((f) => f.height === 0 || f.width === 0);
+        const loose = frames.filter((f) => !f.hung);
+        check(outside.length === 0 && blank.length === 0 && loose.length === 0, `${where}, ${name}: ${frames.length} frames, every one inside the chat's rectangle, drawn, and hanging from the top edge (worst frame ${worst(frames).toFixed(1)} ms)`);
+      }
+      const heights = up.map((f) => f.height);
+      const widths = up.map((f) => f.width);
+      const firstTall = heights.findIndex((h) => h >= DOCK_SIZES.chat.height * 0.9);
+      const firstWide = widths.findIndex((w) => w >= DOCK_SIZES.chat.width * 0.9);
+      check(firstTall >= 0 && firstWide >= 0 && firstTall <= firstWide, `${where}: growing, it reaches its height before its width: down first, then out (frame ${firstTall} and ${firstWide})`);
+
+      // ---- the shell's Open chat (tray, links): straight from idle, on a session ----
+      await p.keyboard.press("Escape");
+      await c.settle("idle");
+      await p.evaluate((id: string) => (window as Any).__onChat(id), first.id);
+      await c.settle("chat");
+      await frame.locator("#title", { hasText: prompt }).waitFor();
+      check((await c.lastCall()).state === "chat", `${where}: the shell's Open chat grows it from idle, on the session it names`);
+      // A press beside it, where the window lets the click through to the app below (here: the page around a smaller test window is the island's) is the shell's.
+      await p.keyboard.press("Escape");
+      await c.settle("open");
+      await p.keyboard.press("Escape");
+      await c.settle("idle");
+      if (scheme === "dark" && notch) {
+        // Frame by frame, to be looked at: the open dock growing into the chat, and back down.
+        await c.hover();
+        await c.settle("open");
+        await strip(c, "chat-open", "chat", () => p.locator("#expand").click(), [0, 40, 80, 120, 160, 200, 260, 320, 400, 520]);
+        await strip(c, "chat-close", "open", () => p.keyboard.press("Escape"), [0, 40, 80, 120, 160, 200, 260, 320, 400, 520]);
+        await p.keyboard.press("Escape");
+        await c.settle("idle");
+      }
+      await c.context.close();
+    }
+  }
+
   // ================= a normal browser: no bridge =================
   const b = await dock("light", { bridge: false, scale: 1 });
   await b.page.goto(`${runner.url}/dock`);
@@ -1203,7 +1360,7 @@ try {
     const r = el.getBoundingClientRect();
     return [r.left, r.top, r.width, r.height];
   }) as Promise<number[]>;
-  check((await islandBox()).join() === [270, 0, DOCK_WINDOW.width, DOCK_WINDOW.height].join(), "without the bridge the island's box hangs from the top of the page, in the middle");
+  check((await islandBox()).join() === [(1000 - DOCK_WINDOW.width) / 2, 0, DOCK_WINDOW.width, DOCK_WINDOW.height].join(), "without the bridge the island's box hangs from the top of the page, in the middle");
   await b.fits("idle");
   await b.page.mouse.move(500, 10);
   await b.page.locator("#panel").waitFor();

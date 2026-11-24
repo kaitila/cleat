@@ -16,10 +16,14 @@ export function promptUrl(runnerUrl: string): string {
   return new URL("/prompt", runnerUrl).href;
 }
 
-/** The dock's page. With a notch, its size in points as `?notch=WxH`: the page draws the island out of it. */
-export function dockUrl(runnerUrl: string, notch: { width: number; height: number } | null = null): string {
+/**
+ * The dock's page. With a notch, its size in points as `?notch=WxH`: the page draws the island out of
+ * it. With a chat size, `&chat=WxH`: how large the island grows into the chat on this display (D0042).
+ */
+export function dockUrl(runnerUrl: string, notch: { width: number; height: number } | null = null, chat: { width: number; height: number } | null = null): string {
   const url = new URL("/dock", runnerUrl);
   if (notch) url.searchParams.set("notch", `${notch.width}x${notch.height}`);
+  if (chat) url.searchParams.set("chat", `${chat.width}x${chat.height}`);
   return url.href;
 }
 

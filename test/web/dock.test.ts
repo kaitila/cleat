@@ -4,7 +4,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { DOCK_SIZES as SHELL_SIZES, DOCK_STATES, DOCK_WINDOW as SHELL_WINDOW, dockSizes as shellDockSizes, islandRect as shellIslandRect, NOTCH_WING as SHELL_WING } from "../../shell/src/dock";
+import { chatSize, DOCK_SIZES as SHELL_SIZES, DOCK_STATES, DOCK_WINDOW as SHELL_WINDOW, dockSizes as shellDockSizes, dockWindow as shellDockWindow, islandRect as shellIslandRect, NOTCH_WING as SHELL_WING } from "../../shell/src/dock";
 import { dockUrl } from "../../shell/src/origin";
 import {
   CLOSE_MS,
@@ -16,7 +16,10 @@ import {
   QUIET_HEIGHT,
   RECENT_EVENTS,
   asPeek,
+  clickAction,
   dockSizes,
+  dockWindow,
+  parseChat,
   dockWorkspaces,
   enqueue,
   inWorkspace,
@@ -97,8 +100,8 @@ describe("the contract with the shell", () => {
     expect(Object.keys(DOCK_SIZES)).toEqual([...DOCK_STATES]);
     expect(DOCK_SIZES).toEqual(SHELL_SIZES);
     expect(DOCK_WINDOW).toEqual({ ...SHELL_WINDOW });
-    expect(DOCK_WINDOW).toEqual({ width: 460, height: 480 });
-    expect(DOCK_SIZES).toEqual({ idle: { width: 128, height: 22 }, peek: { width: 380, height: 40 }, open: { width: 460, height: 480 } });
+    expect(DOCK_WINDOW).toEqual({ width: 960, height: 680 });
+    expect(DOCK_SIZES).toEqual({ idle: { width: 128, height: 22 }, peek: { width: 380, height: 40 }, open: { width: 460, height: 480 }, chat: { width: 960, height: 680 } });
     // The owner's limits: a pill of at most 24, a peek of at most 52, and nothing larger than the window.
     expect(DOCK_SIZES.idle.height).toBeLessThanOrEqual(24);
     expect(QUIET_HEIGHT).toBeLessThan(DOCK_SIZES.idle.height);
@@ -205,16 +208,93 @@ describe("the contract with the shell", () => {
     expect(noComments(source("dock.js"))).not.toMatch(/resizeTo|resizeBy|innerWidth|innerHeight/);
   });
 
-  test("the bridge is used for setState and nothing else, and the page works without it", () => {
+  test("the bridge is used for setState and onChat and nothing else, and the page works without it", () => {
     const js = noComments(source("dock.js"));
-    expect(js.match(/intuitionDock[?.\w]*/g)).toEqual(["intuitionDock?.setState"]);
+    expect(js.match(/intuitionDock[?.\w]*/g)).toEqual(["intuitionDock?.setState", "intuitionDock?.onChat?."]);
   });
 
-  test("the links open new windows on /prompt and /?session=<id>, which the shell turns into the pop-up and the chat window", () => {
+  test("New task is a new window on /prompt; Open in chat grows the island into the chat, not a window (D0042)", () => {
     const html = source("dock.html");
     expect(html).toMatch(/<a class="[^"]*" href="\/prompt" target="_blank" rel="noopener">New task<\/a>/);
-    // Open in chat is in the head's "…": it opens /?session=<id> the same way, through window.open.
-    expect(source("dock.js")).toContain('window.open(`/?session=${encodeURIComponent(id)}`, "_blank", "noopener")');
+    const js = noComments(source("dock.js"));
+    expect(js).toContain('if (action === "chat") goChat(id);');
+    expect(js).not.toMatch(/window\.open\(/);
+    // The chat is the chat view itself, in the island: one frame on /?embed=dock, never another origin.
+    expect(html).toMatch(/<iframe id="chat-frame" class="chat-frame" title="Chat"><\/iframe>/);
+    expect(js).toContain('els.chatFrame.src = "/?embed=dock";');
+    expect(js).toContain("e.origin !== location.origin || e.source !== els.chatFrame.contentWindow");
+  });
+});
+
+describe("the chat: the island grown large (D0042)", () => {
+  test("the page reads the chat's size from the address the shell gives, and the window is as large as the largest state", () => {
+    const chat = { width: 910, height: 726 };
+    expect(parseChat(new URL(dockUrl("http://127.0.0.1:4777", { width: 179, height: 38 }, chat)).search)).toEqual(chat);
+    expect(parseChat("")).toBeNull();
+    for (const bad of ["?chat=910", "?chat=910x", "?chat=400x726", "?chat=910x300", "?chat=9100x726", "?chat=910.5x726", "?chat=<b>x726"]) expect(parseChat(bad)).toBeNull();
+    expect(dockWindow(chat)).toEqual(shellDockWindow(chat));
+    expect(dockWindow(chat)).toEqual(chat);
+    // A chat no larger than the open dock still leaves the window the open dock's size.
+    expect(dockWindow({ width: 460, height: 480 })).toEqual({ width: 460, height: 480 });
+    for (const notch of [null, { width: 179, height: 38 }]) {
+      expect(dockSizes(notch, chat)).toEqual(shellDockSizes(notch, chat));
+      for (const state of DOCK_STATES) {
+        expect(islandRect(state, notch, chat)).toEqual(shellIslandRect(state, notch ? { ...notch, x: 0 } : null, chat));
+        expect(islandRect(state, notch, chat).x + islandRect(state, notch, chat).width / 2).toBe(chat.width / 2);
+      }
+    }
+    expect(islandSize("chat", { panel: 10 }, null, chat)).toEqual(chat);
+    expect(islandRect("chat", null, chat)).toEqual({ x: 0, y: 0, width: 910, height: 726 });
+  });
+
+  test("one click from the notch: the pill, the peek, the band or the head of the open dock; the band of the chat steps down", () => {
+    const notch = { width: 179, height: 32 };
+    expect(clickAction("idle", { y: 10 }, notch)).toBe("chat");
+    expect(clickAction("idle", { y: 10 })).toBe("chat");
+    expect(clickAction("peek", { y: 50 }, notch)).toBe("chat");
+    // Open: the notch's band above the head, or the head's own empty part; not a control, not the stream.
+    expect(clickAction("open", { y: 20 }, notch)).toBe("chat");
+    expect(clickAction("open", { y: 50, head: true }, notch)).toBe("chat");
+    expect(clickAction("open", { y: 50, head: true, control: true }, notch)).toBeNull();
+    expect(clickAction("open", { y: 200 }, notch)).toBeNull();
+    expect(clickAction("open", { y: 10 })).toBeNull();
+    expect(clickAction("open", { y: 10, head: true })).toBe("chat");
+    // The chat: the band steps back down; inside, the chat's own page has the clicks.
+    expect(clickAction("chat", { y: 20 }, notch)).toBe("down");
+    expect(clickAction("chat", { y: 40 }, notch)).toBeNull();
+    expect(clickAction("chat", { y: 5 })).toBeNull();
+  });
+
+  test("the shell's chat size: a share of the display, between the open dock and its most, clear of the edges", () => {
+    expect(chatSize({ width: 1470, height: 956 })).toEqual({ width: 910, height: 726 });
+    expect(chatSize({ width: 1920, height: 1080 })).toEqual({ width: 1180, height: 820 });
+    expect(chatSize({ width: 2560, height: 1440 })).toEqual({ width: 1180, height: 860 });
+    expect(chatSize({ width: 1280, height: 800 })).toEqual({ width: 794, height: 608 });
+    // A display smaller than the open dock: the chat is the open dock's size, never smaller.
+    expect(chatSize({ width: 400, height: 300 })).toEqual({ width: 460, height: 480 });
+    for (const area of [{ width: 1470, height: 956 }, { width: 1024, height: 640 }, { width: 3008, height: 1692 }]) {
+      const c = chatSize(area);
+      expect(c.width % 2 + c.height % 2).toBe(0);
+      expect(c.width).toBeLessThanOrEqual(area.width - 48);
+      expect(c.height).toBeLessThanOrEqual(area.height - 24);
+    }
+  });
+
+  test("the chat is only out of sight while off, so its page is laid out and ready; inert, so nothing in it takes a key", () => {
+    const html = source("dock.html");
+    expect(html).toMatch(/<section id="chat" class="chat layer" aria-label="Chat" data-off inert>/);
+    const css = noComments(source("dock.css"));
+    expect(css).toMatch(/\.chat\.layer\[data-off\] \{ visibility: hidden; animation: none; \}/);
+    expect(css).not.toMatch(/\.chat[^{]*\{[^}]*display: none/);
+  });
+
+  test("the chat view knows it is in the dock: dark, no backdrop, links as windows, Esc and its button step down, the keyboard only while shown", () => {
+    const js = noComments(source("chat.js"));
+    expect(js).toContain('new URLSearchParams(location.search).get("embed") === "dock"');
+    expect(js).toContain('window.parent.postMessage({ holmEmbed: "down" }, location.origin)');
+    expect(js).toMatch(/if \(enabled && active\)/);
+    expect(js).toContain("if (push && !EMBED) history.pushState");
+    expect(source("chat.html")).toMatch(/<button id="collapse" class="collapse quiet" type="button" aria-label="Back to the dock" title="Back to the dock \(Esc\)" hidden>/);
   });
 });
 

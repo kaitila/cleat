@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { parseArgs } from "../../shell/src/args";
 import { captureBody, clipFileName, clipsToPrune, isPng, KEEP_CLIPS, MAX_TEXT, PNG_SIGNATURE, saveClip } from "../../shell/src/clip";
 import { acceptedRect, acceptedSender, captureSize, cropPlan, isSnipPage, matchSources, SELF_TEST_CROP, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PATH, SNIP_PRELOAD, snipUrl, toPixels } from "../../shell/src/snip";
-import { acceptedState, DOCK_CHANNEL, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, type DockState, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
+import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_CHAT_CHANNEL, dockWindow, DOCK_CHECK_MS, DOCK_MISSES, DOCK_STALE_RUNNER, DOCK_PRELOAD, DOCK_NEAR, DOCK_SIZES, DOCK_STATES, DOCK_WATCH_FAR_MS, DOCK_WATCH_NEAR_MS, DOCK_WINDOW, dockBounds, type DockState, dockFocusable, isDockState, islandDistance, islandRect, takesMouse, watchMs } from "../../shell/src/dock";
 import { centred, markBitmap, tileBitmap } from "../../shell/src/geometry";
 import { APP_ID, loginItem, parseLogin } from "../../shell/src/login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, sessionOf, settingsUrl, windowTarget } from "../../shell/src/origin";
@@ -33,7 +33,7 @@ describe("bundle", () => {
     expect(code.length).toBeLessThan(200_000);
   });
 
-  test("the dock's preload is its own small file beside it, and exposes setState and nothing else", async () => {
+  test("the dock's preload is its own small file beside it, and exposes setState and onChat and nothing else", async () => {
     const out = join(dir, "bundle-preload");
     await buildShell(out);
     expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, SNIP_PRELOAD, BUNDLE].sort());
@@ -47,9 +47,12 @@ describe("bundle", () => {
 
     const src = readFileSync(join(REPO, "shell", "src", "dock-preload.ts"), "utf8");
     expect(src.match(/exposeInMainWorld\(/g)).toHaveLength(1);
-    expect(src).toContain('contextBridge.exposeInMainWorld("intuitionDock", {\n  setState: (state: unknown): void => {\n    ipcRenderer.send(DOCK_CHANNEL, state);\n  },\n});');
-    // One way out of the page: a send on the dock's channel. Nothing comes back in.
-    expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send"]);
+    expect(src).toContain('contextBridge.exposeInMainWorld("intuitionDock", {\n  setState: (state: unknown): void => {\n    ipcRenderer.send(DOCK_CHANNEL, state);\n  },\n');
+    // One way out of the page: a send on the dock's channel. One way in (D0042): the chat's channel,
+    // and what comes in is a session id or null, never the event or anything else the shell sent.
+    expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send", "ipcRenderer.on"]);
+    expect(code).toContain(DOCK_CHAT_CHANNEL);
+    expect(src).toContain("ipcRenderer.on(DOCK_CHAT_CHANNEL, (_event, session: unknown) => {\n      callback(typeof session === \"string\" && session ? session : null);");
   });
 
   test("the snip's preload is its own small file, and exposes getCapture, crop and close and nothing else", async () => {
@@ -536,30 +539,36 @@ describe("the dock", () => {
   const display = { x: 0, y: 0, width: 1920, height: 1080 };
   const sender = { fromDock: true, mainFrame: true, url: "http://127.0.0.1:4777/dock" };
 
-  test("three states, one window, and the most the island covers in each", () => {
-    expect([...DOCK_STATES]).toEqual(["idle", "peek", "open"]);
-    expect(DOCK_WINDOW).toEqual({ width: 460, height: 480 });
-    expect(DOCK_SIZES).toEqual({ idle: { width: 128, height: 22 }, peek: { width: 380, height: 40 }, open: { width: 460, height: 480 } });
+  test("four states, one window as large as the largest, and the most the island covers in each", () => {
+    expect([...DOCK_STATES]).toEqual(["idle", "peek", "open", "chat"]);
+    expect(DOCK_WINDOW).toEqual({ width: 960, height: 680 });
+    expect(DOCK_SIZES).toEqual({ idle: { width: 128, height: 22 }, peek: { width: 380, height: 40 }, open: { width: 460, height: 480 }, chat: { width: 960, height: 680 } });
+    // The chat the shell works out for a display sizes the window (D0042): never smaller than the open dock.
+    expect(dockWindow({ width: 1180, height: 820 })).toEqual({ width: 1180, height: 820 });
+    expect(dockWindow({ width: 300, height: 300 })).toEqual({ width: 460, height: 480 });
   });
 
   test("the window's bounds: the top edge of the display, centred, and no state in it", () => {
-    expect(dockBounds(display)).toEqual({ x: 730, y: 0, width: 460, height: 480 });
+    expect(dockBounds(display)).toEqual({ x: 480, y: 0, width: 960, height: 680 });
+    expect(dockBounds(display, chatSize(display))).toEqual({ x: 370, y: 0, width: 1180, height: 820 });
     expect(dockBounds.length).toBe(1);
   });
 
   test("on a primary display that does not start at 0,0, of an odd width, or smaller than the dock", () => {
-    expect(dockBounds({ x: -1280, y: 200, width: 1280, height: 1024 })).toEqual({ x: -870, y: 200, width: 460, height: 480 });
-    const odd = dockBounds({ x: 0, y: 0, width: 1367, height: 768 });
+    expect(dockBounds({ x: -1280, y: 200, width: 1280, height: 1024 })).toEqual({ x: -1120, y: 200, width: 960, height: 680 });
+    const odd = dockBounds({ x: 0, y: 0, width: 1367, height: 768 }, chatSize({ width: 1367, height: 768 }));
     expect(Number.isInteger(odd.x)).toBe(true);
     expect(Math.abs(odd.x + odd.width / 2 - 1367 / 2)).toBeLessThanOrEqual(0.5);
     // The size never gives way: the contract says exactly this size.
-    expect(dockBounds({ x: 0, y: 0, width: 400, height: 300 })).toEqual({ x: -30, y: 0, width: 460, height: 480 });
+    expect(dockBounds({ x: 0, y: 0, width: 400, height: 300 }, chatSize({ width: 400, height: 300 }))).toEqual({ x: -30, y: 0, width: 460, height: 480 });
   });
 
   test("the island's rectangle in each state hangs from the top centre of the window", () => {
-    expect(islandRect("idle")).toEqual({ x: 166, y: 0, width: 128, height: 22 });
-    expect(islandRect("peek")).toEqual({ x: 40, y: 0, width: 380, height: 40 });
-    expect(islandRect("open")).toEqual({ x: 0, y: 0, width: 460, height: 480 });
+    expect(islandRect("idle")).toEqual({ x: 416, y: 0, width: 128, height: 22 });
+    expect(islandRect("peek")).toEqual({ x: 290, y: 0, width: 380, height: 40 });
+    expect(islandRect("open")).toEqual({ x: 250, y: 0, width: 460, height: 480 });
+    expect(islandRect("chat")).toEqual({ x: 0, y: 0, width: 960, height: 680 });
+    expect(islandRect("open", null, { width: 1180, height: 820 })).toEqual({ x: 360, y: 0, width: 460, height: 480 });
     for (const state of DOCK_STATES) {
       const r = islandRect(state);
       expect(r.x + r.width / 2).toBe(DOCK_WINDOW.width / 2);
@@ -623,7 +632,7 @@ describe("the dock", () => {
     const main = readFileSync(join(import.meta.dir, "..", "..", "shell", "src", "main.ts"), "utf8");
     const body = (name: string) => main.match(new RegExp("function " + name + "\\([^)]*\\)[^{]*\\{[\\s\\S]*?\\n\\}"))?.[0] ?? "";
     expect(body("placeDock")).toContain("dock.setBounds(want)");
-    expect(body("dockWindowBounds")).toContain("DOCK_TRANSPARENT ? dockPlace() : opaqueDockBounds(dockPlace(), islandRect(dockState ?? \"idle\"))");
+    expect(body("dockWindowBounds")).toContain("DOCK_TRANSPARENT ? dockPlace() : opaqueDockBounds(dockPlace(), islandRect(dockState ?? \"idle\", null, dockChat))");
     // A state reaches the window's bounds only through fitOpaqueDock, which does nothing for a transparent dock.
     expect(body("fitOpaqueDock")).toContain("if (!DOCK_TRANSPARENT) placeDock();");
     for (const name of ["setDockState", "onDockState", "watchDockMouse", "setDockMouse", "forgetDockState"]) {
@@ -636,11 +645,11 @@ describe("the dock", () => {
     expect(body("createDock")).toContain("win.setIgnoreMouseEvents(true, { forward: true })");
   });
 
-  test("only open can take the keyboard", () => {
-    expect(DOCK_STATES.map(dockFocusable)).toEqual([false, false, true]);
+  test("only open and the chat can take the keyboard", () => {
+    expect(DOCK_STATES.map(dockFocusable)).toEqual([false, false, true, true]);
   });
 
-  test("setState is taken from the dock's main frame on the runner's origin, with one of the three values", () => {
+  test("setState is taken from the dock's main frame on the runner's origin, with one of the four values", () => {
     for (const state of DOCK_STATES) expect(acceptedState(sender, RUNNER, state)).toBe(state);
     expect(acceptedState({ ...sender, url: "http://127.0.0.1:4777/dock?x#y" }, RUNNER, "peek")).toBe("peek");
   });
@@ -684,11 +693,14 @@ describe("the dock", () => {
     expect(dockCode).toContain("if (giveBack && OS === \"macos\") giveKeyboardBack(win);");
     expect(dockCode).toContain("if (focusable && !win.isFocused()) win.focus();");
     // From the primary display, through dockArea: its bounds on Windows and Linux, from the work area's top on a Mac, or from its notch.
-    expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch));");
-    // Once for the place, once for the bounds the notch's measurement is checked against, and twice to
-    // see whether the primary display changed while it was measured (then it is measured again); and
-    // once for the corner the Mac's keyboard sink sits in.
-    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(5);
+    expect(dockCode).toContain("return dockBounds(dockArea(OS, display.bounds, display.workArea, dockNotch), dockChat);");
+    // The chat's size (D0042) from the same area the dock hangs in, worked out again with the notch.
+    expect(dockCode).toContain("return chatSize(dockArea(OS, display.bounds, display.workArea, dockNotch));");
+    expect(dockCode).toContain("dockChat = currentChat();\n    if (JSON.stringify([dockNotch, dockChat]) === before) return;".replace("\n    if", "\n  if"));
+    // Once for the place, once for the chat's size, once for the bounds the notch's measurement is
+    // checked against, and twice to see whether the primary display changed while it was measured
+    // (then it is measured again); and once for the corner the Mac's keyboard sink sits in.
+    expect(dockCode.match(/getPrimaryDisplay\(\)/g)).toHaveLength(6);
     expect(dockCode).toContain("if (screen.getPrimaryDisplay().id === primary || tries >= 2) return notch;");
     // A change of display places the dock again and measures the notch again; a change of the work
     // area alone (a full-screen app, a menu bar hiding) does not (D0037).
@@ -894,14 +906,16 @@ describe("self-test runner", () => {
     notificationsSupported: true, popupCreated: true, popupWidth: 560, popupHeight: 380, popupUrl: "http://127.0.0.1:5000/prompt",
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
     noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
-    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock", dockNotch: null, dockVisible: true, dockBridge: "object:setState:undefined:undefined",
-    primaryDisplay: display, dockIgnoresMouseBeforeLoad: true, dockIdleBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockIdleFocusable: false, dockIdleFocused: false,
+    // On 2560x1440 the chat is 1180x860 (chatSize), and the window is as large as that.
+    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock?chat=1180x860", dockNotch: null, dockVisible: true, dockBridge: "object:setState,onChat:undefined:undefined",
+    primaryDisplay: display, dockIgnoresMouseBeforeLoad: true, dockIdleBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockIdleFocusable: false, dockIdleFocused: false,
     dockMouseOnIdleIsland: true, dockMouseAwayIgnored: true, dockMouseBelowPillIgnored: true,
-    dockPeekBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockPeekFocusable: false, dockMouseOnPeekIsland: true,
-    dockOpenBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockOpenFocusable: true, dockMouseOnOpenIsland: true, dockOtherValueIgnored: true,
-    dockBackBounds: { x: 1050, y: 0, width: 460, height: 480 }, dockBackFocusable: false, dockForeignOriginIgnored: true,
+    dockPeekBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockPeekFocusable: false, dockMouseOnPeekIsland: true,
+    dockOpenBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockOpenFocusable: true, dockMouseOnOpenIsland: true, dockOtherValueIgnored: true,
+    dockChatBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockChatFocusable: true, dockMouseOnChatIsland: true,
+    dockBackBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockBackFocusable: false, dockForeignOriginIgnored: true,
     dockIgnoresMouseUnreported: true, dockIgnoresMouseAfterCrash: true,
-    dockOpenedChatUrl: `http://127.0.0.1:5000/?session=${STUB_SESSION}`, dockOpenedPromptUrl: "http://127.0.0.1:5000/prompt",
+    dockChatSession: STUB_SESSION, dockChatNoWindow: true, dockOpenedPromptUrl: "http://127.0.0.1:5000/prompt",
     dockOtherWindowRefused: true, dockHiddenWithoutRunner: true, dockShownAgain: true,
     snipHotkeyRegistered: true, snipDisplays: [{ bounds: display, scaleFactor: 1.5 }, { bounds: { x: 2560, y: 0, width: 1920, height: 1080 }, scaleFactor: 1 }],
     snipOverlayBounds: [display, { x: 2560, y: 0, width: 1920, height: 1080 }], snipOverlaysShown: true, snipUrl: "http://127.0.0.1:5000/assets/snip.html",
@@ -963,32 +977,39 @@ describe("self-test runner", () => {
     // A MacBook with a notch: the menu bar is 38 points tall.
     const macWork = { x: 0, y: 38, width: 1512, height: 944 };
     const native = "/var/folders/xy/T/intuition";
-    const placeAt = (p: Area) => ({ dockIdleBounds: p, dockPeekBounds: p, dockOpenBounds: p, dockBackBounds: p });
-    const macPlace = dockBounds(dockArea("macos", macDisplay, macWork));
+    const placeAt = (p: Area) => ({ dockIdleBounds: p, dockPeekBounds: p, dockOpenBounds: p, dockChatBounds: p, dockBackBounds: p });
+    /** The window's place in an area, for the chat that area gives (D0042). */
+    const placed = (area: Area) => dockBounds(area, chatSize(area));
+    const chatQuery = (area: Area) => `chat=${chatSize(area).width}x${chatSize(area).height}`;
+    const macArea = dockArea("macos", macDisplay, macWork);
+    const macPlace = placed(macArea);
     const mac: SelfTestResult = {
-      ...good, os: "macos", primaryDisplay: macDisplay, primaryWorkArea: macWork, ...placeAt(macPlace),
+      ...good, os: "macos", primaryDisplay: macDisplay, primaryWorkArea: macWork, ...placeAt(macPlace), dockUrl: `http://127.0.0.1:5000/dock?${chatQuery(macArea)}`,
       imagePath: `${native}/clip-20261115-090507-042.png`, snipCropPath: `${native}/snip-20261115-090508-000.png`,
       snipDisplays: [{ bounds: macDisplay, scaleFactor: 1.5 }], snipOverlayBounds: [macDisplay],
       windowsRelease: null, popupMaterial: "vibrancy",
     };
     const macPosts = [{ text: "intuition self-test 1" }, { imagePath: mac.imagePath! }];
     const at = (r: Partial<SelfTestResult>, where: Where) => problems(r, { posts: macPosts, puts: puts() }, "http://127.0.0.1:5000", png, where);
-    const linuxPlace = dockBounds(macDisplay);
-    const linux: SelfTestResult = { ...mac, os: "linux", primaryWorkArea: macDisplay, ...placeAt(linuxPlace), popupMaterial: "none" };
+    const linuxPlace = placed(macDisplay);
+    const linux: SelfTestResult = { ...mac, os: "linux", primaryWorkArea: macDisplay, ...placeAt(linuxPlace), dockUrl: `http://127.0.0.1:5000/dock?${chatQuery(macDisplay)}`, popupMaterial: "none" };
 
     test("a clean Mac result has no problems, and its dock is judged below the menu bar", () => {
       expect(at(mac, { layout: "macos" })).toEqual([]);
-      expect(at({ ...mac, ...placeAt(dockBounds(macDisplay)) }, { layout: "macos" })).toHaveLength(4);
+      expect(at({ ...mac, ...placeAt(placed(macDisplay)) }, { layout: "macos" })).toHaveLength(5);
     });
 
-    test("with a notch, the dock is judged at the very top, centred on it, and its page has the notch's size", () => {
+    test("with a notch, the dock is judged at the very top, centred on it, and its page has the notch's and the chat's sizes", () => {
       const notch = { x: 666.5, width: 179, height: 38 };
-      const notched = { ...mac, dockNotch: notch, dockUrl: "http://127.0.0.1:5000/dock?notch=179x38", ...placeAt(dockBounds(dockArea("macos", macDisplay, macWork, notch))) };
-      expect(notched.dockIdleBounds).toEqual({ x: 526, y: 0, width: 460, height: 480 });
+      const area = dockArea("macos", macDisplay, macWork, notch);
+      const notched = { ...mac, dockNotch: notch, dockUrl: "http://127.0.0.1:5000/dock?notch=179x38&chat=936x746", ...placeAt(placed(area)) };
+      expect(chatSize(area)).toEqual({ width: 936, height: 746 });
+      expect(notched.dockIdleBounds).toEqual({ x: 288, y: 0, width: 936, height: 746 });
       expect(at(notched, { layout: "macos" })).toEqual([]);
       // Below the menu bar, or without the notch in its address, is not where it should be.
-      expect(at({ ...notched, ...placeAt(macPlace) }, { layout: "macos" })).toHaveLength(4);
-      expect(at({ ...notched, dockUrl: "http://127.0.0.1:5000/dock" }, { layout: "macos" })).toEqual([expect.stringContaining("the dock loaded")]);
+      expect(at({ ...notched, ...placeAt(macPlace) }, { layout: "macos" })).toHaveLength(5);
+      expect(at({ ...notched, dockUrl: "http://127.0.0.1:5000/dock?chat=936x746" }, { layout: "macos" })).toEqual([expect.stringContaining("the dock loaded")]);
+      expect(at({ ...notched, dockUrl: "http://127.0.0.1:5000/dock?notch=179x38" }, { layout: "macos" })).toEqual([expect.stringContaining("the dock loaded")]);
       // A notch is a Mac's.
       expect(at({ ...linux, dockNotch: notch }, { layout: "linux" })).toContainEqual(expect.stringContaining("measured a notch"));
     });
@@ -1039,22 +1060,26 @@ describe("self-test runner", () => {
     });
 
     test("an opaque dock is judged as the island of each state", () => {
-      const island = (s: DockState) => opaqueDockBounds(linuxPlace, islandRect(s));
-      const opaque = { ...linux, dockTransparent: false, dockIdleBounds: island("idle"), dockPeekBounds: island("peek"), dockOpenBounds: island("open"), dockBackBounds: island("idle") };
+      const island = (s: DockState) => opaqueDockBounds(linuxPlace, islandRect(s, null, chatSize(macDisplay)));
+      const opaque = { ...linux, dockTransparent: false, dockIdleBounds: island("idle"), dockPeekBounds: island("peek"), dockOpenBounds: island("open"), dockChatBounds: island("chat"), dockBackBounds: island("idle") };
+      // Grown into the chat, an opaque dock is the whole window's place.
+      expect(island("chat")).toEqual(linuxPlace);
       expect(at(opaque, { layout: "linux" })).toEqual([]);
-      expect(at({ ...opaque, dockTransparent: true }, { layout: "linux" })).toHaveLength(3);
+      expect(at({ ...opaque, dockTransparent: true }, { layout: "linux" })).toHaveLength(4);
     });
   });
 
   test("the dock's bounds are judged against the display the shell reported", () => {
-    // The same dock on another display is in the wrong place four times: idle, peek, open, and back.
+    // The same dock on another display is in the wrong place five times: idle, peek, open, chat, and back.
     const narrow = { ...display, width: 1920 };
-    expect(check({ ...good, primaryDisplay: narrow, primaryWorkArea: narrow })).toHaveLength(4);
+    expect(check({ ...good, primaryDisplay: narrow, primaryWorkArea: narrow })).toHaveLength(5);
     // On the display's top edge, wherever that is.
     const lower = { ...display, y: 300 };
-    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower })).toHaveLength(4);
+    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower })).toHaveLength(5);
     const at = { ...good.dockIdleBounds!, y: 300 };
-    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower, dockIdleBounds: at, dockPeekBounds: at, dockOpenBounds: at, dockBackBounds: at })).toEqual([]);
+    expect(check({ ...good, primaryDisplay: lower, primaryWorkArea: lower, dockIdleBounds: at, dockPeekBounds: at, dockOpenBounds: at, dockChatBounds: at, dockBackBounds: at })).toEqual([]);
+    // Another chat size in the page's address than the display gives: the page would draw another chat.
+    expect(check({ ...good, dockUrl: "http://127.0.0.1:5000/dock?chat=960x680" })).toEqual([expect.stringContaining("the dock loaded")]);
     for (const bad of [null, {}, { x: 0, y: 0, width: 0, height: 0 }, { x: "0", y: 0, width: 100, height: 100 }]) expect(check({ ...good, primaryDisplay: bad as never }).length).toBeGreaterThanOrEqual(5);
     // The window is the same in every state: one that grew, shrank or moved for a state is a failure.
     expect(check({ ...good, dockOpenBounds: { ...good.dockOpenBounds!, height: 481 } })).toHaveLength(1);
