@@ -1,6 +1,6 @@
 # D0045: Install with bun alone, from GitHub; Electron from its own release; the SDKs' own agents
 
-Date: 2026-11-24. Status: active. Task: T-0004. Changes [D0026](D0026-setup-command.md) and [D0030](D0030-console-setup.md) (what setup needs and checks). Written with the names of the rename to holm (T-0003), which runs beside it.
+Date: 2026-11-24. Status: active; its install line is now the `curl | sh` of [D0047](D0047-one-line-install-script.md). Task: T-0004. Changes [D0026](D0026-setup-command.md) and [D0030](D0030-console-setup.md) (what setup needs and checks). Written with the names of the rename to holm (T-0003), which runs beside it.
 
 ## Context
 The owner asked for "a seamless way to run the installation process, what if the user doesn't have bun etc.". Until now the landing page and the README said `git clone … && cd … && bun install && bun run setup`, which needs git, bun, and Node 22.12 or later with npm (used once, to fetch Electron), plus Claude Code installed and logged in. The goal: a stranger on a clean Mac, Linux or Windows machine gets to a running app with one line, with nothing to install by hand but the agent's login.

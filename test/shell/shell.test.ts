@@ -1350,9 +1350,9 @@ describe("start on login", () => {
 });
 
 describe("the repo", () => {
-  test("has no AutoHotkey, PowerShell, batch or shell-script file", () => {
+  test("has no AutoHotkey, PowerShell, batch or shell-script file but the install line's script (D0047)", () => {
     const files = Bun.spawnSync(["git", "ls-files", "--cached", "--others", "--exclude-standard"], { cwd: REPO }).stdout.toString().split("\n");
     expect(files.length).toBeGreaterThan(10);
-    expect(files.filter((f) => /\.(ahk|ps1|cmd|bat|sh)$/i.test(f))).toEqual([]);
+    expect(files.filter((f) => /\.(ahk|ps1|cmd|bat|sh)$/i.test(f))).toEqual(["site/install.sh"]);
   });
 });
