@@ -258,4 +258,5 @@ body > .sheet {
   margin-inline: auto;
   backdrop-filter: var(--frost);
 }
-body > .sheet .guide { grid-template-columns: repeat(auto-fit, minmax(calc(var(--sidebar) + var(--space-5)), 1fr)); column-gap: var(--space-5); }
+body > .sheet .guide { display: block; column-width: calc(var(--sidebar) + var(--space-5)); column-gap: var(--space-5); }
+body > .sheet .guide-section { break-inside: avoid; margin-bottom: var(--space-4); }
