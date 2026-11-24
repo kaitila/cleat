@@ -12,7 +12,7 @@ The layout is detected: inside WSL (`WSL_DISTRO_NAME` set, or `microsoft` in `/p
 
 ## Setup, every layout
 ```sh
-curl -fsSL https://kaitila.github.io/cleat/install.sh | sh
+curl -fsSL https://cleat.kaitila.dev/install.sh | sh
 ```
 
 The line runs `site/install.sh` (D0047): it installs bun if it is missing (its own installer, which needs `unzip`; the script installs that with apt where it can), then the app as a global bun package from GitHub (`~/.bun/install/global/node_modules/cleat`, its command linked into `~/.bun/bin`; no git), with the Agent SDK's Claude Code and the Codex SDK's `codex` inside it ([D0045](decisions/D0045-install-with-bun-only.md)), then runs `cleat setup` with the terminal as its input, or `cleat setup --yes` without one. A clone (`git clone … && bun install && bun run setup`) works the same: `bun run setup` is `bun src/cli.ts setup` (`src/cli/setup.ts`). It assumes nothing about the machine: the layout, the home folder, and for windows-wsl the WSL distribution (`WSL_DISTRO_NAME`) and the Windows user's folders (asked of `cmd.exe`) are all detected. In order:
