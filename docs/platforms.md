@@ -32,6 +32,9 @@ By hand, the same steps are `bun src/cli.ts link`, `holm doctor` (every ✗ line
 
 `holm doctor` again should show only ✓ lines. The settings page's Setup section shows the same from the running app: the layout, the runner, the shell, start at login, the shortcuts and, on a Mac, Screen Recording, each with what to do when it is not ok. A – line is a part that is not up yet (the runner, the shell, start at login, a display), with the one command that brings it up. Those don't change the exit code.
 
+## An install from before the rename
+The app had another name until 2026-11-24 ([D0043](decisions/D0043-rename-to-holm.md)). An install under that name moves once, by itself: the runner and every command move the config and data folders the first time they read the config, and `holm shell install` (or `up`, or `setup`) stops the old shell, moves it and its settings, and replaces its start-at-login item. Each move prints one line. After a `git pull`, `holm up` does all of it. The old names of the environment variables still work for one release.
+
 ## Windows with WSL
 As before this change; everything about it is in [the Windows shell](windows-shell.md). Electron is fetched for Windows x64 from WSL (`npm_config_platform=win32`), with WSL's npm and node. The shell's settings get `wsl: { distro, repo, bun }`, and nothing else is added. The shell on Windows starts the runner through `wsl.exe`. Start at login is the shell's Electron login item (the `Run` registry key).
 
