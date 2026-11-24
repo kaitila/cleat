@@ -1,11 +1,12 @@
-// The one-time move of the config and data folders from their old names (D0043):
-// ~/.config/intuition to ~/.config/holm, and ~/.local/share/intuition to ~/.local/share/holm.
-// Only the default folders move: HOLM_CONFIG and HOLM_DATA_DIR (or the old names, adopted by
-// adoptLegacyEnv) name folders the person chose, which are left where they are.
-import { existsSync, readFileSync } from "node:fs";
+// The one-time move of the config and data folders from their old names (D0043, D0048):
+// ~/.config/holm and ~/.config/intuition to ~/.config/cleat, and ~/.local/share/holm and
+// ~/.local/share/intuition to ~/.local/share/cleat. Only the default folders move: CLEAT_CONFIG and
+// CLEAT_DATA_DIR (or the old names, adopted by adoptLegacyEnv) name folders the person chose, which are
+// left where they are.
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { moveFolder, OLD_NAME } from "../shared/legacy";
+import { moveFolder, OLD_NAMES } from "../shared/legacy";
 
 type Env = Record<string, string | undefined>;
 
@@ -16,15 +17,16 @@ export interface RunnerFolders {
   data: string;
 }
 
-/** The default folders under the new name, and under the old one. */
-export function defaultFolders(home: string = homedir()): { now: RunnerFolders; old: RunnerFolders } {
-  return {
-    now: { config: join(home, ".config", "holm"), data: join(home, ".local", "share", "holm") },
-    old: { config: join(home, ".config", OLD_NAME), data: join(home, ".local", "share", OLD_NAME) },
-  };
+function foldersFor(home: string, name: string): RunnerFolders {
+  return { config: join(home, ".config", name), data: join(home, ".local", "share", name) };
 }
 
-/** The pid of a runner that still runs from the old data folder, or null. */
+/** The default folders under the new name, and under each old one, newest first. */
+export function defaultFolders(home: string = homedir()): { now: RunnerFolders; old: (RunnerFolders & { name: string })[] } {
+  return { now: foldersFor(home, "cleat"), old: OLD_NAMES.map(({ name }) => ({ name, ...foldersFor(home, name) })) };
+}
+
+/** The pid of a runner that still runs from an old data folder, or null. */
 export function oldRunner(oldData: string): number | null {
   let pid: number;
   try {
@@ -60,26 +62,32 @@ function sayOnce(line: string, say: (line: string) => void): void {
 }
 
 /**
- * The folders to use, after moving the old ones to the new names when the new ones are missing.
- * While a runner from before the rename still runs from the old data folder, nothing moves (it
- * would lose what that runner writes) and the old folders are used, so `holm stop`, `start` and
- * `restart` find that runner and can stop it; the next command after it has stopped moves them.
+ * The folders to use, after moving the old ones to the new names. While a runner from before a rename
+ * still runs from an old data folder, nothing moves (it would lose what that runner writes) and that
+ * name's folders are used, so `cleat stop`, `start` and `restart` find that runner and can stop it; the
+ * next command after it has stopped moves them. The newer old name moves first, so where both had the
+ * same file the newer one is kept; nothing already under the new name is overwritten.
  */
 export function runnerFolders(env: Env = process.env, home: string = homedir(), say: (line: string) => void = (l) => console.error(l)): RunnerFolders {
   const { now, old } = defaultFolders(home);
-  const config = env.HOLM_CONFIG === undefined;
-  const data = env.HOLM_DATA_DIR === undefined;
+  const config = env.CLEAT_CONFIG === undefined;
+  const data = env.CLEAT_DATA_DIR === undefined;
   if (!config && !data) return now;
-  const pid = data ? oldRunner(old.data) : null;
-  if (pid !== null) {
-    sayOnce(`holm: a runner from before the rename (pid ${pid}) still runs from ${old.data}: its folders move to ${now.data} once it has stopped`, say);
-    return { config: config ? old.config : now.config, data: old.data };
+  if (data) {
+    for (const o of old) {
+      const pid = oldRunner(o.data);
+      if (pid === null) continue;
+      sayOnce(`cleat: a runner from before the rename (pid ${pid}) still runs from ${o.data}: its folders move to ${now.data} once it has stopped`, say);
+      return { config: config ? o.config : now.config, data: o.data };
+    }
   }
-  for (const [want, from, to] of [
-    [config, old.config, now.config],
-    [data, old.data, now.data],
-  ] as const) {
-    if (want && moveFolder(from, to)) sayOnce(`holm: moved ${from} to ${to} (intuition is now called holm)`, say);
+  for (const o of old) {
+    for (const [want, from, to] of [
+      [config, o.config, now.config],
+      [data, o.data, now.data],
+    ] as const) {
+      if (want && moveFolder(from, to)) sayOnce(`cleat: moved ${from} to ${to} (${o.name} is now called cleat)`, say);
+    }
   }
   return now;
 }

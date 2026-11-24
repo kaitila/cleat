@@ -1,43 +1,61 @@
-// The names the app had before it was renamed holm (D0043), and the one-time move away from them.
-// Only the files named legacy say "intuition": the rename script leaves them alone.
+// The names the app had before it was called cleat, and the one-time move away from them: intuition
+// until D0043, then holm until D0048. Only the files named legacy say the old names: the rename script
+// leaves them alone.
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-/** The old name: the folders, the CLI, the login items and the storage keys were called this. */
-export const OLD_NAME = "intuition";
-/** The old shell's package name, which Electron named its user data folder after. */
-export const OLD_SHELL_NAME = "intuition-shell";
-/** The old launch agent's label (macOS). */
-export const OLD_LAUNCH_AGENT = "dev.intuition.shell";
-/** The old XDG autostart file's name (Linux). */
-export const OLD_AUTOSTART = "intuition.desktop";
-/** The old app id: Electron named the Windows login item's registry value after it. */
-export const OLD_APP_ID = "intuition";
-/** `SessionMeta.source` as the old runner stored it for its own sessions. */
-export const OLD_SOURCE = "intuition";
+/** What an old name called each thing that is named after the app. */
+export interface OldName {
+  /** The folders, the CLI's command link and the storage keys' prefix were called this. */
+  name: string;
+  /** The shell's package name, which Electron named its user data folder after. */
+  shell: string;
+  /** The launch agent's label (macOS). */
+  launchAgent: string;
+  /** The XDG autostart file's name (Linux). */
+  autostart: string;
+  /** The app id: Electron named the Windows login item's registry value after it. */
+  appId: string;
+  /** `SessionMeta.source` as that runner stored it for its own sessions. */
+  source: string;
+  /** The environment variables' prefix. */
+  envPrefix: string;
+}
 
-const OLD_PREFIX = "INTUITION_";
-const NEW_PREFIX = "HOLM_";
+function oldName(name: string): OldName {
+  return { name, shell: `${name}-shell`, launchAgent: `dev.${name}.shell`, autostart: `${name}.desktop`, appId: name, source: name, envPrefix: `${name.toUpperCase()}_` };
+}
 
 /**
- * The old environment variables, for one release: each INTUITION_X that is set becomes HOLM_X where
- * that is not set. Changes `env` in place, so child processes get the new names. Returns the names taken.
+ * The old names, newest first: holm (D0043 to D0048), then intuition (until D0043). Each moves straight
+ * to cleat. Where both left the same thing, the newer one's moves first and is the one kept.
+ */
+export const OLD_NAMES: readonly OldName[] = [oldName("holm"), oldName("intuition")];
+
+const NEW_PREFIX = "CLEAT_";
+
+/**
+ * The old environment variables, for one release: each HOLM_X or INTUITION_X that is set becomes
+ * CLEAT_X where that is not set (HOLM_X first). Changes `env` in place, so child processes get the new
+ * names. Returns the names taken.
  */
 export function adoptLegacyEnv(env: Record<string, string | undefined> = process.env): string[] {
   const taken: string[] = [];
-  for (const [key, value] of Object.entries(env)) {
-    if (!key.startsWith(OLD_PREFIX) || value === undefined) continue;
-    const name = NEW_PREFIX + key.slice(OLD_PREFIX.length);
-    if (env[name] !== undefined) continue;
-    env[name] = value;
-    taken.push(name);
+  for (const { envPrefix } of OLD_NAMES) {
+    for (const [key, value] of Object.entries(env)) {
+      if (!key.startsWith(envPrefix) || value === undefined) continue;
+      const name = NEW_PREFIX + key.slice(envPrefix.length);
+      if (env[name] !== undefined) continue;
+      env[name] = value;
+      taken.push(name);
+    }
   }
   return taken;
 }
 
-/** A stored session's source: the old runner's "intuition" (and none, from before `source`) is the runner's own, "holm". */
+/** A stored session's source: an old runner's "holm" or "intuition" (and none, from before `source`) is the runner's own, "cleat". */
 export function storedSource<T extends string>(source: T | undefined, own: T): T {
-  return source === undefined || source === (OLD_SOURCE as string) ? own : source;
+  return source === undefined || OLD_NAMES.some((o) => o.source === (source as string)) ? own : source;
 }
 
 function move(from: string, to: string): void {
