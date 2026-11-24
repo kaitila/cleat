@@ -1,5 +1,5 @@
 // Builds the landing page: `bun scripts/build-site.ts [out]` writes dist-site/ (or `out`).
-// It copies site/ (the page, its stylesheet and script, and the screenshots site-shots.ts made)
+// It copies site/ (the page, its stylesheet and script)
 // and, beside them, the app's own design system: src/web/base.css (every token the page uses) and
 // the fonts it names, with their licences. The page then asks no other host for anything, and
 // its links are relative, so it works from any folder (/intuition/ on GitHub Pages).

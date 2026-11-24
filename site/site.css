@@ -1,150 +1,145 @@
-/* The landing page's layout. Every colour, length, radius, shadow, filter, font and spring is a
-   token of the app's base.css (copied beside this file by scripts/build-site.ts): nothing here is a
-   raw value (test/site.test.ts). Larger type is a whole multiple of a type token. The dock in the
-   hero is the app's dock (src/web/dock.css) made small: the same clip, springs and fades. */
+/* The landing page: the browser window is the screen. A Mac's notch hangs from its top edge and does
+   what the app's does (site.js); under it, a few lines. Every colour, length, font and spring is a
+   token of the app's base.css, which the build puts beside this file. No glass, no backdrop: the
+   notch is the one object on the page, black on the page's ground in either scheme. */
 
-body { min-height: 100%; display: flex; flex-direction: column; overflow-x: hidden; }
-main { flex: 1; width: 100%; max-width: calc(var(--measure) * 1.5); margin: 0 auto; padding: 0 var(--space-4); display: grid; gap: calc(var(--space-6) * 2); }
+/* ---------- one screen: the notch at its top edge, the words at its bottom ---------- */
+.screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 100svh;
+  padding: calc(var(--control) * 14) var(--space-6) var(--space-6);
+}
+.stage {
+  position: absolute;
+  inset: 0 0 auto;
+  --notch-w: calc(var(--control) * 6.5);
+  --notch-h: calc(var(--control) + var(--space-1));
+  --wing: calc(var(--control) * 3);
+  display: flex;
+  justify-content: center;
+  height: calc(var(--control) * 14);
+  overflow: hidden;
+}
 
-/* ---------- the top bar ---------- */
-.top { display: flex; align-items: center; justify-content: space-between; width: 100%; max-width: calc(var(--measure) * 1.5); margin: 0 auto; padding: var(--space-4); }
-.wordmark { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text); font-weight: var(--semibold); letter-spacing: var(--track-l); }
-.wordmark:hover { text-decoration: none; }
-
-/* ---------- the hero ---------- */
-.hero { display: grid; justify-items: center; gap: var(--space-4); padding-top: var(--space-6); text-align: center; }
-.hero-name { font-size: calc(var(--text-l) * 4); font-weight: var(--semibold); line-height: 1; letter-spacing: calc(var(--track-l) * 3); }
-.hero-line { max-width: calc(var(--measure) * 0.85); font-size: var(--text-l); line-height: var(--leading); color: var(--muted); text-wrap: balance; }
-.hero-links { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-1) var(--space-3); }
-
-/* The install line: one line of code in a glass pill, and Copy. It wraps on a phone, never scrolls the page. */
-.install { display: flex; align-items: center; gap: var(--space-3); width: 100%; max-width: calc(var(--measure) * 1.2); margin-top: var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-radius: var(--radius-l); text-align: left; }
-.install-line { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: all; }
-.copy { flex: none; min-width: calc(var(--control) * 2.5); }
-
-/* ---------- the dock, live ---------- */
-/* A stand-in for the top of a screen: the island hangs from its top edge, as the dock does. */
-.stage { position: relative; width: 100%; max-width: var(--measure); height: calc(var(--control) * 9.5); margin: var(--space-5) 0 0; border-radius: var(--radius-l); overflow: hidden; }
-.screen-edge { position: absolute; inset: 0 0 auto; border-top: var(--hairline) solid var(--line-strong); }
-.caption { margin-top: calc(var(--space-2) * -1); }
-
+/* The island's size as drawn, animated by the browser: each springs on its own, so it grows like a
+   drop, down first and then out (the app's dock.css). */
 @property --island-w { syntax: "<length>"; inherits: false; initial-value: 0; }
 @property --island-h { syntax: "<length>"; inherits: false; initial-value: 0; }
-/* As large as the open dock and never resized: what shows is its clip, sized by site.js. */
+
+/* One box as large as the open dock; what is seen of it is its clip, hanging from the top centre. */
 .island {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  translate: -50% 0;
-  width: min(calc(100% - var(--space-4) * 2), calc(var(--sidebar) * 1.75));
-  height: calc(100% - var(--space-4));
-  background: var(--glass-rim);
-  color: var(--text);
-  text-align: left;
+  position: relative;
+  flex: none;
+  width: calc(var(--control) * 16);
+  height: calc(var(--control) * 14);
+  margin: 0;
+  background: var(--notch);
+  --island-w: var(--notch-w);
+  --island-h: var(--notch-h);
   clip-path: inset(0 calc((100% - var(--island-w)) / 2) calc(100% - var(--island-h)) calc((100% - var(--island-w)) / 2) round 0 0 min(var(--island-h) / 2, var(--radius-l)) min(var(--island-h) / 2, var(--radius-l)));
+  /* Gathering back into the notch: it rises first and narrows a moment later, on the soft spring. */
+  transition: --island-h var(--dur-soft) var(--ease-soft), --island-w var(--dur-soft) var(--ease-soft) calc(var(--lag) * 1.5);
+  transform-origin: 50% 0;
 }
-.surface {
-  position: absolute;
-  inset: 0;
-  background: var(--glass-float);
-  clip-path: inset(0 calc((100% - var(--island-w)) / 2 + var(--hairline)) calc(100% - var(--island-h) + var(--hairline)) calc((100% - var(--island-w)) / 2 + var(--hairline)) round 0 0 calc(min(var(--island-h) / 2, var(--radius-l)) - var(--hairline)) calc(min(var(--island-h) / 2, var(--radius-l)) - var(--hairline)));
+/* Growing: down first, out a moment later, a little past its size and back. */
+.island:is([data-state="peek"], [data-state="open"]) {
+  transition: --island-h var(--dur-bouncy) var(--ease-bouncy), --island-w var(--dur-bouncy) var(--ease-bouncy) var(--lag);
 }
-/* Closing gathers back into the pill on the soft spring; growing stretches down first, then out, on the bouncy one. */
-.island, .island > .surface { transition: --island-w var(--dur-soft) var(--ease-soft), --island-h var(--dur-soft) var(--ease-soft) calc(var(--lag) * 0.75); }
-.island:is([data-state="peek"], [data-state="open"]),
-.island:is([data-state="peek"], [data-state="open"]) > .surface { transition: --island-h var(--dur-bouncy) var(--ease-bouncy), --island-w var(--dur-bouncy) var(--ease-bouncy) var(--lag); }
 
-.layer { position: absolute; top: 0; left: 50%; translate: -50% 0; transform-origin: 50% 0; }
-.layer:not(.pill) { animation: layer-pop var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 2) backwards, layer-fade calc(var(--dur-fade) * 2) var(--ease) calc(var(--lag) * 3) backwards; }
-.pill.layer { animation: layer-fade var(--dur-fade) var(--ease) calc(var(--dur-soft) / 3) backwards; }
-.peek.layer > * { animation: slide-in var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 3) backwards, layer-fade var(--dur-fade) var(--ease) calc(var(--lag) * 3) backwards; }
-.peek.layer > :nth-child(2) { animation-delay: calc(var(--lag) * 3 + var(--stagger)); }
-.peek.layer > :nth-child(3) { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 2); }
-.peek.layer > :nth-child(4) { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 3); }
-.sessions > li, .panel .approval { animation: rise var(--dur-bouncy) var(--ease-bouncy) backwards, layer-fade var(--dur-fade) var(--ease) backwards; animation-delay: calc(var(--lag) * 3); }
-.sessions > li:nth-child(2) { animation-delay: calc(var(--lag) * 3 + var(--stagger)); }
-.sessions > li:nth-child(3) { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 2); }
-.panel .approval { animation-delay: calc(var(--lag) * 3 + var(--stagger) * 3); }
+/* Each state's content keeps its size and place while the clip changes around it. */
+.layer { position: absolute; top: 0; left: 50%; translate: -50% 0; color: var(--text); }
+.layer { transform-origin: 50% 0; animation: layer-pop var(--dur-bouncy) var(--ease-bouncy) calc(var(--lag) * 2) backwards, layer-fade calc(var(--dur-fade) * 2) var(--ease) calc(var(--lag) * 3) backwards; }
 .layer.leaving { animation: layer-out var(--dur-out) var(--ease) forwards; }
-.button[data-pressed] { transform: scale(var(--squash)); }
-
-.pill { display: flex; align-items: center; gap: var(--space-2); height: calc(var(--control-s) + var(--space-1)); padding: 0 var(--space-3); white-space: nowrap; }
-.peek { display: flex; align-items: center; gap: var(--space-2); width: min(calc(var(--sidebar) * 1.5), 100%); height: calc(var(--control) + var(--space-3)); padding: 0 var(--space-4); white-space: nowrap; }
-.peek-title { flex: 0 1 auto; min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
-.peek-body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.peek-label { flex: none; color: var(--warn); font-weight: var(--medium); }
-.panel { display: grid; gap: var(--space-2); width: 100%; padding: var(--space-2) var(--space-2) var(--space-3); }
-.panel-head { display: flex; justify-content: space-between; padding: 0 var(--space-2); }
-.sessions { display: grid; gap: var(--hairline); margin: 0; padding: 0; list-style: none; }
-.sessions .row { min-width: 0; }
-.row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row-meta { flex: none; }
-.panel .approval { margin: 0 var(--space-2); }
-.panel .approval-path { overflow-wrap: anywhere; }
-
 @keyframes layer-pop { from { transform: scale(var(--pop)); } }
-@keyframes slide-in { from { transform: translateX(calc(var(--rise) * -1)); } }
-@keyframes rise { from { transform: translateY(var(--rise)) scale(calc((1 + var(--pop)) / 2)); } }
 @keyframes layer-fade { from { opacity: 0; filter: var(--blur-in); } }
 @keyframes layer-out { to { opacity: 0; } }
 
-/* ---------- arriving: the hero on load, each section as it scrolls into view ---------- */
-.arrive { animation: rise var(--dur-gentle) var(--ease-gentle) backwards, layer-fade var(--dur-fade) var(--ease) backwards; }
-.hero > .arrive:nth-child(2) { animation-delay: var(--stagger); }
-.hero > .arrive:nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
-.hero > .arrive:nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
-.hero > .arrive:nth-child(n + 5) { animation-delay: calc(var(--stagger) * 5); }
-/* Waiting to be seen (site.js sets data-hidden only where it can watch the scroll). */
-.reveal[data-hidden] { opacity: 0; }
-.reveal[data-shown] { animation: rise var(--dur-bouncy) var(--ease-bouncy) backwards, layer-fade calc(var(--dur-fade) * 2) var(--ease) backwards; }
-
-/* ---------- the features ---------- */
-.features { display: grid; gap: calc(var(--space-6) * 1.5); }
-.feature { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); align-items: center; gap: var(--space-6); }
-.feature:nth-child(2) { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-.feature:nth-child(2) .feature-text { order: 1; }
-.feature-text { display: grid; gap: var(--space-3); align-content: start; }
-.feature-title { font-size: calc(var(--text-l) * 1.5); font-weight: var(--semibold); line-height: var(--leading-tight); letter-spacing: var(--track-l); }
-.feature-text > .muted:not(.keys) { font-size: var(--text-l); }
-.keys { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
-.shot { display: block; min-width: 0; }
-.shot img { display: block; width: 100%; height: auto; }
-/* The pop-up and the dock float over the desktop: their own glass and shadow are in the picture. */
-.shot-float { justify-self: center; width: 100%; max-width: calc(var(--measure) * 0.78); }
-.shot-float img { border-radius: var(--radius-l); box-shadow: var(--shadow); }
-/* The snip covers a whole screen: framed as one, a floating glass panel. */
-.shot-screen img { border-radius: var(--radius); box-shadow: var(--shadow); }
-.shot-dock { justify-self: center; display: grid; gap: var(--space-5); width: 100%; max-width: calc(var(--measure) * 0.64); }
-
-/* ---------- how it works ---------- */
-.how { display: grid; gap: var(--space-5); padding: var(--space-6); border-radius: var(--radius-l); }
-.parts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); margin: 0; }
-.parts > div { display: grid; gap: var(--space-2); align-content: start; }
-.parts dd { margin: 0; }
-.platforms { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding-top: var(--space-4); border-top: var(--hairline) solid var(--line); }
-
-/* ---------- the footer ---------- */
-.foot { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2) var(--space-5); width: 100%; max-width: calc(var(--measure) * 1.5); margin: calc(var(--space-6) * 2) auto 0; padding: var(--space-5) var(--space-4) var(--space-6); }
-.foot a { color: var(--muted); }
-.foot a:hover { color: var(--text); }
-
-/* ---------- a phone ---------- */
-@media (max-width: 760px) {
-  main { gap: calc(var(--space-6) * 1.5); }
-  .hero { padding-top: var(--space-4); }
-  .hero-name { font-size: calc(var(--text-l) * 3); }
-  .install { flex-direction: column; align-items: stretch; padding: var(--space-3); border-radius: var(--radius); }
-  .feature, .feature:nth-child(2) { grid-template-columns: minmax(0, 1fr); gap: var(--space-5); }
-  .feature:nth-child(2) .feature-text { order: 0; }
-  .feature-title { font-size: calc(var(--text-l) * 1.25); }
-  .parts { grid-template-columns: minmax(0, 1fr); }
-  .how { padding: var(--space-5); }
-  .row-meta { display: none; }
+/* Idle: the notch with a wing each side, the dot left of it and the words right; nothing under it. */
+.wings {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: calc(var(--notch-w) + var(--wing) * 2);
+  height: var(--notch-h);
+  padding-inline: var(--space-3);
+  font-size: var(--text-s);
+  white-space: nowrap;
 }
+.wing-text { color: var(--muted); }
 
-/* Reduced motion: base.css stops every animation and makes the springs plain; the dock still
-   changes, at once, and its content and the sections only fade in. */
+/* Peek: one line under the notch's band. */
+.peek {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: calc(var(--control) * 13.5);
+  padding: var(--notch-h) var(--space-4) 0;
+  height: calc(var(--notch-h) + var(--control) + var(--space-2));
+  white-space: nowrap;
+}
+.peek-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: var(--medium); }
+.peek-body { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: var(--text-s); }
+.peek-label { flex: none; color: var(--warn); font-size: var(--text-s); font-weight: var(--medium); }
+
+/* Open: the app's dock as it is now (D0038, D0040): the session shown as its own switch, another one
+   at work as a chip, the stream, the card that waits, a quiet reply. */
+.panel { display: flex; flex-direction: column; width: calc(var(--control) * 16); padding-top: var(--notch-h); }
+.head { display: flex; align-items: center; gap: var(--space-1); min-width: 0; padding: var(--space-2) var(--space-2) var(--space-1); white-space: nowrap; }
+.switch { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; height: var(--control); padding-inline: var(--space-2); border-radius: var(--radius-pill); background: var(--hover); font-weight: var(--medium); }
+.switch-title, .chip-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.glyph { flex: none; width: var(--text-m); height: var(--text-m); color: var(--muted); }
+.chevron { flex: none; width: var(--space-3); height: var(--space-3); fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.chip { display: inline-flex; align-items: center; gap: var(--space-1); min-width: 0; max-width: calc(var(--control) * 4); padding-inline: var(--space-2); color: var(--muted); font-size: var(--text-s); }
+.head-end { flex: none; margin-left: auto; padding-inline: var(--space-2); color: var(--muted); font-size: var(--text-s); }
+.stream { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-2) var(--space-4) var(--space-3); }
+.stream p { margin: 0; }
+.you { align-self: flex-end; max-width: 85%; padding: var(--space-1) var(--space-3); border-radius: var(--radius-m); background: var(--bubble); }
+.step { color: var(--muted); font-size: var(--text-s); line-height: var(--leading-tight); }
+.step + .step { margin-top: calc(var(--space-2) - var(--space-3)); }
+.step span { margin-right: var(--space-2); color: var(--text); }
+.approval-actions .button { pointer-events: none; }
+/* Allow, pressed: down a little and back, on the gentle spring. */
+.approval-actions [data-press] { transition: transform var(--dur-gentle) var(--ease-gentle); }
+.approval-actions [data-press][data-pressed] { transform: scale(var(--squash)); }
+.approval[data-state="allow"] .approval-actions { display: none; }
+.reply { margin: 0 var(--space-3) var(--space-3); padding: var(--space-1) var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-m); background: var(--surface); color: var(--muted); }
+
+/* ---------- the words: a caption at the screen's bottom left; the links at its bottom right ---------- */
+.bottom { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-6); }
+.page { flex: 0 1 calc(var(--measure) * 0.75); min-width: 0; }
+.name { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-l); font-weight: var(--medium); line-height: var(--leading-tight); }
+.line { margin: var(--space-2) 0 var(--space-5); font-size: calc(var(--text-l) * 1.5); line-height: var(--leading-tight); letter-spacing: var(--track-l); }
+
+.keys { display: grid; margin: 0 0 var(--space-5); border-top: var(--hairline) solid var(--line); }
+.keys > div { display: flex; align-items: center; gap: var(--space-4); padding-block: var(--space-3); border-bottom: var(--hairline) solid var(--line); }
+.keys dt { display: flex; gap: var(--space-1); flex: none; width: calc(var(--control) * 5); }
+.keys dd { margin: 0; }
+.hover { color: var(--muted); font-size: var(--text-s); }
+.keys kbd { font-size: var(--text-s); }
+
+.install { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3); border: var(--hairline) solid var(--line); border-radius: var(--radius-m); }
+.install-line { flex: 1; min-width: 0; padding-block: var(--space-1); overflow-wrap: anywhere; }
+.copy { flex: none; }
+.fine { margin: var(--space-3) 0 0; }
+
+.foot { display: flex; flex: none; gap: var(--space-4); }
+.foot a { color: var(--muted); }
+
+/* A phone: the notch's dock is wider than the screen, so it is drawn smaller. */
+@media (max-width: 760px) {
+  .screen { padding: calc(var(--control) * 12) var(--space-4) var(--space-5); }
+  .bottom { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 500px) {
+  .island { scale: 0.82; }
+  .stage { height: calc(var(--control) * 11.5); }
+  .keys dt { width: calc(var(--control) * 3.5); }
+}
+/* Reduced motion: the shape changes at once and the content only fades. */
 @media (prefers-reduced-motion: reduce) {
-  .layer:not(.leaving), .arrive, .reveal[data-shown], .sessions > li, .panel .approval, .peek.layer > * { animation: layer-fade var(--dur-fade) var(--ease) !important; }
+  .layer { animation: layer-fade var(--dur-fade) var(--ease-gentle) !important; }
   .layer.leaving { animation: layer-out var(--dur-out) var(--ease) forwards !important; }
 }

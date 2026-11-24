@@ -1,6 +1,6 @@
 // The landing page (site/, built by scripts/build-site.ts): it loads nothing from another host, its
 // links work from any folder, every colour, length, font and spring is a token of the app's base.css,
-// and its images are the screenshots scripts/site-shots.ts made, small enough to serve.
+// and it is one screen around a live notch, with no images and no glass (D0041).
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,9 +23,9 @@ const REPO = "https://github.com/kaitila/intuition";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 describe("the build", () => {
-  test("writes the page, its stylesheet and script, the app's base.css and fonts, and the screenshots", () => {
+  test("writes the page, its stylesheet and script, the app's base.css and fonts, and no images", () => {
     for (const file of ["index.html", "site.css", "site.js", "base.css", "fonts/geist-latin.woff2", "fonts/geist-mono-latin.woff2", "fonts/geist-LICENSE.txt"]) expect(files).toContain(file);
-    expect(files.filter((f) => f.startsWith("shots/") && f.endsWith(".png")).length).toBeGreaterThanOrEqual(3);
+    expect(files.filter((f) => /\.(png|jpe?g|webp|gif)$/.test(f))).toEqual([]);
   });
 
   test("base.css is the app's own, unchanged: the tokens come from it at build time", () => {
@@ -47,7 +47,7 @@ describe("it loads nothing from outside its own folder", () => {
 
   test("the only absolute URLs are <a href> links to the repository, never a src, srcset or stylesheet", () => {
     const refs = [...html.matchAll(/\s(href|src|srcset)="([^"]*)"/g)].map((m) => ({ attr: m[1]!, url: m[2]! }));
-    expect(refs.length).toBeGreaterThan(5);
+    expect(refs.length).toBeGreaterThanOrEqual(5);
     for (const { attr, url } of refs) {
       if (/^[a-z]+:|^\/\//i.test(url)) {
         expect({ attr, url, ok: attr === "href" && url.startsWith(REPO) }).toEqual({ attr, url, ok: true });
@@ -60,7 +60,7 @@ describe("it loads nothing from outside its own folder", () => {
       ...[...noComments(html).matchAll(/\s(?:href|src|srcset)="([^"]*)"/g)].map((m) => ["index.html", m[1]!] as const),
       ...files.filter((f) => f.endsWith(".css")).flatMap((f) => [...noComments(read(f)).matchAll(/url\("?([^")]+)"?\)/g)].map((m) => [f, m[1]!] as const)),
     ].filter(([, url]) => !/^[a-z]+:/i.test(url) && !url.startsWith("#"));
-    expect(local.length).toBeGreaterThan(5);
+    expect(local.length).toBeGreaterThanOrEqual(4);
     for (const [from, url] of local) {
       expect({ url, rooted: url.startsWith("/") }).toEqual({ url, rooted: false });
       const path = url === "./" ? "index.html" : normalize(join(dirname(from), url.split(/[?#]/)[0]!));
@@ -146,46 +146,24 @@ describe("every colour, font and spring is a base.css token", () => {
     expect(/["'`]#[0-9a-f]{3,8}["'`]|\b(?:rgba?|hsla?|oklch)\(|fontFamily|font-family/i.test(js)).toBe(false);
   });
 
-  test("the page is Glass: the backdrop on <body>, frosted glass panels, pill buttons", () => {
-    expect(html).toMatch(/<body class="backdrop">/);
-    expect((html.match(/class="[^"]*\bglass\b/g) ?? []).length).toBeGreaterThanOrEqual(3);
-    expect(html).toMatch(/<button[^>]*class="primary copy"/);
+  test("the page is one screen around the notch: the plain ground, no glass, the notch's black and the dock's dark tokens", () => {
+    expect(html).toMatch(/<body>/);
+    expect(html).not.toMatch(/\bbackdrop\b|class="[^"]*\bglass\b/);
+    expect(html).toMatch(/<figure id="island" class="island dark"/);
+    expect(css).toContain("background: var(--notch)");
+    for (const layer of ["idle", "peek", "open"]) expect(html).toContain(`data-layer="${layer}"`);
+    expect(html).toMatch(/<button[^>]*class="quiet small copy"/);
   });
 });
 
-describe("the screenshots", () => {
-  const shots = readdirSync(join(SITE, "shots")).filter((f) => f.endsWith(".png"));
-  const referenced = [...html.matchAll(/(?:src|srcset)="(shots\/[^"]+)"/g)].map((m) => m[1]!);
-  const script = readFileSync(join(import.meta.dir, "..", "scripts", "site-shots.ts"), "utf8");
-
-  test("every image on the page is one of site/shots, and every one of those is on the page", () => {
-    expect(referenced.length).toBeGreaterThanOrEqual(5);
-    expect([...new Set(referenced)].sort()).toEqual(shots.map((f) => `shots/${f}`).sort());
+describe("what it says", () => {
+  test("the keys are the app's defaults, a Mac's in the markup and Ctrl+Alt for the others", () => {
+    expect([...html.matchAll(/<kbd data-other="([^"]+)">([^<]+)<\/kbd>/g)].map((m) => `${m[2]}/${m[1]}`)).toEqual(["Cmd/Ctrl", "Shift/Alt", "Cmd/Ctrl", "Shift/Alt"]);
+    expect(js).toContain('querySelectorAll("kbd[data-other]")');
   });
 
-  test("each is a PNG under 300 KB", () => {
-    for (const file of shots) {
-      const bytes = readFileSync(join(SITE, "shots", file));
-      expect({ file, png: bytes.subarray(1, 4).toString("latin1") }).toEqual({ file, png: "PNG" });
-      expect({ file, small: statSync(join(SITE, "shots", file)).size < 300 * 1024 }).toEqual({ file, small: true });
-    }
-  });
-
-  test("each is one site-shots.ts writes, from the fake-agent runner with made-up workspaces", () => {
-    expect(script).toContain('INTUITION_FAKE_AGENT: "1"');
-    expect(script).toContain("mkdtempSync(join(tmpdir()");
-    for (const file of shots) {
-      const name = file.replace(/\.png$/, "").replace(/-(light|dark)$/, "-${scheme}");
-      expect({ file, made: script.includes(`\`${name}\``) || script.includes(`"${name}"`) }).toEqual({ file, made: true });
-    }
-  });
-
-  test("the images have their size and alt text, and load lazily below the fold", () => {
-    for (const [img] of html.matchAll(/<img [^>]+>/g)) {
-      expect(img).toMatch(/\swidth="\d+"/);
-      expect(img).toMatch(/\sheight="\d+"/);
-      expect(img).toMatch(/\salt="[^"]{20,}"/);
-      expect(img).toMatch(/loading="lazy"/);
-    }
+  test("the install line is the README's, and Copy copies it", () => {
+    expect(html).toContain("git clone https://github.com/kaitila/intuition &amp;&amp; cd intuition &amp;&amp; bun install &amp;&amp; bun run setup");
+    expect(js).toContain("navigator.clipboard.writeText(text)");
   });
 });
