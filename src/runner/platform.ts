@@ -8,7 +8,7 @@ import { detectLayout } from "../shell/platform";
 const ReportSchema = z.strictObject({
   os: z.enum(["windows", "macos", "linux"]),
   startOnLogin: z.boolean().nullable(),
-  hotkeys: z.strictObject({ hotkey: z.boolean(), snipHotkey: z.boolean() }),
+  hotkeys: z.strictObject({ hotkey: z.boolean(), snipHotkey: z.boolean(), chatHotkey: z.boolean().optional() }),
   dockTransparent: z.boolean(),
   screenRecording: z.enum(["not-determined", "granted", "denied", "restricted", "unknown"]).optional(),
 });

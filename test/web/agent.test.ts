@@ -69,6 +69,8 @@ describe("the pages", () => {
   test("the pop-up's switch sits beside the workspaces, and the hints name its key", () => {
     const html = source("prompt.html");
     expect(html).toMatch(/id="workspaces"[\s\S]*<button id="agent" class="agent-switch[^"]*" type="button" aria-keyshortcuts="Alt\+A"/);
-    expect(html).toContain("<kbd>Alt</kbd><kbd>A</kbd><span>agent</span>");
+    // The hint line is drawn from shortcuts.js (D0046), and names the agent's key.
+    expect(html).toContain('<span id="keys" class="keys muted" aria-hidden="true"></span>');
+    expect(source("prompt.js")).toContain('renderHint(document, document.getElementById("keys"), hintLine("prompt", MAC));');
   });
 });

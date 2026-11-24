@@ -76,6 +76,7 @@ ${rows([
   ["--workspace [name=]<folder>", "a workspace, repeatable; the first is default"],
   ["--hotkey <keys>", "new task hotkey, such as Control+Alt+Space"],
   ["--snip-hotkey <keys>", "the snip hotkey"],
+  ["--chat-hotkey <keys>", "the chat's hotkey (optional)"],
   ["--permission-mode auto|default", "default asks for everything"],
   ["--no-login", "start at login off (else on)"],
   ["--link-dir <folder>", "where the command's link goes"],

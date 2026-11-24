@@ -33,14 +33,14 @@ To work on holm itself, clone it instead: `git clone https://github.com/kaitila/
 `setup` walks you through it, then takes a fresh install to a running app:
 1. **Requirements**: checks bun, Claude Code and its login (offering to log in), Codex, and git (optional), with the command that fixes anything missing;
 2. **Workspaces**: tick the folders sessions may run in (space to toggle, enter to confirm), from the git repositories and `CLAUDE.md` folders in your home, newest first, or add one by its path; then pick the one the pop-up offers first;
-3. **Hotkeys**: keep the platform's defaults (Ctrl+Alt+Space for a new task and Ctrl+Alt+S for the snip on Windows and Linux, Cmd+Shift+Space and Cmd+Shift+S on a Mac) or type others;
+3. **Hotkeys**: keep the platform's defaults (Ctrl+Alt+Space for a new task, Ctrl+Alt+S for the snip and Ctrl+Alt+J for the chat on Windows and Linux; Cmd+Shift+Space, Cmd+Shift+S and Cmd+Shift+J on a Mac) or type others;
 4. **Permissions**: auto (recommended: routine tool calls run, the rest ask you) or ask for everything;
 5. **Start at login**: yes by default;
 6. then writes the config, puts the `holm` command on your PATH, installs the tray app (the first time, a download of Electron of about 110 MB, from its own release), starts the runner and the tray app, and opens the pop-up, so you can send a first task. A step that fails says the command that retries it.
 
-Esc or Ctrl+C at any question stops it with nothing written. For scripts: `bun run setup --yes` takes every default, and `--workspace [name=]<folder>` (repeatable), `--hotkey`, `--snip-hotkey`, `--permission-mode auto|default` and `--no-login` give the answers; without a terminal, setup needs `--yes` or all of them. Running `setup` again changes the answers; running plain `holm` before there is any configuration starts it too. `holm help` lists every command, and `holm doctor --json` is the check for scripts.
+Esc or Ctrl+C at any question stops it with nothing written. For scripts: `bun run setup --yes` takes every default, and `--workspace [name=]<folder>` (repeatable), `--hotkey`, `--snip-hotkey`, `--chat-hotkey` (optional), `--permission-mode auto|default` and `--no-login` give the answers; without a terminal, setup needs `--yes` or all of them. Running `setup` again changes the answers; running plain `holm` before there is any configuration starts it too. `holm help` lists every command, and `holm doctor --json` is the check for scripts.
 
-Then press the hotkey anywhere.
+Then press the hotkey anywhere. Every other key is in the dock's and the chat's keyboard shortcuts: press ? there (away from a text box), or pick Keyboard shortcuts in the dock's "…"; Settings lists them too.
 
 ## Start at login
 `setup` turns it on unless you say no. Change it later with `holm shell login on` or `off` (`status` says which it is), or with "Start on login" in the tray icon's menu. At login the tray app starts, and it starts the runner itself the first time you press the hotkey or open the chat. On Windows, WSL boots first, so allow a few seconds after signing in.

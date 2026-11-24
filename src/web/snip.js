@@ -7,7 +7,9 @@
 // and close(). The runner's half is POST /api/sessions (docs/protocol.md).
 import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
 import { workspaceDigit, anchorBox, anchorLabel, devicePixels, errorText, initialWorkspace, isClick, selectionOf, sessionBody, sizeText, stepWorkspace, UNREACHABLE, wholeDisplay } from "./snip-geometry.js";
-import { commandLabel } from "./keys.js";
+import { MAC } from "./keys.js";
+import { hintLine, keyText, tip } from "./shortcuts.js";
+import { renderHint, tooltips } from "./shortcuts-sheet.js";
 
 /** A selection narrower or shorter than this, in CSS pixels, shows no corner marks: they would cover it. */
 const SMALL = 32;
@@ -68,7 +70,7 @@ function start() {
   function drawWorkspace() {
     chipName.textContent = workspace ?? "no workspace";
     const i = workspaces.findIndex((w) => w.name === workspace);
-    chip.title = `Workspace${i >= 0 ? ` ${i + 1} of ${workspaces.length}` : ""} (Tab, ${commandLabel()}1..9)`;
+    chip.title = `Workspace${i >= 0 ? ` ${i + 1} of ${workspaces.length}` : ""}: the next one (${keyText("task.step")}, ${keyText("task.workspace")})`;
     drawAgent();
   }
 
@@ -79,7 +81,7 @@ function start() {
     const name = document.createElement("span");
     name.textContent = agentName(kind);
     agentButton.replaceChildren(agentSvg(document, kind), name);
-    agentButton.title = `Starts on ${agentName(kind)}. Alt+A switches to ${agentName(flipAgent(kind))}`;
+    agentButton.title = `Starts on ${agentName(kind)}. ${tip(`Switch to ${agentName(flipAgent(kind))}`, "task.agent")}`;
     agentButton.setAttribute("aria-label", `Agent: ${agentName(kind)}. Switch to ${agentName(flipAgent(kind))}`);
     task.placeholder = taskPlaceholder(kind, true);
   }
@@ -313,6 +315,8 @@ function start() {
     drawSelection();
     placeBox();
   });
+  renderHint(document, document.getElementById("keys"), hintLine("snip", MAC));
+  tooltips(document, document.body);
   drawWorkspace();
   void loadWorkspaces().catch((e) => say(e.message, "error"));
 

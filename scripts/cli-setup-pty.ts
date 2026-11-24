@@ -189,6 +189,8 @@ for (const cols of [80, 120]) {
     await s.type(...Array(10).fill(KEY.backspace), "Control+Shift+K", KEY.enter);
     await s.until("Snip hotkey");
     await s.type(KEY.enter);
+    await s.until("Chat hotkey");
+    await s.type(KEY.enter);
     await s.until("ask for permission?");
     await s.type(KEY.enter);
     await s.until("log in?");

@@ -7,13 +7,15 @@ const base = {
   startOnLogin: true,
   hotkey: { wanted: "Control+Alt+Space", active: "Control+Alt+Space" },
   snipHotkey: { wanted: "Control+Alt+S", active: "Control+Alt+S" },
+  chatHotkey: { wanted: "Control+Alt+J", active: "Control+Alt+J" },
   dockTransparent: true,
   screen: "denied" as const,
 };
 
 describe("the report", () => {
   test("a hotkey is registered only when the one held is the one wanted", () => {
-    expect(shellReport({ ...base, os: "windows" }).hotkeys).toEqual({ hotkey: true, snipHotkey: true });
+    expect(shellReport({ ...base, os: "windows" }).hotkeys).toEqual({ hotkey: true, snipHotkey: true, chatHotkey: true });
+    expect(shellReport({ ...base, os: "windows", chatHotkey: { wanted: "Control+Alt+J", active: null } }).hotkeys.chatHotkey).toBe(false);
     // A change the shell could not register keeps the old one working: that is not the wanted one.
     expect(shellReport({ ...base, os: "windows", hotkey: { wanted: "Alt+Space", active: "Control+Alt+Space" } }).hotkeys.hotkey).toBe(false);
     expect(shellReport({ ...base, os: "windows", snipHotkey: { wanted: "Control+Alt+S", active: null } }).hotkeys.snipHotkey).toBe(false);
@@ -32,6 +34,8 @@ describe("the report", () => {
         expect(parseReport(JSON.parse(JSON.stringify(report)))).toEqual(report);
       }
     }
+    // A shell from before the chat's hotkey reports two.
+    expect(parseReport({ os: "linux", startOnLogin: true, hotkeys: { hotkey: true, snipHotkey: true }, dockTransparent: true })).toMatchObject({ hotkeys: { hotkey: true, snipHotkey: true } });
   });
 
   test("goes to the runner's PUT route, and the socket says it is the shell", () => {

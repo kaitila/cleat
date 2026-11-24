@@ -7,6 +7,8 @@
 // again when the page comes back into view, so a login made meanwhile shows.
 import { agentSvg } from "./agent.js";
 import { MAC } from "./keys.js";
+import { GLOBAL, guide, hotkeysOf } from "./shortcuts.js";
+import { renderGuide, tooltips } from "./shortcuts-sheet.js";
 import { agentLines, fieldKeys, isDraft, keycaps, move, putBody, recordKey, setupLines, usedAgents } from "./settings-model.js";
 
 const $ = (id) => document.getElementById(id);
@@ -23,7 +25,7 @@ let exists = new Map();
 let sentRows = [];
 let saving = false;
 let again = false;
-/** The shortcut being recorded ("hotkey" or "snipHotkey"), or null. */
+/** The shortcut being recorded ("hotkey", "snipHotkey" or "chatHotkey"), or null. */
 let recording = null;
 /** GET /api/platform's answer, or null before it; and whether the runner answers now (its socket is open). */
 let platform = null;
@@ -123,7 +125,9 @@ function adopt(stored) {
   const drafts = state ? state.workspaces.map((w, i) => (isDraft(w) ? [i, w] : null)).filter(Boolean) : [];
   const workspaces = Array.isArray(stored.workspaces) ? stored.workspaces.map((w) => ({ ...w })) : [];
   for (const [i, w] of drafts) workspaces.splice(Math.min(i, workspaces.length), 0, w);
-  state = { theme: stored.theme, permissionMode: stored.permissionMode, agent: stored.agent, workspaces, shell: stored.shell ? { ...stored.shell } : null, port: stored.port };
+  // Settings from before the chat's hotkey have none: its default, which the next save stores.
+  const shell = stored.shell ? { ...stored.shell, ...(stored.shell.chatHotkey ? {} : { chatHotkey: hotkeysOf(stored.shell, MAC).chatHotkey }) } : null;
+  state = { theme: stored.theme, permissionMode: stored.permissionMode, agent: stored.agent, workspaces, shell, port: stored.port };
   window.holmTheme?.apply(state.theme);
   render();
 }
@@ -413,12 +417,26 @@ for (const button of document.querySelectorAll("[data-shortcut]")) {
       error.hidden = false;
       return;
     }
+    // Two the same: the shell could register only one. Said here at once; the runner refuses it too.
+    const same = GLOBAL.find((g) => g.key !== key && state.shell[g.key]?.toLowerCase() === got.accelerator.toLowerCase());
+    if (same) {
+      error.textContent = `This is already the ${same.name} shortcut.`;
+      error.hidden = false;
+      button.setAttribute("aria-invalid", "true");
+      showStatus("Not saved", "error");
+      stopRecording();
+      return;
+    }
     error.hidden = true;
     state.shell[key] = got.accelerator;
     stopRecording();
     void save();
   });
 }
+
+// The pages' keys, read-only under the recordable ones: the guide's list less its global part.
+$("page-keys").replaceChildren(renderGuide(document, guide({ mac: MAC, global: false })));
+tooltips(document, document.body);
 
 // ---------- loading and following ----------
 

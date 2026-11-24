@@ -86,6 +86,8 @@ export interface SelfTestResult {
   dockChatSession: string | null;
   /** And no chat window of its own was opened for it. */
   dockChatNoWindow: boolean;
+  /** The chat's hotkey, pressed with the dock on: it went to the dock's page (onChatKey), and no chat window opened. */
+  dockChatKeyToDock: boolean;
   /** The pop-up's URL after the dock's page opened /prompt in a new window. */
   dockOpenedPromptUrl: string | null;
   /** New windows from the dock to another of the runner's paths and to another origin opened nothing. */

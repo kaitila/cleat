@@ -775,6 +775,59 @@ kbd {
 .md [data-align="center"] { text-align: center; }
 .md [data-align="right"] { text-align: right; }
 
+/* ---------- the shortcuts guide (shortcuts-sheet.js, D0046): what each key does, its keycaps at the right ---------- */
+.guide { display: grid; align-items: start; gap: var(--space-4); }
+.guide-section { display: grid; align-content: start; gap: var(--space-1); min-width: 0; }
+.guide-rows { display: grid; margin: 0; }
+.guide-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--control);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.guide-row:last-child { border-bottom: 0; }
+.guide-what { min-width: 0; font-size: var(--text-s); }
+.guide-keys { display: flex; flex: none; align-items: center; gap: var(--space-1); margin: 0; }
+.guide-or { font-size: var(--text-xs); }
+.combo { display: inline-flex; gap: var(--edge); }
+.combo kbd { color: var(--text); }
+
+/* The sheet: a calm panel over the page or the island, its list scrolling under a fixed head. */
+.sheet {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--radius);
+  overflow: hidden;
+  animation: sheet-in var(--dur-snappy) var(--ease-snappy);
+}
+.sheet[hidden] { display: none; }
+@keyframes sheet-in { from { opacity: 0; transform: translateY(calc(var(--rise) / 2)); } }
+.sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4); border-bottom: var(--hairline) solid var(--line); }
+.sheet-title { margin: 0; font-size: var(--text-m); }
+.sheet-body { flex: 1 1 auto; min-height: 0; padding: var(--space-3) var(--space-4) var(--space-4); overflow-y: auto; overscroll-behavior: contain; }
+
+/* A tooltip the page draws (shortcuts-sheet.js): small, quiet, inside the element it belongs to. */
+.tip {
+  position: absolute;
+  z-index: 4;
+  max-width: calc(var(--sidebar) + var(--space-6));
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-xs);
+  background: var(--ink);
+  color: var(--ink-text);
+  line-height: var(--leading-tight);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  animation: tip-in var(--dur-fade) var(--ease);
+}
+.tip[hidden] { display: none; }
+@keyframes tip-in { from { opacity: 0; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after, .select::picker-icon { animation: none !important; transition: none !important; }
 }
