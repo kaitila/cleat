@@ -25,7 +25,7 @@ const PROMPT = "What colour is the attached image? Answer with one word.";
 let windowsTemp: string;
 try {
   // The Windows user's temp folder (%TEMP% is <LocalAppData>\Temp), found at run time, as the shell's clips go there.
-  windowsTemp = join(localAppData(), "Temp", "holm");
+  windowsTemp = join(localAppData(), "Temp", "cleat");
 } catch (e) {
   console.log(`FAIL: the Windows user's LocalAppData folder was not found: ${(e as Error).message}`);
   process.exit(1);
@@ -64,11 +64,11 @@ writeFileSync(image, solidPng(64, [255, 0, 0]));
 // As Windows names it, the way the shell posts it.
 const windowsPath = toWindows(image);
 
-const dir = mkdtempSync(join(tmpdir(), "holm-smoke-image-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-smoke-image-"));
 const configFile = join(dir, "config.json");
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace }] }));
-// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
+// Its own environment, so a CLEAT_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ CLEAT_CONFIG: configFile, CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}`);
 
 const seen = { storedWslPath: false, userEventKeepsThemApart: false, readTheFile: false, answer: "", resultOk: false };

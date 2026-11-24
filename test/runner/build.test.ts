@@ -10,7 +10,7 @@ import type { HealthResponse } from "../../src/shared/protocol";
 import { testRunner } from "./helpers";
 
 function fakeRepo(): string {
-  const repo = mkdtempSync(join(tmpdir(), "holm-build-"));
+  const repo = mkdtempSync(join(tmpdir(), "cleat-build-"));
   for (const dir of ["src/runner", "src/shared", "src/web", "src/cli"]) mkdirSync(join(repo, dir), { recursive: true });
   writeFileSync(join(repo, "src/runner/server.ts"), "one");
   writeFileSync(join(repo, "src/web/dock.html"), "<p>");
@@ -51,21 +51,21 @@ describe("the build id", () => {
     expect(buildId(null, repo)).toBe(before);
   });
 
-  test("HOLM_BUILD_ID replaces it, through the config", async () => {
+  test("CLEAT_BUILD_ID replaces it, through the config", async () => {
     expect(buildId("given")).toBe("given");
     const runner = testRunner();
     await runner.stop();
-    expect(loadConfig({ ...runner.env, HOLM_BUILD_ID: "given" }).buildId).toBe("given");
+    expect(loadConfig({ ...runner.env, CLEAT_BUILD_ID: "given" }).buildId).toBe("given");
     expect(loadConfig(runner.env).buildId).toBeNull();
   });
 });
 
 describe("GET /health", () => {
   const runner = testRunner();
-  const dir = mkdtempSync(join(tmpdir(), "holm-build-runner-"));
+  const dir = mkdtempSync(join(tmpdir(), "cleat-build-runner-"));
   mkdirSync(join(dir, "work"));
   writeFileSync(join(dir, "config.json"), JSON.stringify({ workspaces: [{ name: "work", path: join(dir, "work") }] }));
-  const given = startServer(loadConfig({ HOLM_CONFIG: join(dir, "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0", HOLM_BUILD_ID: "given" }));
+  const given = startServer(loadConfig({ CLEAT_CONFIG: join(dir, "config.json"), CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0", CLEAT_BUILD_ID: "given" }));
   afterAll(async () => {
     await runner.stop();
     await given.stop();
@@ -76,7 +76,7 @@ describe("GET /health", () => {
     expect(body).toEqual({ ok: true, version: expect.any(String), build: buildId() });
   });
 
-  test("a runner started with HOLM_BUILD_ID reports that", async () => {
+  test("a runner started with CLEAT_BUILD_ID reports that", async () => {
     expect(((await (await fetch(`${given.url}/health`)).json()) as HealthResponse).build).toBe("given");
   });
 });

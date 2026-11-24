@@ -27,7 +27,7 @@ describe("an agent's status, as doctor checks it", () => {
     const ok = table({ "claude --version": "2.1.0 (Claude Code)", "claude auth status": '{"loggedIn": true, "authMethod": "claude.ai"}' });
     expect(await claudeStatus(ok.output)).toEqual({ agent: "claude", installed: true, version: "2.1.0 (Claude Code)", loggedIn: true, detail: "2.1.0 (Claude Code), logged in", fix: "" });
     const out = table({ "claude --version": "2.1.0 (Claude Code)", "claude auth status": '{"loggedIn": false}' });
-    expect(await claudeStatus(out.output)).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: holm login" });
+    expect(await claudeStatus(out.output)).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: cleat login" });
     // The Agent SDK's own Claude Code, when it is there: the same checks, asked of it.
     const sdk = table({ "/sdk/claude --version": "2.1.322 (Claude Code)", "/sdk/claude auth status": '{"loggedIn": true}' });
     expect(await claudeStatus(sdk.output, "/sdk/claude")).toMatchObject({ installed: true, version: "2.1.322 (Claude Code)", loggedIn: true });
@@ -41,7 +41,7 @@ describe("an agent's status, as doctor checks it", () => {
     const ok = table({ "/x/codex --version": "codex-cli 0.169.0", "/x/codex login status": "Logged in using ChatGPT" });
     expect(await codexStatus(ok.output, "/x/codex")).toEqual({ agent: "codex", installed: true, version: "codex-cli 0.169.0", loggedIn: true, detail: "codex-cli 0.169.0, logged in using ChatGPT", fix: "" });
     const out = table({ "/x/codex --version": "codex-cli 0.169.0", "/x/codex login status": "Not logged in" });
-    expect(await codexStatus(out.output, "/x/codex")).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: holm login codex" });
+    expect(await codexStatus(out.output, "/x/codex")).toMatchObject({ installed: true, loggedIn: false, fix: "Log in: cleat login codex" });
     const none = table({});
     expect(await codexStatus(none.output, null)).toMatchObject({ installed: false, loggedIn: false });
     expect(none.calls).toEqual([]);

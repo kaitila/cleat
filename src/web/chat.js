@@ -79,7 +79,7 @@ els.meta.append(resume.el);
 /**
  * True inside the dock, grown into the chat (`/?embed=dock`, D0042): the page is the island's
  * content, dark on the notch's black, with no backdrop of its own. The dock shows and hides it
- * (window.holmEmbed, below), and the page takes the keyboard only while it is shown. A link to
+ * (window.cleatEmbed, below), and the page takes the keyboard only while it is shown. A link to
  * another page opens as a window of the shell (target _blank), never inside the island, and Esc that
  * nothing here takes steps back down to the small dock.
  */
@@ -90,7 +90,7 @@ const collapse = $("collapse");
 /** Tells the dock to step back down to its small open view. */
 function stepDown() {
   try {
-    window.parent.postMessage({ holmEmbed: "down" }, location.origin);
+    window.parent.postMessage({ cleatEmbed: "down" }, location.origin);
   } catch {
     // No dock around it: nothing to step down to.
   }
@@ -918,7 +918,7 @@ function terminalMark() {
 function renderHead() {
   const session = selected ? sessions.get(selected) : undefined;
   els.head.hidden = !session;
-  document.title = session ? `${session.title || "Untitled"} · Holm` : "Holm";
+  document.title = session ? `${session.title || "Untitled"} · Cleat` : "Cleat";
   if (!session) return;
   els.title.textContent = session.title || "Untitled";
   els.dot.dataset.status = session.status;
@@ -1233,7 +1233,7 @@ if (EMBED) {
    * one shown; the keyboard goes to its reply. hide: it shrank away; the keyboard leaves it.
    * selected: the session shown, for the small dock to step down onto.
    */
-  window.holmEmbed = {
+  window.cleatEmbed = {
     show(id) {
       active = true;
       if (typeof id === "string" && id && id !== selected) select(id, false, true);

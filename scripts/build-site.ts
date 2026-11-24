@@ -2,7 +2,7 @@
 // It copies site/ (the page, its stylesheet and script)
 // and, beside them, the app's own design system: src/web/base.css (every token the page uses) and
 // the fonts it names, with their licences, and the app's mark (src/web/mark.svg, the favicon). The page then asks no other host for anything, and
-// its links are relative, so it works from any folder (/holm/ on GitHub Pages).
+// its links are relative, so it works from any folder (/cleat/ on GitHub Pages).
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 

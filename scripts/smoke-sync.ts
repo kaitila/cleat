@@ -28,19 +28,19 @@ if (process.env.CI) {
 }
 
 const TIMEOUT_MS = 300_000;
-const FIRST = "Reply with exactly: from holm";
+const FIRST = "Reply with exactly: from cleat";
 const TERMINAL = "Reply with exactly: from terminal";
 const BORN = "Reply with exactly: born in terminal";
-const ANSWER = "Reply with exactly: answered in holm";
+const ANSWER = "Reply with exactly: answered in cleat";
 
-const dir = mkdtempSync(join(tmpdir(), "holm-smoke-sync-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-smoke-sync-"));
 // The real path: Claude Code names a project's folder after it.
 const workspace = join(realpathSync(dir), "workspace");
 mkdirSync(workspace);
 const configFile = join(dir, "config.json");
 writeFileSync(configFile, JSON.stringify({ workspaces: [{ name: "smoke", path: workspace }] }));
-// Its own environment, so a HOLM_FAKE_AGENT left in the shell can't turn this into a fake run.
-const runner = startServer(loadConfig({ HOLM_CONFIG: configFile, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" }));
+// Its own environment, so a CLEAT_FAKE_AGENT left in the shell can't turn this into a fake run.
+const runner = startServer(loadConfig({ CLEAT_CONFIG: configFile, CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" }));
 console.log(`runner on ${runner.url}, workspace ${workspace}`);
 
 /** The terminal's environment: none of a Claude Code session's own variables this script may run in, so `claude` acts as a person's. */
@@ -213,7 +213,7 @@ async function main(): Promise<void> {
   });
   const answer = eventsOf(born.id).filter((e) => e.seq > replySeq && e.kind === "assistant_text").map((e) => (e.kind === "assistant_text" ? e.text : "")).join("\n");
   seen.bAnswer = answer;
-  if (!answer.toLowerCase().includes("answered in holm")) return void finish(1, `the forced reply's answer is ${JSON.stringify(answer)}`);
+  if (!answer.toLowerCase().includes("answered in cleat")) return void finish(1, `the forced reply's answer is ${JSON.stringify(answer)}`);
   // The runner's own turn is not taken for the terminal's: nothing of it is stored twice.
   await Bun.sleep(7000);
   const userTurns = eventsOf(born.id).filter((e) => e.kind === "user" && e.text === ANSWER).length;

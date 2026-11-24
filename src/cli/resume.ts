@@ -1,4 +1,4 @@
-// `holm resume [id or prefix]`: continue one of the runner's sessions in this terminal, in
+// `cleat resume [id or prefix]`: continue one of the runner's sessions in this terminal, in
 // the agent's own UI. It runs `claude --resume <claudeSessionId>` (`codex resume <thread id>` for a
 // Codex session) in the session's folder and hands the terminal over (stdin, stdout and stderr
 // inherited) until the agent exits.
@@ -76,7 +76,7 @@ export interface ResumeDeps {
 
 async function runnerSessions(env: Env): Promise<SessionMeta[]> {
   const url = await runnerUrl(env);
-  if (!url) throw new Error("the runner is not running: start it with `holm start`");
+  if (!url) throw new Error("the runner is not running: start it with `cleat start`");
   const res = await fetch(new URL("/api/sessions", url), { signal: AbortSignal.timeout(2000) });
   if (!res.ok) throw new Error(`${url}/api/sessions answered ${res.status}`);
   return ((await res.json()) as SessionsResponse).sessions;
@@ -94,7 +94,7 @@ export async function runInTerminal(cmd: string[], cwd: string): Promise<number>
   }
 }
 
-/** `holm resume [wanted]`. Returns the exit code: the agent's, or 1 when there was nothing to run. */
+/** `cleat resume [wanted]`. Returns the exit code: the agent's, or 1 when there was nothing to run. */
 export async function resume(wanted: string | undefined, env: Env = process.env, log: Log = console.log, deps: ResumeDeps = {}): Promise<number> {
   const sessions = await (deps.sessions ?? (() => runnerSessions(env)))();
   const picked = plan(sessions, wanted);

@@ -18,11 +18,11 @@ afterAll(async () => {
 });
 
 function configWith(file: unknown) {
-  const dir = mkdtempSync(join(tmpdir(), "holm-mode-"));
+  const dir = mkdtempSync(join(tmpdir(), "cleat-mode-"));
   dirs.push(dir);
   const path = join(dir, "config.json");
   writeFileSync(path, JSON.stringify(file));
-  return () => loadConfig({ HOLM_CONFIG: path, HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0" });
+  return () => loadConfig({ CLEAT_CONFIG: path, CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" });
 }
 
 describe("config permissionMode", () => {

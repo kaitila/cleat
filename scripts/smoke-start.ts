@@ -4,7 +4,7 @@
 // It runs the very command the shell builds (shell/src/wsl.ts) for this distribution, this repo and
 // this bun, through the real wsl.exe: `wsl.exe -d <distro> --exec <bun> <repo>/src/cli.ts start --login-env`.
 // The runner it starts uses a temp config, a temp data folder, a free port and the fake agent: the
-// HOLM_ variables cross into Windows and back through WSLENV. No Electron, no shell, no login item.
+// CLEAT_ variables cross into Windows and back through WSLENV. No Electron, no shell, no login item.
 // It exits 0 when wsl.exe has returned, the runner still answers /health afterwards as a process of
 // its own, and it got a PATH from the login shell. It stops that runner and removes the folder.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,10 +25,10 @@ if (!wsl) {
   process.exit(1);
 }
 
-const dir = mkdtempSync(join(tmpdir(), "holm-smoke-start-"));
+const dir = mkdtempSync(join(tmpdir(), "cleat-smoke-start-"));
 mkdirSync(join(dir, "work"));
-const env = { HOLM_CONFIG: join(dir, "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0", HOLM_FAKE_AGENT: "1" };
-writeFileSync(env.HOLM_CONFIG, JSON.stringify({ workspaces: [{ name: "work", path: join(dir, "work") }] }));
+const env = { CLEAT_CONFIG: join(dir, "config.json"), CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0", CLEAT_FAKE_AGENT: "1" };
+writeFileSync(env.CLEAT_CONFIG, JSON.stringify({ workspaces: [{ name: "work", path: join(dir, "work") }] }));
 
 const { file, args } = runnerCommand(wsl);
 console.log(`${file} ${JSON.stringify(args)}`);
@@ -42,8 +42,8 @@ try {
   if (code !== 0) bad.push(`wsl.exe exited ${code}`);
   // wsl.exe is gone. The runner must not have gone with it.
   await new Promise((resolve) => setTimeout(resolve, 3000));
-  const pid = Number(readFileSync(join(env.HOLM_DATA_DIR, PID_FILE), "utf8"));
-  const url = readFileSync(join(env.HOLM_DATA_DIR, URL_FILE), "utf8").trim();
+  const pid = Number(readFileSync(join(env.CLEAT_DATA_DIR, PID_FILE), "utf8"));
+  const url = readFileSync(join(env.CLEAT_DATA_DIR, URL_FILE), "utf8").trim();
   if (!isRunner(pid)) bad.push(`pid ${pid} is not a running runner three seconds after wsl.exe returned`);
   if (!(await answers(url))) bad.push(`nothing answers at ${url} three seconds after wsl.exe returned`);
   if (isRunner(pid)) {
@@ -53,7 +53,7 @@ try {
     // The login shell's PATH holds the folder bun is in, on a machine where bun was installed for the person.
     if (!path.split(":").some((folder) => wsl.bun.startsWith(`${folder}/`))) bad.push("the runner's PATH does not hold bun's folder: the login shell's environment did not arrive");
   }
-  console.log(`the runner's log:\n${readFileSync(join(env.HOLM_DATA_DIR, LOG_FILE), "utf8").trim()}`);
+  console.log(`the runner's log:\n${readFileSync(join(env.CLEAT_DATA_DIR, LOG_FILE), "utf8").trim()}`);
 } catch (e) {
   bad.push(e instanceof Error ? e.message : String(e));
 } finally {

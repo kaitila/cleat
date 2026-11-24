@@ -5,7 +5,7 @@ A session runs on one of two agents: **Claude Code** (the default) or **OpenAI C
 | | Claude Code | Codex |
 |---|---|---|
 | Driver | `agent-claude.ts`, the Claude Agent SDK's `query()` | `agent-codex.ts`, the Codex SDK (`@openai/codex-sdk`), which runs the `codex exec --experimental-json` it brings and reads its events |
-| Login | Claude Code's (`holm login`, which runs the Agent SDK's Claude Code's `auth login`) | Codex's (`holm login codex`, kept in `~/.codex`) |
+| Login | Claude Code's (`cleat login`, which runs the Agent SDK's Claude Code's `auth login`) | Codex's (`cleat login codex`, kept in `~/.codex`) |
 | New conversation, resume | a Claude Code session id; a reply resumes it | a Codex thread id (stored in `claudeSessionId`); a reply resumes the thread (`resumeThread`) |
 | Streaming | text deltas as Claude Code writes | Codex sends a message only once it is complete, so the text arrives in one piece (a message that grows would stream as deltas) |
 | Tools in the chat | Claude Code's tool calls | a command is `Bash` (`{ command }`), a file change is `Edit` (`{ changes: [{ path, kind }] }`), an MCP call is `mcp__<server>__<tool>`, a web search is `WebSearch`, each with its `tool_result`. Reasoning and the to-do list are left out |
@@ -21,7 +21,7 @@ A session runs on one of two agents: **Claude Code** (the default) or **OpenAI C
 - `POST /api/sessions` takes an optional `agent` that overrides both for that session.
 - The pages ([D0034](decisions/D0034-agent-choice-in-the-pages.md)): the pop-up and the snip have an agent switch beside the workspace that starts on the workspace's agent (`GET /api/workspaces` gives each its `agent`); a click or **Alt+A** flips it, the flip holds for that pop-up whichever workspace is picked after, and the task goes with `agent` set to what it shows. The task box asks "What should Codex do?" when it is Codex. The settings page has the default agent (Agents) and each workspace's own (Default agent, Claude Code or Codex), and a line per agent from `GET /api/agents`: what it needs and what doctor found, red when sessions would run on an agent that can't, amber when nothing uses it. The chat view and the dock put the agent's glyph on each session's row (Claude Code an eight-ray spark, Codex a hexagon; the name only as the tooltip) and name the agent in the session's head.
 - The session keeps its agent (`SessionMeta.agent`) for good: every reply goes to it, whatever the config says by then. A session stored before agents existed is Claude Code's. One imported from the terminal is the agent whose transcript it came from: a Codex thread is `codex`, whatever the workspace's `agent` says.
-- With `HOLM_FAKE_AGENT=1` (tests, CI) the fake agent stands in for both.
+- With `CLEAT_FAKE_AGENT=1` (tests, CI) the fake agent stands in for both.
 
 ## Approvals
 `codex exec`, which the SDK runs, can't ask the host anything: the SDK has no approval callback, and Codex tells the model that escalation requests are not available in this environment. So with Codex no call ever waits for the person, in either mode. What keeps it safe is Codex's own sandbox: in `auto` it can write inside the workspace and nowhere else, without the network; in `default` it can only read. A call the sandbox blocks fails (a `tool_result` with `isError: true`, as "read-only file system") and the model is told. The runner never passes `danger-full-access`, the `never` approval policy or any bypass flag; the mapping is one function, `codexPermissions()`, with unit tests.
@@ -35,10 +35,10 @@ Codex writes every thread, the runner's and a terminal's (`codex`, `codex exec`,
 - A thread that grows while the runner isn't running its turn streams, shows `running` with `terminalTurn`, and goes idle 5 seconds after the turn's end. A reply within two minutes of another process's write needs `force`, as for Claude Code.
 - Nothing writes under `~/.codex`: the runner's own turns go through the SDK, and a rename in the runner stays the runner's (the thread keeps its name in Codex; a new name given there replaces the runner's).
 - The format is Codex's own, not a documented interface: it was read from real files of codex 0.167.1 and 0.169.0. After a Codex upgrade, run `scripts/smoke-codex-sync.ts`.
-- "Continue in terminal" (the chat view and the dock, `resumeCommand` in `src/web/chat-format.js`) copies `cd <cwd> && codex resume <thread id>` for a Codex session, and `holm resume` runs `codex resume <thread id>` in its folder (`claude --resume <id>` for the rest). A Codex session without a thread yet says "no Codex thread yet". The form is from `codex resume --help` (codex 0.167.1): `codex resume [SESSION_ID]`.
+- "Continue in terminal" (the chat view and the dock, `resumeCommand` in `src/web/chat-format.js`) copies `cd <cwd> && codex resume <thread id>` for a Codex session, and `cleat resume` runs `codex resume <thread id>` in its folder (`claude --resume <id>` for the rest). A Codex session without a thread yet says "no Codex thread yet". The form is from `codex resume --help` (codex 0.167.1): `codex resume [SESSION_ID]`.
 
 ## doctor
-`holm doctor` reports **Codex** (the version of the `codex` binary the SDK runs, the one `@openai/codex` installs for this platform) and **Codex login** (`codex login status`). Both are optional: they never make doctor fail. `GET /api/agents` (`src/runner/agent-status.ts`) asks the same commands, for Claude Code and Codex, so the settings page shows the same answers.
+`cleat doctor` reports **Codex** (the version of the `codex` binary the SDK runs, the one `@openai/codex` installs for this platform) and **Codex login** (`codex login status`). Both are optional: they never make doctor fail. `GET /api/agents` (`src/runner/agent-status.ts`) asks the same commands, for Claude Code and Codex, so the settings page shows the same answers.
 
 ## Tested where
 - `test/runner/codex.test.ts` (CI): the permission mapping, the reduction of every Codex event kind, and the driver's start, resume, Stop and failure against a stand-in for the SDK.

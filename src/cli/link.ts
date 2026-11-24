@@ -1,10 +1,10 @@
-// `holm link` and `unlink`: a symlink named holm, in a folder on the PATH, to src/cli.ts.
+// `cleat link` and `unlink`: a symlink named cleat, in a folder on the PATH, to src/cli.ts.
 // bun runs a linked script from its real path, so the command finds the repo from any folder.
 import { existsSync, lstatSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { OLD_NAME } from "../shared/legacy";
+import { OLD_NAMES } from "../shared/legacy";
 
-export const LINK_NAME = "holm";
+export const LINK_NAME = "cleat";
 /** The script the link points to: this checkout's src/cli.ts. */
 export const CLI = join(import.meta.dir, "..", "cli.ts");
 
@@ -44,12 +44,14 @@ export function onPath(dir: string, env: Env = process.env): boolean {
   return (env.PATH ?? "").split(delimiter).some((p) => p !== "" && (real(p) ?? resolve(p)) === want);
 }
 
-/** Removes the link under the command's name from before the rename (D0043), when it is ours: one command, not two. */
+/** Removes the links under the command's names from before the renames (D0043, D0048; shared/legacy.ts), when they are ours: one command, not three. */
 function dropOldLink(folder: string, log: Log): void {
-  const old = join(folder, OLD_NAME);
-  if (found(old).kind !== "ours") return;
-  rmSync(old);
-  log(`removed ${old}: the command is ${LINK_NAME} now`);
+  for (const { name } of OLD_NAMES) {
+    const old = join(folder, name);
+    if (found(old).kind !== "ours") continue;
+    rmSync(old);
+    log(`removed ${old}: the command is ${LINK_NAME} now`);
+  }
 }
 
 /** Makes the link in `dir`. Returns the exit code: 1 when something that is not ours is in its place. */

@@ -52,15 +52,15 @@ export interface Config {
   settings: StoredSettings;
   dataDir: string;
   configPath: string;
-  /** HOLM_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
+  /** CLEAT_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
   fakeAgent: boolean;
-  /** HOLM_BUILD_ID: the build id the runner reports and `start` expects, instead of the hash of the code (tests only). */
+  /** CLEAT_BUILD_ID: the build id the runner reports and `start` expects, instead of the hash of the code (tests only). */
   buildId: string | null;
 }
 
 export const DEFAULT_CONFIG = {
   port: DEFAULT_PORT,
-  // None: the first run, `holm setup` and the Settings window ask for them.
+  // None: the first run, `cleat setup` and the Settings window ask for them.
   workspaces: [] as { name: string; path: string }[],
 };
 
@@ -80,8 +80,8 @@ export function expandHome(path: string): string {
 }
 
 export function configPath(env: Record<string, string | undefined> = process.env): string {
-  // The default folder is ~/.config/holm, moved there once from its old name (legacy.ts).
-  return resolve(expandHome(env.HOLM_CONFIG ?? join(runnerFolders(env).config, "config.json")));
+  // The default folder is ~/.config/cleat, moved there once from its old name (legacy.ts).
+  return resolve(expandHome(env.CLEAT_CONFIG ?? join(runnerFolders(env).config, "config.json")));
 }
 
 /** The index of the first workspace whose name an earlier one has, or null. */
@@ -134,12 +134,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!parsed.success) throw new Error(`${path}: ${z.prettifyError(parsed.error)}`);
   const twice = duplicateWorkspace(parsed.data.workspaces);
   if (twice !== null) throw new Error(`${path}: workspace "${parsed.data.workspaces[twice]!.name}" is listed twice`);
-  // The default folder is ~/.local/share/holm, moved there once from its old name (legacy.ts).
-  const dataDir = resolve(expandHome(env.HOLM_DATA_DIR ?? runnerFolders(env).data));
+  // The default folder is ~/.local/share/cleat, moved there once from its old name (legacy.ts).
+  const dataDir = resolve(expandHome(env.CLEAT_DATA_DIR ?? runnerFolders(env).data));
   mkdirSync(dataDir, { recursive: true });
   const { port, ...settings } = parsed.data;
   const config: Config = {
-    port: env.HOLM_PORT !== undefined ? Number(env.HOLM_PORT) : port,
+    port: env.CLEAT_PORT !== undefined ? Number(env.CLEAT_PORT) : port,
     workspaces: [],
     permissionMode: settings.permissionMode,
     workspaceModes: {},
@@ -148,8 +148,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     settings,
     dataDir,
     configPath: path,
-    fakeAgent: env.HOLM_FAKE_AGENT === "1",
-    buildId: env.HOLM_BUILD_ID || null,
+    fakeAgent: env.CLEAT_FAKE_AGENT === "1",
+    buildId: env.CLEAT_BUILD_ID || null,
   };
   applySettings(config, settings);
   return config;

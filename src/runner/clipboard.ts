@@ -1,7 +1,7 @@
 // The clipboard handoff: the shell posts what it captured on the hotkey, the runner keeps the latest
 // capture in memory, and the pop-up asks for it. An image arrives as the path of a PNG the shell saved.
 // windows-wsl: a Windows path, stored as its WSL path under /mnt/<drive>/, which is what Claude reads.
-// macOS and Linux: the shell runs on this machine and saves into <temp>/holm/; only a PNG there is taken.
+// macOS and Linux: the shell runs on this machine and saves into <temp>/cleat/; only a PNG there is taken.
 import { closeSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, posix } from "node:path";
@@ -13,26 +13,26 @@ export const MAX_TEXT = 20_000;
 /** Where WSL mounts the Windows drives: /mnt/c is C:\. */
 export const MOUNTS = "/mnt";
 
-export const NOT_AN_IMAGE = "imagePath must be an existing .png the shell saved: under /mnt/<drive>/ for Windows with WSL, in <temp>/holm/ on macOS and Linux";
+export const NOT_AN_IMAGE = "imagePath must be an existing .png the shell saved: under /mnt/<drive>/ for Windows with WSL, in <temp>/cleat/ on macOS and Linux";
 
 /**
  * Which image paths a runner takes. `mounts`: a Windows or WSL path under <mounts>/<drive>/ (windows-wsl).
- * `folder`: a file directly in one folder, the shell's <temp>/holm/ (macOS and Linux, where the
+ * `folder`: a file directly in one folder, the shell's <temp>/cleat/ (macOS and Linux, where the
  * shell and the runner share the machine and its temp folder). A bare string is a `mounts` rule.
  */
 export type ImageRule = string | { kind: "mounts"; mounts: string } | { kind: "folder"; folder: string };
 
-/** Where the shell saves clips and snips on a native layout: the OS temp folder's holm/, as Electron's app.getPath("temp") gives it. */
+/** Where the shell saves clips and snips on a native layout: the OS temp folder's cleat/, as Electron's app.getPath("temp") gives it. */
 export function nativeImageFolder(): string {
-  return join(tmpdir(), "holm");
+  return join(tmpdir(), "cleat");
 }
 
-/** The rule for a layout: /mnt for windows-wsl, the temp folder's holm/ for macOS and Linux. */
+/** The rule for a layout: /mnt for windows-wsl, the temp folder's cleat/ for macOS and Linux. */
 export function imageRuleFor(layout: Layout): ImageRule {
   return layout === "windows-wsl" ? { kind: "mounts", mounts: MOUNTS } : { kind: "folder", folder: nativeImageFolder() };
 }
 
-/** This machine's rule, from its layout (HOLM_PLATFORM when set). */
+/** This machine's rule, from its layout (CLEAT_PLATFORM when set). */
 export function defaultImageRule(): ImageRule {
   return imageRuleFor(detectLayout());
 }

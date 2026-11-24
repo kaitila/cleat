@@ -28,7 +28,7 @@ async function settings(r: TestRunner): Promise<Settings> {
   return (await res.json()) as Settings;
 }
 
-const file = (r: TestRunner) => r.env.HOLM_CONFIG!;
+const file = (r: TestRunner) => r.env.CLEAT_CONFIG!;
 
 const SHELL = { hotkey: "Alt+Space", snipHotkey: "Alt+Shift+S", dock: true, startOnLogin: false };
 

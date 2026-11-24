@@ -212,7 +212,7 @@ describe("the contract with the shell", () => {
 
   test("the bridge is used for setState, onChat and onChatKey and nothing else, and the page works without it", () => {
     const js = noComments(source("dock.js"));
-    expect(js.match(/holmDock[?.\w]*/g)).toEqual(["holmDock?.setState", "holmDock?.onChat?.", "holmDock?.onChatKey?."]);
+    expect(js.match(/cleatDock[?.\w]*/g)).toEqual(["cleatDock?.setState", "cleatDock?.onChat?.", "cleatDock?.onChatKey?."]);
   });
 
   test("New task is a new window on /prompt; Open in chat grows the island into the chat, not a window (D0042)", () => {
@@ -293,7 +293,7 @@ describe("the chat: the island grown large (D0042)", () => {
   test("the chat view knows it is in the dock: dark, no backdrop, links as windows, Esc and its button step down, the keyboard only while shown", () => {
     const js = noComments(source("chat.js"));
     expect(js).toContain('new URLSearchParams(location.search).get("embed") === "dock"');
-    expect(js).toContain('window.parent.postMessage({ holmEmbed: "down" }, location.origin)');
+    expect(js).toContain('window.parent.postMessage({ cleatEmbed: "down" }, location.origin)');
     expect(js).toMatch(/if \(enabled && active\)/);
     expect(js).toContain("if (push && !EMBED) history.pushState");
     expect(source("chat.html")).toMatch(/<button id="collapse" class="collapse quiet" type="button" aria-label="Back to the dock" title="Back to the dock \(Esc\)" hidden>/);
@@ -301,9 +301,9 @@ describe("the chat: the island grown large (D0042)", () => {
 });
 
 describe("what the pill says", () => {
-  test("nothing going on: 'holm', without a dot", () => {
-    expect(pillOf([])).toEqual({ tone: "none", text: "Holm", status: null, failed: false });
-    expect(pillOf([session("a", "idle")])).toEqual({ tone: "none", text: "Holm", status: null, failed: false });
+  test("nothing going on: 'cleat', without a dot", () => {
+    expect(pillOf([])).toEqual({ tone: "none", text: "Cleat", status: null, failed: false });
+    expect(pillOf([session("a", "idle")])).toEqual({ tone: "none", text: "Cleat", status: null, failed: false });
   });
 
   test("running sessions are counted, with the running dot", () => {
@@ -500,7 +500,7 @@ describe("the open dock's hotkeys", () => {
     const now = Date.parse(at(0));
     const made = (minutesAgo: number, source?: string) => ({ createdAt: at(minutesAgo), ...(source ? { source } : {}) });
     expect(justStarted(made(0), false, now)).toBe(true);
-    expect(justStarted(made(0, "holm"), false, now)).toBe(true);
+    expect(justStarted(made(0, "cleat"), false, now)).toBe(true);
     expect(justStarted(made(0), true, now)).toBe(false);
     expect(justStarted(made(0, "terminal"), false, now)).toBe(false);
     expect(justStarted(made(1), false, now)).toBe(false);

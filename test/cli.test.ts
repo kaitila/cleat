@@ -57,10 +57,10 @@ describe("the ui", () => {
     }, () => ({ state: "ok" }));
     expect(out).toBe("✗ Step: broke\n");
     out = "";
-    ui.intro("holm setup");
+    ui.intro("cleat setup");
     ui.step(1, "Requirements");
     ui.outro("done");
-    expect(out).toBe("holm setup\n\n\n1. Requirements\n\ndone\n");
+    expect(out).toBe("cleat setup\n\n\n1. Requirements\n\ndone\n");
   });
 
   test("on a terminal a spinner redraws one line, hides the cursor and shows it again, and fits the width", async () => {
@@ -106,8 +106,8 @@ describe("hotkeys", () => {
 
 describe("every command into a pipe", () => {
   function env() {
-    const dir = mkdtempSync(join(tmpdir(), "holm-cli-"));
-    return { ...process.env, HOLM_CONFIG: join(dir, "config.json"), HOLM_DATA_DIR: join(dir, "data"), HOLM_PORT: "0", HOLM_PLATFORM: "linux", XDG_DATA_HOME: join(dir, "share"), XDG_CONFIG_HOME: join(dir, "xdg"), HOME: join(dir, "home"), DISPLAY: "", WAYLAND_DISPLAY: "" };
+    const dir = mkdtempSync(join(tmpdir(), "cleat-cli-"));
+    return { ...process.env, CLEAT_CONFIG: join(dir, "config.json"), CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0", CLEAT_PLATFORM: "linux", XDG_DATA_HOME: join(dir, "share"), XDG_CONFIG_HOME: join(dir, "xdg"), HOME: join(dir, "home"), DISPLAY: "", WAYLAND_DISPLAY: "" };
   }
   const run = (words: string[], extra: Record<string, string | undefined> = {}) => {
     const p = Bun.spawnSync([process.execPath, CLI, ...words], { cwd: REPO, env: { ...env(), ...extra }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -150,6 +150,6 @@ describe("every command into a pipe", () => {
     expect(p.exitCode).toBe(2);
     expect(p.stdout.toString()).toContain("pass --yes to take every default");
     expect(p.stdout.toString()).not.toContain("\x1b");
-    expect(existsSync(e.HOLM_CONFIG)).toBe(false);
+    expect(existsSync(e.CLEAT_CONFIG)).toBe(false);
   });
 });

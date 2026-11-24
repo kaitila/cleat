@@ -1,4 +1,4 @@
-// `holm resume`: which session it picks, and what it runs where. Claude Code is never run:
+// `cleat resume`: which session it picks, and what it runs where. Claude Code is never run:
 // the command is handed to a stand-in, and the real spawner runs only bun.
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -12,13 +12,13 @@ afterAll(() => {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 function tempDir(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), "holm-resume-")));
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "cleat-resume-")));
   dirs.push(dir);
   return dir;
 }
 
 function meta(id: string, claudeSessionId: string | null, updatedAt: string, cwd = `/work/${id}`): SessionMeta {
-  return { id, claudeSessionId, workspace: "w", cwd, title: `title ${id}`, source: "holm", status: "idle", createdAt: updatedAt, updatedAt, lastSeq: 1 };
+  return { id, claudeSessionId, workspace: "w", cwd, title: `title ${id}`, source: "cleat", status: "idle", createdAt: updatedAt, updatedAt, lastSeq: 1 };
 }
 
 const sessions = [
@@ -71,7 +71,7 @@ describe("a Codex session", () => {
     expect("error" in listed && listed.error).toContain("title eeee6666-0000 (w, no Codex thread yet)");
     expect("error" in listed && listed.error).toContain("title cccc4444-0000 (w, no Claude Code session yet)");
   });
-  test("holm resume runs codex resume in the session's folder", async () => {
+  test("cleat resume runs codex resume in the session's folder", async () => {
     const ran: { cmd: string[]; cwd: string }[] = [];
     const code = await resume("dddd", {}, () => {}, {
       sessions: async () => mixed,

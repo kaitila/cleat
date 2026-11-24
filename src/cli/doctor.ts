@@ -1,4 +1,4 @@
-// `holm doctor`: which layout this is, and whether each prerequisite and part is there, each with a one-line fix.
+// `cleat doctor`: which layout this is, and whether each prerequisite and part is there, each with a one-line fix.
 // The probes are passed in, so tests check the report without the machine's own git or Claude Code.
 import { existsSync, readFileSync } from "node:fs";
 import { claudeBinary } from "../runner/agent-claude";
@@ -15,7 +15,7 @@ type Log = (line: string) => void;
 export interface Check {
   name: string;
   ok: boolean;
-  /** Something needed: doctor exits 1 when it is not ok. The rest are parts `holm up` brings up. */
+  /** Something needed: doctor exits 1 when it is not ok. The rest are parts `cleat up` brings up. */
   needed: boolean;
   /** What was found: a version, a path, or why it is missing. */
   detail: string;
@@ -102,13 +102,13 @@ export function prerequisites(platform: Platform, probes: Pick<Probes, "output" 
     ok: claude !== null,
     needed: true,
     detail: claude === null ? "not found" : cmd === "claude" ? claude : `${claude}, the Agent SDK's`,
-    fix: "`holm update` installs it again with the app (the Agent SDK brings Claude Code)",
+    fix: "`cleat update` installs it again with the app (the Agent SDK brings Claude Code)",
   });
 
   if (claude !== null) {
     const status = probes.output([cmd, "auth", "status"]);
     const loggedIn = status !== null && /"loggedIn"\s*:\s*true/.test(status);
-    add({ name: "Claude Code login", ok: loggedIn, needed: true, detail: loggedIn ? "logged in" : "not logged in", fix: "log in: `holm login`" });
+    add({ name: "Claude Code login", ok: loggedIn, needed: true, detail: loggedIn ? "logged in" : "not logged in", fix: "log in: `cleat login`" });
   }
   return out;
 }
@@ -118,11 +118,11 @@ export function codexChecks(probes: Pick<Probes, "output" | "codex">): Check[] {
   const out: Check[] = [];
   const codex = probes.codex();
   const codexVersion = codex === null ? null : probes.output([codex, "--version"]);
-  out.push({ name: "Codex", ok: codexVersion !== null, needed: false, detail: codexVersion ?? "not installed", fix: "`holm update` installs it again with the app (the Codex SDK brings it); only needed for sessions on Codex" });
+  out.push({ name: "Codex", ok: codexVersion !== null, needed: false, detail: codexVersion ?? "not installed", fix: "`cleat update` installs it again with the app (the Codex SDK brings it); only needed for sessions on Codex" });
   if (codexVersion !== null) {
     const status = probes.output([codex!, "login", "status"]);
     const loggedIn = status !== null && /^logged in/i.test(status);
-    out.push({ name: "Codex login", ok: loggedIn, needed: false, detail: loggedIn ? status! : "not logged in", fix: "log in: `holm login codex` (only needed for sessions on Codex)" });
+    out.push({ name: "Codex login", ok: loggedIn, needed: false, detail: loggedIn ? status! : "not logged in", fix: "log in: `cleat login codex` (only needed for sessions on Codex)" });
   }
   return out;
 }
@@ -137,15 +137,15 @@ export async function checks(platform: Platform, probes: Probes, env: Env = proc
 
   const unavailable = platform.unavailable(env);
   if (platform.layout === "windows-wsl") {
-    add({ name: "Windows", ok: unavailable === null, needed: true, detail: unavailable ?? "the Windows disk is at /mnt/c", fix: "run holm inside WSL 2, with the Windows disk mounted at /mnt/c" });
+    add({ name: "Windows", ok: unavailable === null, needed: true, detail: unavailable ?? "the Windows disk is at /mnt/c", fix: "run cleat inside WSL 2, with the Windows disk mounted at /mnt/c" });
   } else if (platform.layout === "linux") {
-    add({ name: "display", ok: unavailable === null, needed: false, detail: unavailable ?? (env.WAYLAND_DISPLAY ? `WAYLAND_DISPLAY=${env.WAYLAND_DISPLAY}` : `DISPLAY=${env.DISPLAY}`), fix: "run holm from a desktop session: the shell needs a display" });
+    add({ name: "display", ok: unavailable === null, needed: false, detail: unavailable ?? (env.WAYLAND_DISPLAY ? `WAYLAND_DISPLAY=${env.WAYLAND_DISPLAY}` : `DISPLAY=${env.DISPLAY}`), fix: "run cleat from a desktop session: the shell needs a display" });
   }
 
   out.push(...codexChecks(probes));
 
   const url = config.ok ? await probes.runner() : null;
-  add({ name: "runner", ok: url !== null, needed: false, detail: url ? `running at ${url}` : "not running", fix: "`holm start` (or `holm up`)" });
+  add({ name: "runner", ok: url !== null, needed: false, detail: url ? `running at ${url}` : "not running", fix: "`cleat start` (or `cleat up`)" });
 
   const installed = probes.shellInstalled();
   // windows-wsl asks Windows for the folder: without Windows there is none to name.
@@ -155,10 +155,10 @@ export async function checks(platform: Platform, probes: Probes, env: Env = proc
   } catch {
     folder = "the shell's folder (Windows could not be asked)";
   }
-  add({ name: "shell installed", ok: installed, needed: false, detail: installed ? folder : `not in ${folder}`, fix: "`holm shell install` (or `holm up`)" });
+  add({ name: "shell installed", ok: installed, needed: false, detail: installed ? folder : `not in ${folder}`, fix: "`cleat shell install` (or `cleat up`)" });
 
   const pid = installed ? probes.shellPid() : null;
-  add({ name: "shell running", ok: pid !== null, needed: false, detail: pid !== null ? `pid ${pid}` : "not running", fix: "`holm shell start` (or `holm up`)" });
+  add({ name: "shell running", ok: pid !== null, needed: false, detail: pid !== null ? `pid ${pid}` : "not running", fix: "`cleat shell start` (or `cleat up`)" });
 
   const onAtLogin = installed ? await probes.login() : null;
   add({
@@ -166,7 +166,7 @@ export async function checks(platform: Platform, probes: Probes, env: Env = proc
     ok: onAtLogin === true,
     needed: false,
     detail: onAtLogin === null ? (installed ? "could not be read" : "the shell is not installed") : onAtLogin ? (platform.login === "xdg-autostart" ? `on (${autostartFile(env)})` : "on") : "off",
-    fix: "`holm shell login on`",
+    fix: "`cleat shell login on`",
   });
   return out;
 }

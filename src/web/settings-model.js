@@ -163,23 +163,23 @@ export function setupLines(platform, reachable, shell = null) {
 
   if (!platform) lines.push({ key: "layout", name: "Layout", tone: "unknown", value: "Unknown", detail: "Shown once the runner answers." });
   else if (layout && LAYOUT_NAMES[layout]) lines.push({ key: "layout", name: "Layout", tone: "ok", value: LAYOUT_NAMES[layout][0], detail: LAYOUT_NAMES[layout][1] });
-  else lines.push({ key: "layout", name: "Layout", tone: "bad", value: "Unknown", detail: "HOLM_PLATFORM names no layout. Unset it, or set it to windows-wsl, macos or linux, then restart the runner: holm stop, then holm start." });
+  else lines.push({ key: "layout", name: "Layout", tone: "bad", value: "Unknown", detail: "CLEAT_PLATFORM names no layout. Unset it, or set it to windows-wsl, macos or linux, then restart the runner: cleat stop, then cleat start." });
 
   if (reachable && platform) lines.push({ key: "runner", name: "Runner", tone: "ok", value: "Running", detail: `Version ${platform.runner?.version ?? "unknown"}, on this machine's port.` });
-  else lines.push({ key: "runner", name: "Runner", tone: "bad", value: "Not reachable", detail: `Nothing answers on the runner's port. ${where}: holm up` });
+  else lines.push({ key: "runner", name: "Runner", tone: "bad", value: "Not reachable", detail: `Nothing answers on the runner's port. ${where}: cleat up` });
 
   const known = reachable && platform !== null;
   const connected = known && platform.shell?.connected === true;
   const report = connected ? (platform.shell.report ?? null) : null;
   if (!known) lines.push({ key: "shell", name: "Shell", tone: "unknown", value: "Unknown", detail: "Shown once the runner answers." });
   else if (connected) lines.push({ key: "shell", name: "Shell", tone: "ok", value: "Running", detail: report ? `On ${OS_NAMES[report.os] ?? report.os}: the tray, the shortcuts and the dock.` : "It hasn't said how it is yet." });
-  else lines.push({ key: "shell", name: "Shell", tone: "bad", value: "Not running", detail: `The tray, the shortcuts and the dock need it. ${where}: holm up (or holm shell start)` });
+  else lines.push({ key: "shell", name: "Shell", tone: "bad", value: "Not running", detail: `The tray, the shortcuts and the dock need it. ${where}: cleat up (or cleat shell start)` });
 
   const notYet = connected ? "It hasn't said yet." : "Shown while the shell runs.";
   if (!report) lines.push({ key: "startOnLogin", name: "Start at login", tone: "unknown", value: "Unknown", detail: notYet });
   else if (report.startOnLogin === true) lines.push({ key: "startOnLogin", name: "Start at login", tone: "ok", value: "On", detail: "The shell starts when you log in, and starts the runner." });
-  else if (report.startOnLogin === false) lines.push({ key: "startOnLogin", name: "Start at login", tone: "off", value: "Off", detail: "After a login nothing runs until you start it. Turn on Start at login below, or: holm shell login on" });
-  else lines.push({ key: "startOnLogin", name: "Start at login", tone: "bad", value: "Can't be read", detail: `The shell could not read it. ${where}: holm shell login status says why.` });
+  else if (report.startOnLogin === false) lines.push({ key: "startOnLogin", name: "Start at login", tone: "off", value: "Off", detail: "After a login nothing runs until you start it. Turn on Start at login below, or: cleat shell login on" });
+  else lines.push({ key: "startOnLogin", name: "Start at login", tone: "bad", value: "Can't be read", detail: `The shell could not read it. ${where}: cleat shell login status says why.` });
 
   if (report) {
     // A shell from before the chat's hotkey reports two (D0046).
@@ -193,7 +193,7 @@ export function setupLines(platform, reachable, shell = null) {
       lines.push({ key: "hotkeys", name: "Shortcuts", tone: "bad", value: "Not registered", detail: `${names}: another program holds the keys${wayland}. Pick other keys under Shortcuts.` });
     }
     if (report.dockTransparent === false) {
-      lines.push({ key: "dock", name: "Dock", tone: "off", value: "Opaque", detail: "No compositor here, so the dock is a small solid window. A desktop that composites (GNOME, KDE, Xfce and others) shows it as an island; HOLM_DOCK_OPAQUE=0 forces that." });
+      lines.push({ key: "dock", name: "Dock", tone: "off", value: "Opaque", detail: "No compositor here, so the dock is a small solid window. A desktop that composites (GNOME, KDE, Xfce and others) shows it as an island; CLEAT_DOCK_OPAQUE=0 forces that." });
     }
   }
 

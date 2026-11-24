@@ -191,7 +191,7 @@ describe("the workspace chip and the keys", () => {
   test("an error is the runner's own text, and the session body carries the snip's path", () => {
     expect(errorText(400, { error: " imagePath is refused " })).toBe("imagePath is refused");
     expect(errorText(500, null)).toBe("the runner answered 500");
-    expect(sessionBody("alpha", "what is this", "C:\\Users\\x\\AppData\\Local\\Temp\\holm\\snip-1.png")).toEqual({ workspace: "alpha", prompt: "what is this", imagePath: "C:\\Users\\x\\AppData\\Local\\Temp\\holm\\snip-1.png" });
+    expect(sessionBody("alpha", "what is this", "C:\\Users\\x\\AppData\\Local\\Temp\\cleat\\snip-1.png")).toEqual({ workspace: "alpha", prompt: "what is this", imagePath: "C:\\Users\\x\\AppData\\Local\\Temp\\cleat\\snip-1.png" });
     expect(sessionBody("alpha", "what is this", "/tmp/s.png", "codex")).toEqual({ workspace: "alpha", prompt: "what is this", imagePath: "/tmp/s.png", agent: "codex" });
     expect(sessionBody("alpha", "what is this", "/tmp/s.png", "gpt")).toEqual({ workspace: "alpha", prompt: "what is this", imagePath: "/tmp/s.png" });
   });

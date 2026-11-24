@@ -17,19 +17,19 @@ export const LAYOUTS: readonly Layout[] = ["windows-wsl", "macos", "linux"];
 type Env = Record<string, string | undefined>;
 
 /**
- * The layout: HOLM_PLATFORM when it names one (tests, and trying the linux layout under WSLg), else
+ * The layout: CLEAT_PLATFORM when it names one (tests, and trying the linux layout under WSLg), else
  * windows-wsl inside WSL (WSL_DISTRO_NAME, or "microsoft" in /proc/version), else from process.platform.
- * Throws for an HOLM_PLATFORM that names none, and for a platform holm has no layout for.
+ * Throws for a CLEAT_PLATFORM that names none, and for a platform cleat has no layout for.
  */
 export function detectLayout(env: Env = process.env, platform: string = process.platform, procVersion: () => string = readProcVersion): Layout {
-  const forced = env.HOLM_PLATFORM;
+  const forced = env.CLEAT_PLATFORM;
   if (forced !== undefined && forced !== "") {
     if ((LAYOUTS as readonly string[]).includes(forced)) return forced as Layout;
-    throw new Error(`HOLM_PLATFORM is ${JSON.stringify(forced)}: it must be one of ${LAYOUTS.join(", ")}`);
+    throw new Error(`CLEAT_PLATFORM is ${JSON.stringify(forced)}: it must be one of ${LAYOUTS.join(", ")}`);
   }
   if (platform === "darwin") return "macos";
   if (platform === "linux") return env.WSL_DISTRO_NAME || /microsoft/i.test(procVersion()) ? "windows-wsl" : "linux";
-  throw new Error(`holm has no layout for ${platform}: on Windows, run it inside WSL`);
+  throw new Error(`cleat has no layout for ${platform}: on Windows, run it inside WSL`);
 }
 
 function readProcVersion(): string {
@@ -159,8 +159,8 @@ function appData(layout: "macos" | "linux", env: Env = process.env): string {
 
 /** Where the shell is installed on a native layout: <home>/shell beneath it. */
 export function nativeHome(layout: "macos" | "linux", env: Env = process.env): string {
-  if (layout === "macos") return join(homedir(), "Library", "Application Support", "holm");
-  return join(env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "holm");
+  if (layout === "macos") return join(homedir(), "Library", "Application Support", "cleat");
+  return join(env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "cleat");
 }
 
 const PLATFORMS: Record<Layout, Platform> = {

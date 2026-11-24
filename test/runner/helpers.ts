@@ -30,17 +30,17 @@ export interface TestRunner extends Runner {
 export function testRunner(
   options: { dir?: string; driver?: AgentDriver; mounts?: string; permissionMode?: string; workMode?: string; agent?: string; workAgent?: string; sync?: Partial<SyncOptions>; ops?: TranscriptOps } = {},
 ): TestRunner {
-  const dir = options.dir ?? mkdtempSync(join(tmpdir(), "holm-runner-"));
+  const dir = options.dir ?? mkdtempSync(join(tmpdir(), "cleat-runner-"));
   const workspace = join(dir, "work");
   mkdirSync(workspace, { recursive: true });
   const env = {
-    HOLM_CONFIG: join(dir, "config.json"),
-    HOLM_DATA_DIR: join(dir, "data"),
-    HOLM_PORT: "0",
-    HOLM_FAKE_AGENT: "1",
+    CLEAT_CONFIG: join(dir, "config.json"),
+    CLEAT_DATA_DIR: join(dir, "data"),
+    CLEAT_PORT: "0",
+    CLEAT_FAKE_AGENT: "1",
   };
   writeFileSync(
-    env.HOLM_CONFIG,
+    env.CLEAT_CONFIG,
     JSON.stringify({
       ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
       ...(options.agent ? { agent: options.agent } : {}),

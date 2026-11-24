@@ -1,4 +1,4 @@
-// `holm update` and `holm login` (D0045): the steps they run, with the running faked.
+// `cleat update` and `cleat login` (D0045): the steps they run, with the running faked.
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,9 +7,9 @@ import { installKind, loginCommand, PACKAGE, packageName, parseLoginAgent, type 
 
 describe("update", () => {
   test("a folder with .git is a checkout; one in bun's global node_modules is the package; anything else is neither", () => {
-    const dir = mkdtempSync(join(tmpdir(), "holm-update-"));
+    const dir = mkdtempSync(join(tmpdir(), "cleat-update-"));
     expect(installKind(dir)).toBe("other");
-    const pkg = join(dir, "bun", "install", "global", "node_modules", "holm");
+    const pkg = join(dir, "bun", "install", "global", "node_modules", "cleat");
     mkdirSync(pkg, { recursive: true });
     expect(installKind(pkg)).toBe("package");
     mkdirSync(join(dir, ".git"));

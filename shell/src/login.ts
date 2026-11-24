@@ -1,7 +1,7 @@
 // Start on login: what Electron's login item settings are given. No Electron imports here.
 
 /** The app user model id. Windows ties toasts to it, and Electron names the login item's registry value after it. */
-export const APP_ID = "holm";
+export const APP_ID = "cleat";
 
 /** What `--login on|off|status` writes to its result file. */
 export interface LoginResult {
@@ -30,7 +30,7 @@ export function parseLogin(value: string | undefined): "on" | "off" | "status" |
 
 /** The XDG autostart file that starts the shell at login on Linux. */
 export function autostartFile(home: string, env: Record<string, string | undefined> = process.env): string {
-  return `${env.XDG_CONFIG_HOME || `${home}/.config`}/autostart/holm.desktop`;
+  return `${env.XDG_CONFIG_HOME || `${home}/.config`}/autostart/cleat.desktop`;
 }
 
 /** One argument of a .desktop file's Exec line: quoted, with ", `, $ and \ escaped, and % doubled. */
@@ -43,7 +43,7 @@ export function autostartEntry(exe: string, args: string[]): string {
   return [
     "[Desktop Entry]",
     "Type=Application",
-    "Name=Holm",
+    "Name=Cleat",
     "Comment=Fire tasks at Claude Code from a hotkey",
     `Exec=${[exe, ...args].map(execArg).join(" ")}`,
     "Terminal=false",
@@ -53,7 +53,7 @@ export function autostartEntry(exe: string, args: string[]): string {
 }
 
 /** The launchd agent's label, and its file's name under ~/Library/LaunchAgents. */
-export const LAUNCH_AGENT = "dev.holm.shell";
+export const LAUNCH_AGENT = "dev.cleat.shell";
 
 /** The launch agent that starts the shell at login on macOS. */
 export function launchAgentFile(home: string): string {
