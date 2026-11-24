@@ -14,6 +14,10 @@ import { installCurrentShell } from "./cli/up";
 import { errorText, makeUi, promptOutput, termOf, type State } from "./cli/ui";
 import { install, isInstalled, login, pidFile, prompt, removeShell, start, stop, stopAndWait, writeRunnerLocation } from "./shell/install";
 import { currentPlatform } from "./shell/platform";
+import { adoptLegacyEnv } from "./shared/legacy";
+
+// The environment variables' names from before the rename, for one release (D0043, shared/legacy.ts). Before anything reads the environment.
+adoptLegacyEnv();
 
 const term = termOf();
 const ui = makeUi({ term });

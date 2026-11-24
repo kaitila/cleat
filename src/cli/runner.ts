@@ -164,7 +164,7 @@ export interface StartOptions {
 
 /** Starts the runner detached, waits for /health and prints the URL. Returns the exit code. */
 export async function start(env: Env = process.env, log: Log = console.log, options: StartOptions = {}): Promise<number> {
-  const f = files(env);
+  let f = files(env);
   const want = buildId(f.config.buildId);
   const running = recorded(f);
   if (running) {
@@ -187,6 +187,8 @@ export async function start(env: Env = process.env, log: Log = console.log, opti
     }
     log(`the runner at ${running.url} (pid ${running.pid}) runs older code than this repo's: restarting it`);
     await kill(f, running.pid);
+    // A runner from before the rename ran from the old folders, which move now that it has stopped (runner/legacy.ts).
+    f = files(env);
   } else {
     const configured = configuredUrl(f.config);
     const build = configured ? await buildOf(configured) : null;

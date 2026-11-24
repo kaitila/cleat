@@ -5,6 +5,7 @@
 // Writes are synchronous, so two events can never get the same seq.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { storedSource } from "../shared/legacy";
 import type { SessionEvent, SessionMeta } from "../shared/protocol";
 import type { NewEvent } from "./agent";
 
@@ -38,8 +39,8 @@ export class Store {
     this.statePath = join(dataDir, "state.json");
     this.eventsDir = join(dataDir, "events");
     mkdirSync(this.eventsDir, { recursive: true });
-    // Sessions stored before `source` existed are all the runner's own.
-    for (const s of readJson<SessionMeta[]>(this.sessionsPath, [])) this.sessions.set(s.id, { ...s, source: s.source ?? "holm" });
+    // Sessions stored before `source` existed, and those stored under the runner's old name, are all its own.
+    for (const s of readJson<SessionMeta[]>(this.sessionsPath, [])) this.sessions.set(s.id, { ...s, source: storedSource(s.source, "holm") });
     this.state = { lastWorkspace: readJson<{ lastWorkspace?: string | null }>(this.statePath, {}).lastWorkspace ?? null };
     this.recover();
   }

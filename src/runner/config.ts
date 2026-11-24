@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import { AGENTS, DEFAULT_PORT, type AgentKind, type PermissionMode, type Settings, type Workspace } from "../shared/protocol";
+import { runnerFolders } from "./legacy";
 
 /** Only these two: every other SDK mode (the ones that allow calls without the classifier or the person) is refused when the config is read. */
 const Mode = z.enum(["auto", "default"]);
@@ -79,7 +80,8 @@ export function expandHome(path: string): string {
 }
 
 export function configPath(env: Record<string, string | undefined> = process.env): string {
-  return resolve(expandHome(env.HOLM_CONFIG ?? "~/.config/holm/config.json"));
+  // The default folder is ~/.config/holm, moved there once from its old name (legacy.ts).
+  return resolve(expandHome(env.HOLM_CONFIG ?? join(runnerFolders(env).config, "config.json")));
 }
 
 /** The index of the first workspace whose name an earlier one has, or null. */
@@ -132,7 +134,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!parsed.success) throw new Error(`${path}: ${z.prettifyError(parsed.error)}`);
   const twice = duplicateWorkspace(parsed.data.workspaces);
   if (twice !== null) throw new Error(`${path}: workspace "${parsed.data.workspaces[twice]!.name}" is listed twice`);
-  const dataDir = resolve(expandHome(env.HOLM_DATA_DIR ?? "~/.local/share/holm"));
+  // The default folder is ~/.local/share/holm, moved there once from its old name (legacy.ts).
+  const dataDir = resolve(expandHome(env.HOLM_DATA_DIR ?? runnerFolders(env).data));
   mkdirSync(dataDir, { recursive: true });
   const { port, ...settings } = parsed.data;
   const config: Config = {
