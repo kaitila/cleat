@@ -23,9 +23,16 @@ const REPO = "https://github.com/kaitila/intuition";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 describe("the build", () => {
-  test("writes the page, its stylesheet and script, the app's base.css and fonts, and no images", () => {
-    for (const file of ["index.html", "site.css", "site.js", "base.css", "fonts/geist-latin.woff2", "fonts/geist-mono-latin.woff2", "fonts/geist-LICENSE.txt"]) expect(files).toContain(file);
+  test("writes the page, its stylesheet and script, the app's base.css, fonts and mark, and no raster images", () => {
+    for (const file of ["index.html", "site.css", "site.js", "base.css", "mark.svg", "fonts/geist-latin.woff2", "fonts/geist-mono-latin.woff2", "fonts/geist-LICENSE.txt"]) expect(files).toContain(file);
     expect(files.filter((f) => /\.(png|jpe?g|webp|gif)$/.test(f))).toEqual([]);
+  });
+
+  test("the mark is the app's own, its favicon, and beside the name in the text's colour, never a status dot (D0044)", () => {
+    expect(read("mark.svg")).toBe(readFileSync(join(WEB, "mark.svg"), "utf8"));
+    expect(existsSync(join(SITE, "mark.svg"))).toBe(false);
+    expect(html).toContain('<link rel="icon" href="mark.svg" type="image/svg+xml">');
+    expect(html).toMatch(/<h1 class="name"><svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="16.5" cy="10" r="4.5"\/><rect x="2" y="16.5" width="20" height="4" rx="2"\/><\/svg>/);
   });
 
   test("base.css is the app's own, unchanged: the tokens come from it at build time", () => {
