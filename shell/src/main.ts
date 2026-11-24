@@ -1756,7 +1756,8 @@ async function selfTest(): Promise<SelfTestResult> {
     // Port 9 (discard): nothing answers /health there.
     settings = { ...settings, runnerUrl: "http://127.0.0.1:9" };
     try {
-      r.noWindowWithoutRunner = (await openPopup(true)) === null && BrowserWindow.getAllWindows().length === 0;
+      // Not counting the Mac's keyboard sink: a hidden window of no size, made when the dock gave the keyboard back (after "chat", D0042).
+      r.noWindowWithoutRunner = (await openPopup(true)) === null && BrowserWindow.getAllWindows().filter((w) => w !== keyboardSink).length === 0;
     } finally {
       settings = { ...settings, runnerUrl: real };
     }
