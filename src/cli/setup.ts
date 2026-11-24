@@ -183,12 +183,14 @@ export interface SetupOptions {
   login?: boolean;
   /** --permission-mode: auto, or default (ask for everything). */
   permissionMode?: PermissionMode;
-  /** --hotkey and --snip-hotkey: Electron accelerators. */
+  /** --hotkey, --snip-hotkey and --chat-hotkey: Electron accelerators. */
   hotkey?: string;
   snipHotkey?: string;
+  /** Not one of the flags a script must give: left out, the chat's hotkey is its default (D0046). */
+  chatHotkey?: string;
 }
 
-const VALUED = ["--workspace", "--link-dir", "--permission-mode", "--hotkey", "--snip-hotkey"];
+const VALUED = ["--workspace", "--link-dir", "--permission-mode", "--hotkey", "--snip-hotkey", "--chat-hotkey"];
 
 /**
  * The words after `setup`. Each valued flag takes the next word or `--flag=value`. An error says which
@@ -217,7 +219,7 @@ export function parseSetupArgs(words: string[], cwd = process.cwd()): { ok: true
       } else {
         const why = acceleratorError(value);
         if (why) return { ok: false, error: `${flag} ${value}: ${why}` };
-        options[flag === "--hotkey" ? "hotkey" : "snipHotkey"] = value.trim();
+        options[flag === "--hotkey" ? "hotkey" : flag === "--snip-hotkey" ? "snipHotkey" : "chatHotkey"] = value.trim();
       }
     } else return { ok: false, error: `unknown option: ${word}` };
   }
@@ -387,9 +389,11 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
   const defaults = defaultHotkeys(shellOsOf(platform));
   let hotkey = options.hotkey ?? current.shell?.hotkey ?? defaults.hotkey;
   let snipHotkey = options.snipHotkey ?? current.shell?.snipHotkey ?? defaults.snipHotkey;
+  let chatHotkey = options.chatHotkey ?? current.shell?.chatHotkey ?? defaults.chatHotkey;
   const shown = () => {
     ui.line(`New task   ${keycaps(hotkey, c, ui.term.color)}`);
     ui.line(`Snip       ${keycaps(snipHotkey, c, ui.term.color)}`);
+    ui.line(`Chat       ${keycaps(chatHotkey, c, ui.term.color)}`);
   };
   shown();
   if (!options.yes && (options.hotkey === undefined || options.snipHotkey === undefined)) {
@@ -406,6 +410,12 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
         const s = await ask.text({ message: "Snip hotkey", initial: snipHotkey, validate: (v) => validate(v) ?? (v.trim().toLowerCase() === hotkey.toLowerCase() ? "the new task hotkey is already this" : undefined) });
         if (s === CANCEL) return cancelled();
         snipHotkey = s.trim();
+      }
+      if (options.chatHotkey === undefined) {
+        const taken = (v: string) => (v.trim().toLowerCase() === hotkey.toLowerCase() ? "the new task hotkey is already this" : v.trim().toLowerCase() === snipHotkey.toLowerCase() ? "the snip hotkey is already this" : undefined);
+        const t = await ask.text({ message: "Chat hotkey (opens the chat in the notch)", initial: chatHotkey, validate: (v) => validate(v) ?? taken(v) });
+        if (t === CANCEL) return cancelled();
+        chatHotkey = t.trim();
       }
       shown();
     }
@@ -436,7 +446,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
   const results: { title: string; state: State; retry?: string }[] = [];
   const record = (title: string, state: State, retry?: string) => results.push({ title, state, retry });
 
-  const settings: StoredSettings = { ...current, permissionMode, workspaces, shell: { hotkey, snipHotkey, dock: current.shell?.dock ?? true, startOnLogin } };
+  const settings: StoredSettings = { ...current, permissionMode, workspaces, shell: { hotkey, snipHotkey, chatHotkey, dock: current.shell?.dock ?? true, startOnLogin } };
   const written = await ui.task(
     "Writing the config",
     async () => {
@@ -520,7 +530,7 @@ export async function setup(options: SetupOptions, platform: Platform, actions: 
   const next = [
     `${c.bold("Done.")} ${exit === 0 ? "holm is set up." : "Some steps need another try (above)."}`,
     "",
-    ...padded([keycaps(hotkey, c, ui.term.color), keycaps(snipHotkey, c, ui.term.color)]).map((k, i) => `${k}  ${i === 0 ? "a new task, from anywhere" : "snip a part of the screen"}`),
+    ...padded([hotkey, snipHotkey, chatHotkey].map((k) => keycaps(k, c, ui.term.color))).map((k, i) => `${k}  ${["a new task, from anywhere", "snip a part of the screen", "the chat in the notch, and back"][i]}`),
     "",
     unavailable ? `chat: ${url ?? "holm start, then open the URL it prints"}` : `chat: the tray icon${url ? `, or ${url}` : ""}`,
     `settings: the tray menu${url ? `, or ${url}/settings` : ""}`,

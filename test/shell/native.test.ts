@@ -33,8 +33,8 @@ describe("the OS", () => {
   });
 
   test("hotkeys: Command+Shift on a Mac, Control+Alt elsewhere", () => {
-    expect(defaultHotkeys("macos")).toEqual({ hotkey: "Command+Shift+Space", snipHotkey: "Command+Shift+S" });
-    for (const os of ["windows", "linux"] as const) expect(defaultHotkeys(os)).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S" });
+    expect(defaultHotkeys("macos")).toEqual({ hotkey: "Command+Shift+Space", snipHotkey: "Command+Shift+S", chatHotkey: "Command+Shift+J" });
+    for (const os of ["windows", "linux"] as const) expect(defaultHotkeys(os)).toEqual({ hotkey: "Control+Alt+Space", snipHotkey: "Control+Alt+S", chatHotkey: "Control+Alt+J" });
   });
 
   test("savedPathPattern: native paths are <temp>/holm/<kind>-<time>.png; Windows ones as before", () => {

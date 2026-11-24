@@ -60,6 +60,8 @@ export function chatSize(area: Pick<Area, "width" | "height">): Size {
 export const DOCK_CHANNEL = "holm-dock:set-state";
 /** The one message the shell sends the page: grow into the chat, on a session (its id) or on the page's own pick (null). */
 export const DOCK_CHAT_CHANNEL = "holm-dock:chat";
+/** The chat's hotkey was pressed: the page grows into the chat, or puts it away when it shows it (D0046). Nothing else rides on it. */
+export const DOCK_CHAT_KEY_CHANNEL = "holm-dock:chat-key";
 /** The preload's bundle, beside main.cjs in the app folder. */
 export const DOCK_PRELOAD = "dock-preload.cjs";
 /** How often the shell asks whether the runner is there, to hide the dock or bring it back. */

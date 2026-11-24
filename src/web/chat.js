@@ -40,7 +40,9 @@ import { resumeControl } from "./chat-resume.js";
 import { agentMark, agentName, agentOf, agentSvg, setAgentMark } from "./agent.js";
 import { renderMarkdown } from "./markdown.js";
 import { answersList, questionDecidedLabel, questionForm, questionsOf } from "./questions.js";
-import { commandK } from "./keys.js";
+import { commandK, MAC } from "./keys.js";
+import { guide, tip } from "./shortcuts.js";
+import { shortcutsSheet, tooltips } from "./shortcuts-sheet.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -650,6 +652,7 @@ function rowFor(session) {
   };
   row.more.type = "button";
   row.more.setAttribute("aria-label", "Session actions");
+  row.more.title = "Rename, pin, fork, archive or delete";
   row.more.setAttribute("aria-haspopup", "menu");
   row.more.addEventListener("click", () => openMenu(session.id, row.more));
   link.addEventListener("contextmenu", (e) => {
@@ -1141,6 +1144,11 @@ function onMessage(message) {
       streamed.set(message.sessionId, (streamed.get(message.sessionId) ?? "") + message.text);
       if (message.sessionId === selected) streamSoon(!loading);
       break;
+    case "settings":
+      shellKeys = message.settings?.shell ?? null;
+      renderTips();
+      if (sheet.isOpen) sheet.open();
+      break;
   }
 }
 
@@ -1171,20 +1179,53 @@ setInterval(() => {
   for (const [id, row] of rows) row.time.textContent = relativeTime(sessions.get(id)?.updatedAt ?? "", now);
 }, 30_000);
 
+// ---------- the keys (D0046) ----------
+
+/** The shell's part of the settings, for the global hotkeys in the tooltips and the guide. */
+let shellKeys = null;
+const keysButton = $("keys-button");
+/** Every shortcut: ? when the keyboard is not in a text box, or the ? in the sidebar's head. */
+const sheet = shortcutsSheet(document, document.body, {
+  sections: () => guide({ mac: MAC, shell: shellKeys }),
+  keys: () => active && !menu.isOpen && !els.confirm.open,
+});
+keysButton.addEventListener("click", () => sheet.toggle());
+tooltips(document, document.body);
+
+/** The tooltips that name a key, the global ones as the person recorded them. */
+function renderTips() {
+  const keys = { mac: MAC, shell: shellKeys };
+  document.querySelector(".sidebar .new-task").title = tip("New task", "hotkey", keys);
+  els.search.title = tip("Search sessions", "chat.find", keys);
+  if (EMBED) collapse.title = `${tip("Back to the dock", "chat.down", keys)}. ${tip("Close the chat", "chatHotkey", keys)}`;
+}
+renderTips();
+void fetch("/api/settings")
+  .then((res) => (res.ok ? res.json() : null))
+  .then((settings) => {
+    shellKeys = settings?.shell ?? null;
+    renderTips();
+  })
+  .catch(() => {});
+
+// ⌘K (Ctrl+K off a Mac) finds a session, as in the open dock.
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.isComposing || menu.isOpen || els.confirm.open || !commandK(e)) return;
+  e.preventDefault();
+  els.search.focus();
+  els.search.select();
+});
+
 // ---------- inside the dock (D0042) ----------
 
 if (EMBED) {
-  // Esc that nothing on the page took (the search, a menu, a rename and the confirmation take theirs
-  // first): back to the small dock. ⌘K (Ctrl+K off a Mac) finds a session, as in the open dock.
+  // Esc that nothing on the page took (the search, a menu, a rename, the confirmation and the
+  // shortcuts take theirs first): back to the small dock.
   document.addEventListener("keydown", (e) => {
     if (e.defaultPrevented || e.isComposing || menu.isOpen || els.confirm.open) return;
     if (e.key === "Escape") {
       e.preventDefault();
       stepDown();
-    } else if (commandK(e)) {
-      e.preventDefault();
-      els.search.focus();
-      els.search.select();
     }
   });
   /**
@@ -1206,6 +1247,7 @@ if (EMBED) {
       active = false;
       wantFocus = false;
       menu.close();
+      sheet.close(false);
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     },
     selected: () => selected,

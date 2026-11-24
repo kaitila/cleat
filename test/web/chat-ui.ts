@@ -78,6 +78,27 @@ let markdownId = "";
 const browser = await launch();
 const dir = mkdtempSync(join(tmpdir(), "holm-chat-ui-"));
 const shots = mkdtempSync(join(tmpdir(), "holm-chat-shots-"));
+
+/**
+ * The controls on the page that a person can't tell apart without a name or a tooltip: every visible
+ * button and link needs an accessible name, and one that is only a glyph (two characters or fewer, or
+ * none) needs a tooltip too (D0046).
+ */
+function unnamedControls(): string[] {
+  const out: string[] = [];
+  for (const el of document.querySelectorAll<HTMLElement>("button, a[href], [role=button], [role=menuitem]")) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0 || getComputedStyle(el).visibility === "hidden" || el.closest("[hidden], [inert]")) continue;
+    const words = (el.textContent ?? "").trim();
+    const labelled = el.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? "").join("") ?? "";
+    const name = el.getAttribute("aria-label") || labelled || words || el.title || el.dataset.tip;
+    const tooltip = el.title || el.dataset.tip;
+    if (!name) out.push(`no name: ${el.outerHTML.slice(0, 120)}`);
+    else if (words.length <= 2 && !labelled && !tooltip) out.push(`no tooltip: ${el.outerHTML.slice(0, 120)}`);
+  }
+  return out;
+}
+
 const hostileId = seed(join(dir, "data"));
 const api = testRunner({ dir });
 let runner: Runner = api;
@@ -142,6 +163,42 @@ try {
   await page.emulateMedia({ colorScheme: "dark" });
   await shot("chat-dark");
   await page.emulateMedia({ colorScheme: "light" });
+
+  // ---- the keyboard shortcuts (D0046): the ? in the sidebar's head, or ? itself ----
+  await page.locator("#keys-button").click();
+  await page.locator(".sheet:not([hidden])").waitFor();
+  const guideTitles = (await text(".sheet .guide-title")).join(",");
+  check(guideTitles === "Anywhere,Dock,Chat,New task and snip", `the ? button opens every shortcut: ${guideTitles}`);
+  const caps = async (key: string) => (await page.locator(`.sheet .guide-row[data-key="${key}"] .combo`).first().locator("kbd").allTextContents()).join("");
+  check((await caps("chatHotkey")) === "⌘⇧J" && (await caps("hotkey")) === "⌘⇧Space" && (await caps("chat.find")) === "⌘K", `with the defaults before the shell has sent its own, in a Mac's words (${await caps("hotkey")}, ${await caps("chatHotkey")})`);
+  await shot("chat-shortcuts-light");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await shot("chat-shortcuts-dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.keyboard.press("Escape");
+  check((await page.locator(".sheet:not([hidden])").count()) === 0, "Esc closes it");
+  await page.locator("#archived-view").focus();
+  await page.keyboard.press("Shift+Slash");
+  check((await page.locator(".sheet:not([hidden])").count()) === 1, "? opens it away from a text box");
+  await page.locator(".sheet-close").click();
+  check((await page.locator(".sheet:not([hidden])").count()) === 0, "and its Close button closes it");
+  await page.locator("#search").focus();
+  await page.keyboard.press("Shift+Slash");
+  check((await page.locator(".sheet:not([hidden])").count()) === 0 && (await page.locator("#search").inputValue()) === "?", "in the search ? is typed, not taken");
+  await page.locator("#search").fill("");
+  await page.locator("#search").dispatchEvent("input");
+  await page.locator("#reply-text").focus();
+  await page.keyboard.press("Meta+k");
+  check((await page.evaluate(() => document.activeElement?.id)) === "search", "⌘K finds a session in the chat window too");
+  // Tooltips: the page's own, with the keys.
+  await page.locator("#keys-button").hover();
+  await page.locator(".tip:not([hidden])").waitFor({ timeout: 2000 });
+  check((await page.locator(".tip").textContent()) === "Keyboard shortcuts (?)", "the ? button's tooltip says what it is and its key");
+  await page.locator(".sidebar .new-task").hover();
+  await page.waitForFunction(() => document.querySelector(".tip:not([hidden])")?.textContent === "New task (⌘⇧Space)", null, { timeout: 2000 });
+  check(true, "New task's tooltip has the global hotkey: New task (⌘⇧Space)");
+  const unnamed = await page.evaluate(unnamedControls);
+  check(unnamed.length === 0, `every button and link has a name, and every glyph-only one a tooltip (${unnamed.join("; ") || "all"})`);
 
   // ---- the agent: a quiet glyph on each row, and the head names it ----
   check((await page.locator('.session[aria-current="true"] .agent-mark').getAttribute("data-agent")) === "claude", "a Claude Code session's row has Claude Code's glyph");

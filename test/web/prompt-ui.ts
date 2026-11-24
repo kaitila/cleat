@@ -15,6 +15,7 @@ interface Page {
   goto(url: string): Promise<unknown>;
   evaluate<T>(fn: () => T): Promise<T>;
   click(selector: string): Promise<void>;
+  fill(selector: string, value: string): Promise<void>;
   waitForFunction(fn: () => unknown, arg?: unknown, options?: { timeout?: number }): Promise<unknown>;
   waitForEvent(event: "close", options?: { timeout?: number }): Promise<unknown>;
   screenshot(options: { path?: string; clip?: { x: number; y: number; width: number; height: number }; fullPage?: boolean }): Promise<Uint8Array>;
@@ -192,6 +193,8 @@ try {
     return keys.right <= window.innerWidth && sw.right <= window.innerWidth && document.querySelector(".keys")!.textContent!.includes("agent");
   });
   check("the hints name Alt+A for the agent, and they and the switch fit the window", keysFit);
+  const hint = await page.evaluate(() => [...document.querySelectorAll("#keys > *")].map((el) => el.textContent).join(" "));
+  check("the hint line is the guide's, in a Mac's words", hint === "Enter start ⇧ Enter new line ⌥ A agent Esc close", hint);
   await shot(page, "light-empty");
   const fonts = await page.evaluate(() => document.fonts.check('13px "Geist Variable"'));
   check("the interface font is loaded, from the runner's /assets/fonts", fonts && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-latin.woff2"), requested.join(" "));
@@ -343,15 +346,22 @@ try {
   const sentUser = sent ? await userTexts(sent.id) : [];
   check("the session's user event has the task, then the clipboard text under 'Clipboard:'", sentUser[0]?.text === `Explain this code\n\nClipboard:\n${COPIED}`, JSON.stringify(sentUser));
 
-  // Removed with Alt+Backspace: not sent, and the later polls don't bring it back.
+  // Removed with Backspace in the empty task (D0046): not sent, and the later polls don't bring it back.
+  // Option+Backspace and Backspace in a task with words are the text box's: they delete, nothing else.
   await post({ text: COPIED });
   const removedByKey = await open("dark");
   await removedByKey.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
   check("the capture is attached again on a new visit", !(await removedByKey.evaluate(clipState)).hidden);
   await shot(removedByKey, "dark-clipboard-text");
+  await removedByKey.keyboard.type("two words");
   await removedByKey.keyboard.press("Alt+Backspace");
+  await removedByKey.keyboard.press("Backspace");
   c = await removedByKey.evaluate(clipState);
-  check("Alt+Backspace removes the attachment", c.hidden && c.empty, JSON.stringify(c));
+  check("in a task with words, Option+Backspace and Backspace edit the text and keep the attachment", !c.hidden, JSON.stringify(c));
+  await removedByKey.fill("#task", "");
+  await removedByKey.keyboard.press("Backspace");
+  c = await removedByKey.evaluate(clipState);
+  check("Backspace in the empty task removes the attachment", c.hidden && c.empty, JSON.stringify(c));
   await Bun.sleep(2300);
   c = await removedByKey.evaluate(clipState);
   s = await removedByKey.evaluate(state);

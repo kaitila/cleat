@@ -43,6 +43,8 @@ export function validateSettings(body: unknown, current: StoredSettings): Stored
     const before = current.workspaces.find((c) => c.name === w.name)?.agent;
     if (before) w.agent = before;
   }
+  const clash = sameHotkey(settings.shell);
+  if (clash) return clash;
   const twice = duplicateWorkspace(settings.workspaces);
   if (twice !== null) return { field: `workspaces.${twice}.name`, error: `workspace "${settings.workspaces[twice]!.name}" is listed twice` };
   const known = new Set(current.workspaces.map((w) => w.path));
@@ -53,6 +55,26 @@ export function validateSettings(body: unknown, current: StoredSettings): Stored
     if (!isFolder(path)) return { field: `workspaces.${i}.path`, error: `no folder at ${w.path}` };
   }
   return settings;
+}
+
+const HOTKEY_NAMES = { hotkey: "New task", snipHotkey: "Snip", chatHotkey: "Chat" } as const;
+
+/**
+ * Two of the shell's hotkeys on the same keys, the later one named (D0046): the shell could register
+ * only one of them. Compared without case and spaces, as Electron reads accelerators.
+ */
+export function sameHotkey(shell: StoredSettings["shell"]): SettingsRefusal | null {
+  if (!shell) return null;
+  const seen = new Map<string, keyof typeof HOTKEY_NAMES>();
+  for (const key of ["hotkey", "snipHotkey", "chatHotkey"] as const) {
+    const value = shell[key];
+    if (!value) continue;
+    const norm = value.replace(/\s+/g, "").toLowerCase();
+    const first = seen.get(norm);
+    if (first) return { field: `shell.${key}`, error: `This is already the ${HOTKEY_NAMES[first]} shortcut.` };
+    seen.set(norm, key);
+  }
+  return null;
 }
 
 /**

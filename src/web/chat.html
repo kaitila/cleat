@@ -19,19 +19,21 @@
         <span class="brand"><svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="16.5" cy="10" r="4.5"/><rect x="2" y="16.5" width="20" height="4" rx="2"/></svg>Holm</span>
         <span class="sidebar-actions">
           <a class="new-task button quiet" href="/prompt">New task</a>
+          <!-- Every shortcut (D0046), as ? does. -->
+          <button id="keys-button" class="keys-button quiet" type="button" aria-label="Keyboard shortcuts" aria-haspopup="dialog" title="Keyboard shortcuts (?)">?</button>
           <!-- Only inside the dock (D0042): back to the small dock, as Esc. -->
           <button id="collapse" class="collapse quiet" type="button" aria-label="Back to the dock" title="Back to the dock (Esc)" hidden><svg class="collapse-mark" viewBox="0 0 16 16" stroke="currentColor" aria-hidden="true"><path d="M9.5 2.5v4h4M9.5 6.5l4.5-4.5M6.5 13.5v-4h-4M6.5 9.5 2 14"/></svg></button>
           <a class="settings-link button quiet" href="/assets/settings.html" aria-label="Settings" title="Settings"><svg class="gear" viewBox="0 0 16 16" stroke="currentColor" aria-hidden="true"><path d="M12.98 6.91L14.64 6.81L14.64 9.19L12.98 9.09L12.3 10.75L13.54 11.86L11.86 13.54L10.75 12.3L9.09 12.98L9.19 14.64L6.81 14.64L6.91 12.98L5.25 12.3L4.14 13.54L2.46 11.86L3.7 10.75L3.02 9.09L1.36 9.19L1.36 6.81L3.02 6.91L3.7 5.25L2.46 4.14L4.14 2.46L5.25 3.7L6.91 3.02L6.81 1.36L9.19 1.36L9.09 3.02L10.75 3.7L11.86 2.46L13.54 4.14L12.3 5.25Z"/><circle cx="8" cy="8" r="2.25"/></svg></a>
         </span>
       </div>
       <div class="finder">
-        <input id="search" class="input search" type="search" placeholder="Search" aria-label="Search sessions by title or workspace" autocomplete="off">
+        <input id="search" class="input search" type="search" placeholder="Search" aria-label="Search sessions by title or workspace" title="Search sessions (⌘K)" autocomplete="off">
         <div class="filters">
           <select id="workspace-filter" class="select quiet small filter" aria-label="Workspace">
             <button><selectedcontent></selectedcontent></button>
             <option value="">All workspaces</option>
           </select>
-          <button id="archived-view" class="quiet small" type="button" aria-pressed="false">Archived</button>
+          <button id="archived-view" class="quiet small" type="button" aria-pressed="false" title="Show the archived sessions">Archived</button>
         </div>
       </div>
       <p id="sessions-empty" class="sessions-empty muted small" hidden>No sessions yet.</p>
@@ -47,7 +49,7 @@
           <span id="workspace"></span>
           <span id="agent" class="agent"></span>
           <span id="status"></span>
-          <button id="stop" class="stop small" type="button" hidden>Stop</button>
+          <button id="stop" class="stop small" type="button" title="Stop the turn that runs" hidden>Stop</button>
         </p>
       </header>
       <div id="scroller" class="scroller">
