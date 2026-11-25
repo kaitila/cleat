@@ -11,6 +11,7 @@ import {
   decidedLabel,
   isOpenInTerminal,
   OPEN_IN_TERMINAL_HINT,
+  pagesChanged,
   relativeTime,
   replyState,
   resumeCommand,
@@ -1602,9 +1603,15 @@ try {
 
 let attempt = 0;
 
+/** The runner's build id from the first hello; another one later means new pages: reload (D0054). */
+let build = null;
+
 function onMessage(message) {
   switch (message?.type) {
     case "hello": {
+      // The chat in the island is its own page: it sees the same hello and reloads itself.
+      if (pagesChanged(build, message.build)) return location.reload();
+      build ??= message.build ?? null;
       attempt = 0;
       els.connection.hidden = true;
       sessions.clear();

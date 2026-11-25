@@ -109,7 +109,12 @@ export const ASK_USER_QUESTION = "AskUserQuestion";
 
 /** What the runner sends on the WebSocket at /ws. Clients send nothing. */
 export type ServerMessage =
-  | { type: "hello"; sessions: SessionMeta[] }
+  /**
+   * `build`: the runner's build id (a hash of the code and pages it serves). A page that sees it
+   * change on a reconnect reloads itself, so a runner restarted onto new pages never leaves an open
+   * window drawing the old ones (D0054).
+   */
+  | { type: "hello"; sessions: SessionMeta[]; build: string }
   | { type: "session"; session: SessionMeta }
   /** The session was deleted (POST .../delete): its record and events are gone. */
   | { type: "removed"; sessionId: string }

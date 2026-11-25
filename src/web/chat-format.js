@@ -234,6 +234,15 @@ export function unknownNote(event) {
   return oneLine(`${kind}${tool}${decision}`).slice(0, 120);
 }
 
+/**
+ * Whether a hello's build id says the runner now serves other pages than the ones this page loaded
+ * with (D0054): only when both are known and differ. The first hello, or a runner that sends none,
+ * is never a change.
+ */
+export function pagesChanged(known, given) {
+  return typeof known === "string" && known !== "" && typeof given === "string" && given !== "" && known !== given;
+}
+
 /** Delay before reconnect attempt number `attempt` (0, 1, 2...): 0.5 s doubling to 5 s. */
 export function backoffMs(attempt) {
   return Math.min(5000, 500 * 2 ** Math.max(0, attempt));

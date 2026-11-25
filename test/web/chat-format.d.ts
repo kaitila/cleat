@@ -12,6 +12,7 @@ declare module "*/web/chat-format.js" {
   export function toolLabelText(name: unknown): string;
   export const STEP_SOURCES: number;
   export function stepsSummary(names: string[]): { count: string; sources: string };
+  export function pagesChanged(known: unknown, given: unknown): boolean;
   export const WORKING_WORDS: string[];
   export function workingWord(random?: number): string;
   export const APPROVAL_MAX_CHARS: number;
