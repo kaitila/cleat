@@ -81,16 +81,9 @@
 
   <div class="bottom">
   <div class="page">
-    <h1 class="name"><svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="16.5" cy="10" r="4.5"/><rect x="2" y="16.5" width="20" height="4" rx="2"/></svg>Cleat</h1>
+    <!-- The Ledge, whose dot hops now and then (base.css, .mark-dot; D0052). -->
+    <h1 class="name"><svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle class="mark-dot" cx="16.5" cy="10" r="4.5"/><rect x="2" y="16.5" width="20" height="4" rx="2"/></svg>Cleat</h1>
     <p class="line">Claude Code and Codex, from the notch. Hand off a task with one key; every session waits up there until it needs you.</p>
-
-    <dl class="keys">
-      <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>Space</kbd></dt><dd>A task, with your clipboard attached</dd></div>
-      <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>S</kbd></dt><dd>A task about part of the screen</dd></div>
-      <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>J</kbd></dt><dd>The whole chat, grown out of the notch</dd></div>
-      <div><dt><span class="hover">Hover</span></dt><dd>Every session at a glance: read, reply, allow</dd></div>
-      <div><dt><kbd>?</kbd></dt><dd>Every other key, inside the app</dd></div>
-    </dl>
 
     <div class="install">
       <code id="install-line" class="install-line">curl -fsSL https://cleat.kaitila.dev/install.sh | sh</code>
@@ -99,11 +92,22 @@
     <p class="fine small muted">macOS, Linux, or Windows with WSL 2. The line brings bun, the app and its agents; you log in to Claude Code or Codex. It runs on your machine: nothing leaves it but what the agent sends.</p>
   </div>
 
-  <footer class="foot small muted">
-    <a href="https://github.com/kaitila/cleat">GitHub</a>
-    <a href="https://github.com/kaitila/cleat/blob/main/LICENSE">MIT licence</a>
-    <a href="https://github.com/kaitila/cleat/blob/main/SECURITY.md">Security</a>
-  </footer>
+  <!-- Beside the words: the keys (a desktop app's, left out on a phone), the links under them. -->
+  <div class="side-col">
+    <dl class="keys">
+      <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>Space</kbd></dt><dd>A task, with your clipboard attached</dd></div>
+      <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>S</kbd></dt><dd>A task about part of the screen</dd></div>
+      <div><dt><kbd data-other="Ctrl">Cmd</kbd><kbd data-other="Alt">Shift</kbd><kbd>J</kbd></dt><dd>The whole chat, grown out of the notch</dd></div>
+      <div><dt><span class="hover">Hover</span></dt><dd>Every session at a glance: read, reply, allow</dd></div>
+      <div><dt><kbd>?</kbd></dt><dd>Every other key, inside the app</dd></div>
+    </dl>
+
+    <footer class="foot small muted">
+      <a href="https://github.com/kaitila/cleat">GitHub</a>
+      <a href="https://github.com/kaitila/cleat/blob/main/LICENSE">MIT licence</a>
+      <a href="https://github.com/kaitila/cleat/blob/main/SECURITY.md">Security</a>
+    </footer>
+  </div>
   </div>
   </main>
 </body>

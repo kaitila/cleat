@@ -695,6 +695,19 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .working-dot { animation: breathe var(--dur-hop) var(--ease) infinite; }
 }
+/* The mark beside the name on the landing page (D0052): the same hop, now and then. The hop takes
+   the first quarter of four --dur-hop, the rest is a wait; under reduced motion it stays still. */
+.mark-dot { transform-box: fill-box; transform-origin: 50% 100%; }
+@media (prefers-reduced-motion: no-preference) {
+  .mark-dot { animation: hop-now-and-then calc(var(--dur-hop) * 4) linear var(--dur-hop) infinite; }
+}
+@keyframes hop-now-and-then {
+  0% { transform: none; animation-timing-function: ease-out; }
+  3% { transform: scale(1.12, 0.86); animation-timing-function: ease-out; }
+  10% { transform: translateY(calc(var(--rise) * -0.7)) scale(0.96, 1.05); animation-timing-function: ease-in; }
+  15.5% { transform: scale(1.16, 0.82); animation-timing-function: ease-out; }
+  18.5%, 100% { transform: none; }
+}
 .tool-body .label:not(:first-child) { margin-top: var(--space-2); }
 .tool-body pre { max-height: 50vh; overflow: auto; }
 .tool[data-error] .tool-result { border-color: var(--danger); }
