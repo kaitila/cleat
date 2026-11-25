@@ -31,7 +31,9 @@ import {
   WORKING_WORDS,
   workingWord,
   pagesChanged,
+  elapsedLabel,
 } from "../../src/web/chat-format.js";
+import { ICON_KEYS, iconKey } from "../../src/web/tool-icons.js";
 import { OPEN_IN_TERMINAL } from "../../src/shared/protocol";
 import { testRunner } from "../runner/helpers";
 
@@ -64,7 +66,9 @@ describe("served by the runner", () => {
 
   test("every module chat.js imports is one the runner serves", async () => {
     const imports = [...source("chat.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!);
-    expect(imports).toEqual(["chat-format.js", "chat-manage.js", "chat-resume.js", "agent.js", "markdown.js", "questions.js", "keys.js", "shortcuts.js", "shortcuts-sheet.js"]);
+    expect(imports).toEqual(["chat-format.js", "chat-manage.js", "chat-resume.js", "agent.js", "markdown.js", "questions.js", "keys.js", "shortcuts.js", "shortcuts-sheet.js", "tool-icons.js", "working.js"]);
+    expect([...source("working.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js", "tool-icons.js"]);
+    expect([...source("tool-icons.js").matchAll(/from "\.\/([^"]+)"/g)]).toEqual([]);
     expect([...source("chat-manage.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     expect([...source("chat-resume.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     for (const file of imports) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
@@ -98,12 +102,69 @@ describe("the working mark (D0051, D0053)", () => {
     for (let i = 0; i < 50; i++) expect(WORKING_WORDS.map((w) => `${w}…`)).toContain(workingWord());
   });
 
-  test("the chat and the dock both draw it: a template with the Ledge and its word, kept at the stream's end while a turn runs", () => {
-    for (const [page, script] of [["chat.html", "chat.js"], ["dock.html", "dock.js"]] as const) {
-      expect(source(page)).toMatch(/<template id="working-template"><div class="working"[^>]*><svg class="working-mark"[^]*<circle class="working-dot"[^]*<span class="working-word"><\/span><\/div><\/template>/);
-      expect(source(script)).toContain('session?.status !== "running"');
-      expect(source(script)).toContain("workingWord()");
+  test("the next word never repeats the one shown (D0055)", () => {
+    for (let i = 0; i < WORKING_WORDS.length; i++) {
+      const shown = `${WORKING_WORDS[i]}…`;
+      expect(workingWord((i + 0.5) / WORKING_WORDS.length, shown)).not.toBe(shown);
     }
+  });
+
+  test("the time beside it: seconds, then minutes and seconds, then hours and minutes; nothing under a second", () => {
+    expect(elapsedLabel(0)).toBe("");
+    expect(elapsedLabel(999)).toBe("");
+    expect(elapsedLabel(4_200)).toBe("4s");
+    expect(elapsedLabel(59_999)).toBe("59s");
+    expect(elapsedLabel(65_000)).toBe("1m 05s");
+    expect(elapsedLabel(3_725_000)).toBe("1h 02m");
+    expect(elapsedLabel(Number.NaN)).toBe("");
+  });
+
+  test("the chat and the dock both draw it from one template: the Ledge, the step's icon, the word, the time", () => {
+    for (const [page, script] of [["chat.html", "chat.js"], ["dock.html", "dock.js"]] as const) {
+      expect(source(page)).toMatch(/<template id="working-template"><div class="working" role="status" aria-label="Working"><svg class="working-mark"[^]*<circle class="working-dot"[^]*<\/svg><span class="working-step" hidden><\/span><span class="working-word"><\/span><span class="working-time" hidden><\/span><\/div><\/template>/);
+      expect(source(script)).toContain('session?.status !== "running"');
+      expect(source(script)).toContain("workingIndicator(document)");
+      // A turn that ends lets it fade away rather than vanish.
+      expect(source(script)).toContain("working?.leave()");
+    }
+    const working = source("working.js");
+    expect(working).toContain('getElementById("working-template")');
+    expect(working).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML/);
+    // A loop of 2.5 to 4 seconds (D0055).
+    expect(working).toContain("WORD_MS = 4000");
+  });
+});
+
+describe("tool icons (D0055)", () => {
+  test("a built-in tool has its own, a connector its server's, any other connector a plug, any other tool a wrench", () => {
+    expect(iconKey("Bash")).toBe("terminal");
+    expect(iconKey("Read")).toBe("file");
+    expect(iconKey("Edit")).toBe("pencil");
+    expect(iconKey("Grep")).toBe("search");
+    expect(iconKey("WebFetch")).toBe("globe");
+    expect(iconKey("Skill")).toBe("spark");
+    expect(iconKey("ToolSearch")).toBe("plug");
+    expect(iconKey("mcp__claude_ai_Gmail__search_threads")).toBe("mail");
+    expect(iconKey("mcp__claude_ai_Google_Calendar__list_events")).toBe("calendar");
+    expect(iconKey("mcp__claude_ai_Google_Drive__search_files")).toBe("folder");
+    expect(iconKey("mcp__claude_ai_Google_Sheets__get_values")).toBe("grid");
+    expect(iconKey("mcp__claude_ai_Slack__slack_search_public")).toBe("bubble");
+    expect(iconKey("mcp__claude_ai_Notion__notion-search")).toBe("page");
+    expect(iconKey("mcp__claude_ai_Gamma__list_funds")).toBe("graph");
+    expect(iconKey("mcp__claude_ai_NoCFO__constants_retrieve")).toBe("receipt");
+    expect(iconKey("mcp__somewhere__else")).toBe("plug");
+    expect(iconKey("Mystery")).toBe("tool");
+    expect(iconKey(undefined)).toBe("tool");
+    expect(iconKey("constructor")).toBe("tool");
+  });
+
+  test("every key has a shape, and the markup is fixed: a tool's name only picks a key", () => {
+    const code = source("tool-icons.js");
+    for (const key of ICON_KEYS) expect(code).toContain(`${key}: '`);
+    // The only interpolations in the markup are the key and its shape, never the name itself.
+    const inserted = [...code.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1]);
+    expect(inserted).toEqual(["iconKey(name)", "SHAPES[iconKey(name)]"]);
+    expect(code).not.toMatch(/\bdocument\b|\bwindow\b/);
   });
 });
 

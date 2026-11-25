@@ -14,7 +14,8 @@ declare module "*/web/chat-format.js" {
   export function stepsSummary(names: string[]): { count: string; sources: string };
   export function pagesChanged(known: unknown, given: unknown): boolean;
   export const WORKING_WORDS: string[];
-  export function workingWord(random?: number): string;
+  export function workingWord(random?: number, not?: string): string;
+  export function elapsedLabel(ms: number): string;
   export const APPROVAL_MAX_CHARS: number;
   export const APPROVAL_MAX_LINES: number;
   export function approvalView(toolName: string, input: unknown): { path: string; text: string; full: string };

@@ -22,7 +22,6 @@ import {
   toolLabel,
   toolSummary,
   unknownNote,
-  workingWord,
 } from "./chat-format.js";
 import { canStop, manage, menuItems, renameInline, sessionMenu, visible } from "./chat-manage.js";
 import { renderMarkdown } from "./markdown.js";
@@ -69,6 +68,8 @@ import {
   saveWorkspace,
   stepSession,
 } from "./dock-state.js";
+import { toolIcon } from "./tool-icons.js";
+import { workingIndicator } from "./working.js";
 
 /** A Mac's notch, from the shell (`?notch=WxH`): the island grows out of it. Null without one. */
 const NOTCH = parseNotch(location.search);
@@ -576,8 +577,13 @@ function renderText(el, text, streaming = false) {
   el.replaceChildren(renderMarkdown(text, document, { streaming }));
 }
 
-/** The Ledge at the stream's end while the selected session's turn runs (renderWorking). */
+/** The working indicator at the stream's end while the selected session's turn runs (renderWorking), and its element. */
+let working = null;
 let workingEl = null;
+/** toolUseId -> tool name of the calls still waiting for their result, oldest first. */
+const openSteps = new Map();
+/** When the selected session's latest turn began: its newest user message's time (ms), or null when it isn't among the events shown. */
+let turnStart = null;
 
 /** What stays at the stream's end: the streaming text, then the working mark. Null when neither is there. */
 function tail() {
@@ -585,18 +591,24 @@ function tail() {
   return workingEl?.parentNode === els.stream ? workingEl : null;
 }
 
-/** While the selected session's turn runs, the Ledge's dot hops at the stream's end, as in the chat (D0051). */
+/**
+ * While the selected session's turn runs, the working indicator sits at the stream's end, as in the
+ * chat (D0051, D0055, working.js): the step under way or an island word, and the time since the turn
+ * began. When the turn ends it fades away.
+ */
 function renderWorking() {
   const session = selected ? sessions.get(selected) : undefined;
   if (session?.status !== "running") {
-    workingEl?.remove();
+    working?.leave();
+    working = null;
     workingEl = null;
     return;
   }
-  if (!workingEl) {
-    workingEl = document.getElementById("working-template").content.firstElementChild.cloneNode(true);
-    workingEl.querySelector(".working-word").textContent = workingWord();
+  if (!working) {
+    working = workingIndicator(document);
+    workingEl = working.el;
   }
+  working.update({ step: [...openSteps.values()].at(-1) ?? null, since: turnStart });
   if (els.stream.lastElementChild !== workingEl) {
     els.stream.append(workingEl);
     follow();
@@ -636,7 +648,7 @@ function toolRow(event) {
   const row = h("div", "tool-row");
   const mark = h("span", "tool-mark small");
   const label = toolLabel(event.name);
-  row.append(h("span", "tool-name", label.source));
+  row.append(toolIcon(document, event.name), h("span", "tool-name", label.source));
   if (label.action) row.append(h("span", "tool-action", label.action));
   row.append(h("span", event.name === "Bash" ? "tool-line mono" : "tool-line", toolSummary(event.name, event.input)), mark);
   tools.set(event.toolUseId, mark);
@@ -754,19 +766,29 @@ function apply(event) {
   if (!event || typeof event.seq !== "number" || event.seq <= lastSeq) return;
   lastSeq = event.seq;
   switch (event.kind) {
-    case "user":
+    case "user": {
       add(h("div", "msg user card", event.text));
+      // The turn this message starts: the working indicator counts from here.
+      const at = Date.parse(event.ts);
+      turnStart = Number.isFinite(at) ? at : null;
+      openSteps.clear();
+      renderWorking();
       break;
+    }
     case "assistant_text":
       // The streamed text is on the page already: the complete text takes its place without rising again.
       renderText(add(h("div", "msg assistant md"), streamedEl?.parentNode === els.stream), event.text);
       break;
     case "tool_use":
       toolRow(event);
+      openSteps.set(event.toolUseId, String(event.name ?? "Tool"));
+      renderWorking();
       break;
     case "tool_result": {
       const mark = tools.get(event.toolUseId);
       if (mark && event.isError) mark.textContent = "failed";
+      openSteps.delete(event.toolUseId);
+      renderWorking();
       break;
     }
     case "approval_request":
@@ -779,15 +801,18 @@ function apply(event) {
     }
     case "result":
       endOpenApprovals();
+      openSteps.clear();
       add(h("div", event.ok ? "note num muted small" : "note num error small", resultLine(event)));
       if (!event.ok && event.text) add(h("div", "error small", event.text));
       break;
     case "error":
       endOpenApprovals();
+      openSteps.clear();
       add(h("div", "error small", event.message));
       break;
     case "stopped":
       endOpenApprovals();
+      openSteps.clear();
       add(h("div", "note muted small", "Stopped"));
       break;
     default:
@@ -1263,7 +1288,12 @@ function select(id) {
   tools.clear();
   approvals.clear();
   streamedEl = null;
+  // The stream is emptied below: the old indicator goes with it, its clock stopped.
+  working?.leave();
+  working = null;
   workingEl = null;
+  openSteps.clear();
+  turnStart = null;
   loadErrorEl = null;
   els.stream.replaceChildren();
   stick = true;
