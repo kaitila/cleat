@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ApprovalAsk } from "../../src/runner/agent";
-import { DENIED, MAX_DENIED_INPUT, MAX_TOOL_RESULT, claudeOptions, reduce } from "../../src/runner/agent-claude";
+import { DENIED, MAX_DENIED_INPUT, MAX_TOOL_RESULT, claudeOptions, mcpSettled, reduce, turnPrompt } from "../../src/runner/agent-claude";
 
 const input = { agent: "claude" as const, prompt: "hi", cwd: "/tmp/work", resume: null, permissionMode: "auto" as const, signal: new AbortController().signal, approve: async () => "deny" as const };
 /** Only the fields reduce() reads: the SDK's message types carry many more. */
@@ -138,5 +138,63 @@ describe("reduce", () => {
     expect(reduce(msg({ type: "assistant", parent_tool_use_id: "t9", message: { content: [{ type: "text", text: "sub" }] } }))).toEqual([]);
     expect(reduce(msg({ type: "stream_event", parent_tool_use_id: "t9", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "sub" } } }))).toEqual([]);
     expect(reduce(msg({ type: "system", subtype: "init" }))).toEqual([]);
+  });
+});
+
+describe("mcpSettled", () => {
+  const server = (name: string, status: "connected" | "failed" | "needs-auth" | "pending" | "disabled") => ({ name, status });
+
+  test("waits while a server is still connecting, and ends once none is", async () => {
+    const answers = [[server("a", "pending"), server("b", "connected")], [server("a", "pending")], [server("a", "connected"), server("b", "needs-auth")]];
+    let calls = 0;
+    await mcpSettled(async () => answers[Math.min(calls++, answers.length - 1)]!, { pollMs: 1 });
+    expect(calls).toBe(3);
+  });
+
+  test("a failed, signed-out or disabled server doesn't hold the turn up", async () => {
+    let calls = 0;
+    await mcpSettled(async () => (calls++, [server("a", "failed"), server("b", "needs-auth"), server("c", "disabled")]));
+    expect(calls).toBe(1);
+  });
+
+  test("gives up after the cap when a server stays pending", async () => {
+    const start = Date.now();
+    await mcpSettled(async () => [server("slow", "pending")], { capMs: 60, pollMs: 10 });
+    const took = Date.now() - start;
+    expect(took).toBeGreaterThanOrEqual(55);
+    expect(took).toBeLessThan(1000);
+  });
+
+  test("a status call that fails, or an abort, ends the wait", async () => {
+    await mcpSettled(async () => {
+      throw new Error("no control channel");
+    });
+    const stop = new AbortController();
+    let calls = 0;
+    const wait = mcpSettled(async () => (calls++ === 0 && stop.abort(), [server("slow", "pending")]), { pollMs: 1, signal: stop.signal });
+    await wait;
+    expect(calls).toBe(1);
+  });
+});
+
+describe("turnPrompt", () => {
+  test("sends the text once ready, then keeps the input open until the turn is done", async () => {
+    let ready = () => {};
+    let done = () => {};
+    const gen = turnPrompt("hello", new Promise((r) => (ready = r)), new Promise((r) => (done = r)));
+    let first: unknown = null;
+    const next = gen.next().then((r) => (first = r));
+    await Bun.sleep(5);
+    expect(first).toBeNull();
+    ready();
+    await next;
+    expect(first).toEqual({ done: false, value: { type: "user", message: { role: "user", content: "hello" }, parent_tool_use_id: null } });
+    let finished = false;
+    const last = gen.next().then((r) => (finished = r.done === true));
+    await Bun.sleep(5);
+    expect(finished).toBe(false);
+    done();
+    await last;
+    expect(finished).toBe(true);
   });
 });
