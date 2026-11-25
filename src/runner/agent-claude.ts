@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import type { CanUseTool, Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, McpServerStatus, Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { ASK_USER_QUESTION, type QuestionAnswers } from "../shared/protocol";
 import type { AgentDriver, AgentOutput, NewEvent, TurnInput } from "./agent";
 import { toolSummary } from "./notifications";
@@ -192,6 +192,45 @@ export function reduce(message: SDKMessage, inputs: Map<string, unknown> = new M
 /** After the person's Stop, how long an interrupted turn may take to end before it is aborted outright. */
 export const STOP_GRACE_MS = 5000;
 
+/** How long a turn's prompt waits for MCP servers that are still connecting (D0050). */
+export const MCP_WAIT_MS = 10_000;
+/** How often the MCP servers' status is asked while some are still connecting. */
+export const MCP_POLL_MS = 250;
+
+/**
+ * Resolves once no MCP server is still connecting (status "pending"), or after `capMs`, or when
+ * `signal` aborts (D0050). Every turn is a new Claude Code process, and the claude.ai connectors
+ * take seconds to connect in one: a prompt sent at once reaches the model without their tools, and
+ * the agent tells the person the connector "disconnected". A server that failed or needs a sign-in
+ * is settled too: waiting would not bring it. A status call that fails ends the wait.
+ */
+export async function mcpSettled(
+  status: () => Promise<McpServerStatus[]>,
+  { capMs = MCP_WAIT_MS, pollMs = MCP_POLL_MS, signal }: { capMs?: number; pollMs?: number; signal?: AbortSignal } = {},
+): Promise<void> {
+  const until = Date.now() + capMs;
+  while (!signal?.aborted && Date.now() < until) {
+    let servers: McpServerStatus[];
+    try {
+      servers = await status();
+    } catch {
+      return;
+    }
+    if (!servers.some((s) => s.status === "pending")) return;
+    await new Promise((r) => setTimeout(r, Math.min(pollMs, Math.max(0, until - Date.now()))));
+  }
+}
+
+/**
+ * The turn's prompt as streaming input: the person's text once `ready` resolves, then the input stays
+ * open until `done` (the turn has ended), so approvals and Stop keep their channel to Claude Code.
+ */
+export async function* turnPrompt(prompt: string, ready: Promise<void>, done: Promise<void>): AsyncGenerator<SDKUserMessage> {
+  await ready;
+  yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null };
+  await done;
+}
+
 export function claudeDriver(): AgentDriver {
   return {
     async *run(input: TurnInput): AsyncIterable<AgentOutput> {
@@ -204,12 +243,16 @@ export function claudeDriver(): AgentDriver {
       let onStop: (() => void) | undefined;
       let sessionId: string | null = null;
       const inputs = new Map<string, unknown>();
+      let end = () => {};
+      const ended = new Promise<void>((r) => (end = r));
       try {
         const { query } = await import("@anthropic-ai/claude-agent-sdk");
         const options = claudeOptions(input, abortController, (data) => {
           stderr = (stderr + data).slice(-2000);
         });
-        const q = query({ prompt: input.prompt, options });
+        // The prompt waits for the MCP servers still connecting (D0050); `q` is set before the generator runs.
+        const ready = Promise.resolve().then(() => mcpSettled(() => q.mcpServerStatus(), { signal: abortController.signal }));
+        const q = query({ prompt: turnPrompt(input.prompt, ready, ended), options });
         // Stop: the SDK's interrupt ends the turn as Claude Code's Esc does; one that doesn't end soon is aborted.
         onStop = () => {
           void q.interrupt().catch(() => abortController.abort());
@@ -233,6 +276,7 @@ export function claudeDriver(): AgentDriver {
         const detail = stderr.trim();
         yield { type: "event", event: { kind: "error", message: (e as Error).message + (detail ? `\n${detail}` : "") } };
       } finally {
+        end();
         input.signal.removeEventListener("abort", abort);
         if (onStop) input.interrupt?.removeEventListener("abort", onStop);
         clearTimeout(hard);

@@ -6,7 +6,7 @@ A session runs on one of two agents: **Claude Code** (the default) or **OpenAI C
 |---|---|---|
 | Driver | `agent-claude.ts`, the Claude Agent SDK's `query()` | `agent-codex.ts`, the Codex SDK (`@openai/codex-sdk`), which runs the `codex exec --experimental-json` it brings and reads its events |
 | Login | Claude Code's (`cleat login`, which runs the Agent SDK's Claude Code's `auth login`) | Codex's (`cleat login codex`, kept in `~/.codex`) |
-| New conversation, resume | a Claude Code session id; a reply resumes it | a Codex thread id (stored in `claudeSessionId`); a reply resumes the thread (`resumeThread`) |
+| New conversation, resume | a Claude Code session id; a reply resumes it. Each turn is a new Claude Code process, and its prompt waits up to 10 s for MCP servers still connecting (the claude.ai connectors), [D0050](decisions/D0050-wait-for-mcp-connectors.md) | a Codex thread id (stored in `claudeSessionId`); a reply resumes the thread (`resumeThread`) |
 | Streaming | text deltas as Claude Code writes | Codex sends a message only once it is complete, so the text arrives in one piece (a message that grows would stream as deltas) |
 | Tools in the chat | Claude Code's tool calls | a command is `Bash` (`{ command }`), a file change is `Edit` (`{ changes: [{ path, kind }] }`), an MCP call is `mcp__<server>__<tool>`, a web search is `WebSearch`, each with its `tool_result`. Reasoning and the to-do list are left out |
 | `auto` mode | the SDK's classifier, which asks the person when unsure | Codex's `workspace-write` sandbox (writes in the workspace, no network) with its default `on-request` approval policy |
