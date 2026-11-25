@@ -40,15 +40,13 @@
       "Read(~/.aws/**)",
       "Read(~/.config/gh/**)"
     ],
-    "ask": [
+    "allow": [
       "Bash(gh pr merge *)",
       "Bash(gh api * -X *)",
       "Bash(gh api * --method *)",
       "Bash(docker *)",
       "Bash(ssh *)",
-      "Bash(scp *)"
-    ],
-    "allow": [
+      "Bash(scp *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
