@@ -238,3 +238,36 @@ export function unknownNote(event) {
 export function backoffMs(attempt) {
   return Math.min(5000, 500 * 2 ** Math.max(0, attempt));
 }
+
+/**
+ * The word beside the working mark (D0053): island and harbour lingo, as a cleat is the fitting a
+ * boat is tied to. One is picked each time the mark appears and kept while it stays.
+ */
+export const WORKING_WORDS = [
+  "Island-hopping",
+  "Casting off",
+  "Charting the reef",
+  "Reading the tides",
+  "Beachcombing",
+  "Paddling out",
+  "Trimming the sails",
+  "Rowing ashore",
+  "Sounding the depths",
+  "Hauling in",
+  "Mending nets",
+  "Tying up",
+  "Riding the swell",
+  "Spotting land",
+  "Following the gulls",
+  "Waiting for the tide",
+  "Coiling rope",
+  "Scanning the horizon",
+  "Dropping anchor",
+  "Raising the flag",
+];
+
+/** A working word, as "Island-hopping…". `random` is a number in [0, 1), Math.random's by default. */
+export function workingWord(random = Math.random()) {
+  const i = Math.min(WORKING_WORDS.length - 1, Math.max(0, Math.floor(random * WORKING_WORDS.length)));
+  return `${WORKING_WORDS[i]}…`;
+}

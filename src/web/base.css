@@ -681,7 +681,9 @@ kbd {
 .tool-body { display: grid; gap: var(--space-1); padding: var(--space-3); border-top: var(--hairline) solid var(--line); }
 
 /* ---------- working: the Ledge whose dot hops while a turn runs (D0051) ---------- */
-.working { display: flex; align-items: center; min-height: var(--control); padding-inline: var(--space-2); color: var(--muted); }
+.working { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control); padding-inline: var(--space-2); color: var(--muted); font-size: var(--text-s); }
+/* Its word (D0053): island lingo, picked when the mark appears, small and muted beside it. */
+.working-word { white-space: nowrap; }
 .working-mark { width: var(--control-s); height: var(--control-s); overflow: visible; }
 .working-dot { transform-box: fill-box; transform-origin: 50% 100%; animation: hop var(--dur-hop) linear infinite; }
 @keyframes hop {

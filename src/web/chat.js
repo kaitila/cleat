@@ -21,6 +21,7 @@ import {
   toolLabelText,
   toolSummary,
   unknownNote,
+  workingWord,
 } from "./chat-format.js";
 import {
   archivedLine,
@@ -214,7 +215,10 @@ function renderWorking() {
     return;
   }
   // The Ledge in the text's colour (D0044), from chat.html's template: its dot hops (base.css, .working).
-  workingEl ??= document.getElementById("working-template").content.firstElementChild.cloneNode(true);
+  if (!workingEl) {
+    workingEl = document.getElementById("working-template").content.firstElementChild.cloneNode(true);
+    workingEl.querySelector(".working-word").textContent = workingWord();
+  }
   if (els.stream.lastElementChild !== workingEl) {
     els.stream.append(workingEl);
     follow();
