@@ -35,7 +35,19 @@ describe("the build", () => {
     expect(read("mark.svg")).toBe(readFileSync(join(WEB, "mark.svg"), "utf8"));
     expect(existsSync(join(SITE, "mark.svg"))).toBe(false);
     expect(html).toContain('<link rel="icon" href="mark.svg" type="image/svg+xml">');
-    expect(html).toMatch(/<h1 class="name"><svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="16.5" cy="10" r="4.5"\/><rect x="2" y="16.5" width="20" height="4" rx="2"\/><\/svg>/);
+    expect(html).toMatch(/<h1 class="name"><svg class="mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle class="mark-dot" cx="16.5" cy="10" r="4.5"\/><rect x="2" y="16.5" width="20" height="4" rx="2"\/><\/svg>/);
+  });
+
+  test("the mark's dot hops now and then, and stays still under reduced motion (D0052)", () => {
+    const base = readFileSync(join(WEB, "base.css"), "utf8");
+    expect(base).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{\s*\.mark-dot \{ animation: hop-now-and-then calc\(var\(--dur-hop\) \* 4\)/);
+    expect(base).toContain("@keyframes hop-now-and-then");
+  });
+
+  test("the page is one screen and never scrolls (D0052)", () => {
+    expect(css).toContain("html, body { height: 100%; overflow: hidden; }");
+    expect(css).toMatch(/\.screen \{[^}]*height: 100svh;/);
+    expect(css).not.toMatch(/min-height: 100svh/);
   });
 
   test("base.css is the app's own, unchanged: the tokens come from it at build time", () => {
