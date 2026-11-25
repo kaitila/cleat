@@ -18,6 +18,7 @@ import {
   sessionStatus,
   startedInTerminal,
   TERMINAL_MARK_TITLE,
+  toolLabel,
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
@@ -604,7 +605,10 @@ function renderStreamed() {
 function toolRow(event) {
   const row = h("div", "tool-row");
   const mark = h("span", "tool-mark small");
-  row.append(h("span", "tool-name", String(event.name ?? "Tool")), h("span", "tool-line mono", toolSummary(event.name, event.input)), mark);
+  const label = toolLabel(event.name);
+  row.append(h("span", "tool-name", label.source));
+  if (label.action) row.append(h("span", "tool-action", label.action));
+  row.append(h("span", event.name === "Bash" ? "tool-line mono" : "tool-line", toolSummary(event.name, event.input)), mark);
   tools.set(event.toolUseId, mark);
   add(row);
 }

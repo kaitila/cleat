@@ -23,6 +23,9 @@ import {
   sessionStatus,
   shellWord,
   startedInTerminal,
+  stepsSummary,
+  toolLabel,
+  toolLabelText,
   toolSummary,
   unknownNote,
 } from "../../src/web/chat-format.js";
@@ -65,6 +68,29 @@ describe("served by the runner", () => {
   });
 });
 
+describe("toolLabel and stepsSummary", () => {
+  test("an MCP tool is its server, without claude.ai, and its tool's words", () => {
+    expect(toolLabel("mcp__claude_ai_Gamma__list_funds")).toEqual({ source: "Gamma", action: "list funds" });
+    expect(toolLabel("mcp__claude_ai_Google_Drive__read_file_content")).toEqual({ source: "Google Drive", action: "read file content" });
+    expect(toolLabel("mcp__foreman__claim_task")).toEqual({ source: "foreman", action: "claim task" });
+    expect(toolLabelText("mcp__claude_ai_Slack__slack_search_public")).toBe("Slack search public");
+    expect(toolLabel("mcp__claude_ai_Notion__notion")).toEqual({ source: "Notion", action: "notion" });
+  });
+  test("ToolSearch is loading tools; anything else is its own name", () => {
+    expect(toolLabel("ToolSearch")).toEqual({ source: "Tools", action: "load" });
+    expect(toolLabel("Bash")).toEqual({ source: "Bash", action: "" });
+    expect(toolLabel(undefined)).toEqual({ source: "Tool", action: "" });
+    expect(toolLabelText("Read")).toBe("Read");
+  });
+  test("a run says how many steps and names its first three sources", () => {
+    expect(stepsSummary(["Bash"])).toEqual({ count: "1 step", sources: "Bash" });
+    const names = ["Skill", "ToolSearch", "Bash", "mcp__claude_ai_Google_Drive__search_files", "mcp__claude_ai_Gamma__list_funds", "mcp__claude_ai_Gamma__list_deals", "Bash"];
+    expect(stepsSummary(names)).toEqual({ count: "7 steps", sources: "Skill, Bash, Google Drive +1" });
+    expect(stepsSummary(["ToolSearch", "ToolSearch"])).toEqual({ count: "2 steps", sources: "Tools" });
+    expect(stepsSummary(["mcp__claude_ai_Gamma__a", "mcp__claude_ai_Gamma__b"])).toEqual({ count: "2 steps", sources: "Gamma" });
+  });
+});
+
 describe("toolSummary", () => {
   test("Bash: the command, on one line", () => {
     expect(toolSummary("Bash", { command: "echo fake" })).toBe("echo fake");
@@ -76,11 +102,22 @@ describe("toolSummary", () => {
     expect(toolSummary("Grep", { pattern: "x", path: "src" })).toBe("src");
     expect(toolSummary("NotebookEdit", { notebook_path: "/n.ipynb" })).toBe("/n.ipynb");
   });
-  test("anything else: the first 80 characters of the input", () => {
-    expect(toolSummary("WebSearch", { query: "bun" })).toBe('{"query":"bun"}');
-    const long = toolSummary("Task", { prompt: "p".repeat(300) });
+  test("anything else: its telling text field, else its first text, at most 80 characters", () => {
+    expect(toolSummary("WebSearch", { query: "bun" })).toBe("bun");
+    expect(toolSummary("Skill", { skill: "book-investment", args: "Pyramid" })).toBe("book-investment");
+    expect(toolSummary("mcp__claude_ai_Gamma__list_deals", { stage: "all", q: "Pyramid" })).toBe("Pyramid");
+    expect(toolSummary("mcp__claude_ai_Gmail__get", { limit: 3, threadId: "t1" })).toBe("t1");
+    expect(toolSummary("mcp__claude_ai_Gamma__list_funds", {})).toBe("");
+    expect(toolSummary("Task", { prompt: "p".repeat(300) })).toBe("p".repeat(80));
+  });
+  test("ToolSearch: the tools it loads, by their labels", () => {
+    expect(toolSummary("ToolSearch", { query: "select:mcp__claude_ai_Google_Drive__search_files,mcp__claude_ai_Gmail__get_thread" })).toBe("Google Drive search files, Gmail get thread");
+    expect(toolSummary("ToolSearch", { query: "+Gamma portal" })).toBe("+Gamma portal");
+  });
+  test("an input with no text: JSON, at most 80 characters", () => {
+    const long = toolSummary("Odd", { n: [1, 2, 3], deep: { x: "p".repeat(300) } });
     expect(long).toHaveLength(80);
-    expect(long.startsWith('{"prompt":"ppp')).toBe(true);
+    expect(long.startsWith('{"n":[1,2,3]')).toBe(true);
     expect(toolSummary("Odd", "plain\ntext")).toBe("plain text");
     expect(toolSummary("Odd", undefined)).toBe("");
     expect(toolSummary("Odd", null)).toBe("null");

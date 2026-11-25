@@ -15,7 +15,10 @@ import {
   resultLine,
   sessionStatus,
   startedInTerminal,
+  stepsSummary,
   TERMINAL_MARK_TITLE,
+  toolLabel,
+  toolLabelText,
   toolSummary,
   unknownNote,
 } from "./chat-format.js";
@@ -126,8 +129,12 @@ let generation = 0;
 let lastSeq = 0;
 let loading = false;
 let loadAgain = false;
-/** toolUseId -> the parts of its <details>, to put the result into. */
+/** toolUseId -> the parts of its <details>, to put the result into, and the run it is folded into. */
 const tools = new Map();
+/** A run of tool calls folded into one line (.steps) -> { el, body, count, line, mark, ids }. */
+const runs = new WeakMap();
+/** The Ledge at the stream's end while the selected session's turn runs (renderWorking). */
+let workingEl = null;
 /** approvalId -> its card in the stream: { el, actions, error, buttons, decided }. */
 const approvals = new Map();
 /** sessionId -> assistant text streamed so far and not yet replaced by its assistant_text event. */
@@ -186,9 +193,32 @@ let live = false;
  */
 function add(el, still = false) {
   if (live && !still) el.classList.add("arrive");
-  els.stream.insertBefore(el, streamedEl?.parentNode === els.stream ? streamedEl : null);
+  els.stream.insertBefore(el, tail());
   follow();
   return el;
+}
+
+/** What stays at the stream's end: the streaming text, then the working mark. Null when neither is there. */
+function tail() {
+  if (streamedEl?.parentNode === els.stream) return streamedEl;
+  return workingEl?.parentNode === els.stream ? workingEl : null;
+}
+
+
+/** While the selected session's turn runs, the Ledge's dot hops at the stream's end (D0051). */
+function renderWorking() {
+  const session = selected ? sessions.get(selected) : undefined;
+  if (session?.status !== "running") {
+    workingEl?.remove();
+    workingEl = null;
+    return;
+  }
+  // The Ledge in the text's colour (D0044), from chat.html's template: its dot hops (base.css, .working).
+  workingEl ??= document.getElementById("working-template").content.firstElementChild.cloneNode(true);
+  if (els.stream.lastElementChild !== workingEl) {
+    els.stream.append(workingEl);
+    follow();
+  }
 }
 
 function renderText(el, text, streaming = false) {
@@ -222,8 +252,59 @@ function renderStreamed() {
   }
   if (!streamedEl) streamedEl = h("div", `msg assistant md streaming${live ? " arrive" : ""}`);
   renderText(streamedEl, text, true);
-  if (streamedEl.parentNode !== els.stream) els.stream.append(streamedEl);
+  if (streamedEl.parentNode !== els.stream) els.stream.insertBefore(streamedEl, workingEl?.parentNode === els.stream ? workingEl : null);
   follow();
+}
+
+/** The tool call or run of them a new call joins: the last thing in the stream, when it is one. */
+function lastStep() {
+  const end = tail();
+  const last = end ? end.previousElementSibling : els.stream.lastElementChild;
+  return last?.matches(".tool, .steps") ? last : null;
+}
+
+/**
+ * Folds `first`, a tool call on its own in the stream, into a run of steps: one quiet line ("11
+ * steps · Gamma, Google Drive, Slack +2") that opens to the calls (D0051).
+ */
+function foldIntoRun(first) {
+  const el = h("details", "steps");
+  const summary = h("summary");
+  const count = h("span", "steps-count");
+  const line = h("span", "steps-line");
+  const mark = h("span", "tool-mark small");
+  summary.append(count, line, mark);
+  const body = h("div", "steps-body");
+  el.append(summary, body);
+  summary.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggleTool(el, body);
+  });
+  const run = { el, body, count, line, mark, ids: [] };
+  runs.set(el, run);
+  first.replaceWith(el);
+  const tool = tools.get(first.dataset.toolUseId);
+  if (tool) joinRun(run, tool);
+  else body.append(first);
+  return run;
+}
+
+function joinRun(run, tool) {
+  run.body.append(tool.details);
+  run.ids.push(tool.id);
+  tool.run = run;
+  renderRun(run);
+}
+
+/** A run's line: the call under way while one is, else the sources it used; and how many failed. */
+function renderRun(run) {
+  const list = run.ids.map((id) => tools.get(id)).filter(Boolean);
+  const { count, sources } = stepsSummary(list.map((t) => t.name));
+  const last = list.at(-1);
+  run.count.textContent = count;
+  run.line.textContent = last && !last.done ? toolLabelText(last.name) : sources;
+  const failed = list.filter((t) => t.failed).length;
+  run.mark.textContent = failed ? `${failed} failed` : "";
 }
 
 function toolCard(toolUseId, name, input) {
@@ -231,7 +312,10 @@ function toolCard(toolUseId, name, input) {
   details.dataset.toolUseId = toolUseId;
   const summary = h("summary");
   const mark = h("span", "tool-mark small");
-  summary.append(h("span", "tool-name", name), h("span", "tool-line mono", toolSummary(name, input)), mark);
+  const label = toolLabel(name);
+  summary.append(h("span", "tool-name", label.source));
+  if (label.action) summary.append(h("span", "tool-action", label.action));
+  summary.append(h("span", name === "Bash" ? "tool-line mono" : "tool-line", toolSummary(name, input)), mark);
   const body = h("div", "tool-body");
   const result = h("pre", "tool-result well muted", "Waiting for the result.");
   body.append(h("div", "label", "Input"), h("pre", "tool-input well", inputText(input, 2)), h("div", "label", "Result"), result);
@@ -240,9 +324,14 @@ function toolCard(toolUseId, name, input) {
     e.preventDefault();
     toggleTool(details, body);
   });
-  const tool = { details, body, result, mark, done: false };
+  const tool = { id: toolUseId, name: typeof name === "string" && name ? name : "Tool", details, body, result, mark, done: false, failed: false, run: null };
   tools.set(toolUseId, tool);
-  add(details);
+  // Calls in a row fold into one run of steps; text, an approval or a new turn starts the next.
+  const prev = lastStep();
+  if (prev?.classList.contains("steps")) joinRun(runs.get(prev), tool);
+  else if (prev) joinRun(foldIntoRun(prev), tool);
+  else add(details);
+  follow();
   return tool;
 }
 
@@ -260,16 +349,21 @@ function toolResult(event) {
   if (event.isError) {
     tool.details.dataset.error = "true";
     tool.mark.textContent = "failed";
+    tool.failed = true;
   }
+  if (tool.run) renderRun(tool.run);
   follow();
 }
 
 /** A turn that ended leaves no call waiting: one without a result says so. */
 function endOpenTools() {
+  const touched = new Set();
   for (const tool of tools.values()) {
     if (!tool.done) tool.result.textContent = "No result.";
     tool.done = true;
+    if (tool.run) touched.add(tool.run);
   }
+  for (const run of touched) renderRun(run);
 }
 
 // ---------- motion ----------
@@ -291,10 +385,13 @@ function flipAfter(el, change, name) {
   if (reducedMotion.matches) return change();
   const view = els.scroller.getBoundingClientRect();
   const before = new Map();
-  for (let next = el.nextElementSibling; next; next = next.nextElementSibling) {
-    const box = next.getBoundingClientRect();
-    if (box.top > view.bottom) break;
-    before.set(next, box.top);
+  // What follows `el` in its run of steps, then what follows the run in the stream.
+  for (let node = el; node && node !== els.stream; node = node.parentElement) {
+    for (let next = node.nextElementSibling; next; next = next.nextElementSibling) {
+      const box = next.getBoundingClientRect();
+      if (box.top > view.bottom) break;
+      before.set(next, box.top);
+    }
   }
   change();
   const timing = spring(name);
@@ -919,6 +1016,7 @@ function renderHead() {
   const session = selected ? sessions.get(selected) : undefined;
   els.head.hidden = !session;
   document.title = session ? `${session.title || "Untitled"} · Cleat` : "Cleat";
+  renderWorking();
   if (!session) return;
   els.title.textContent = session.title || "Untitled";
   els.dot.dataset.status = session.status;
@@ -1049,6 +1147,7 @@ function select(id, push = false, reveal = true) {
   tools.clear();
   approvals.clear();
   streamedEl = null;
+  workingEl = null;
   loadErrorEl = null;
   els.stream.replaceChildren();
   stick = true;

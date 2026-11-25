@@ -178,6 +178,8 @@
   /* Rows that arrive together, one after the other; and how far the island's width lags its height. */
   --stagger: 40ms;
   --lag: 40ms;
+  /* One hop of the working mark's dot on its ledge, rest included (.working, D0051). */
+  --dur-hop: 1500ms;
   /* How much of the island shows while nothing is going on. */
   --island-quiet: 0.55;
   /* The island's size as drawn. dock.js sets both on the island; until it has, nothing is drawn. */
@@ -646,28 +648,53 @@ kbd {
   color: var(--muted);
 }
 
-/* ---------- tool call: <details class="tool">, one closed row until opened ---------- */
-.tool { min-width: 0; border: var(--hairline) solid var(--line); border-radius: var(--radius-m); background: var(--surface); }
-.tool > summary {
+/* ---------- tool call: <details class="tool">, one quiet line until opened (D0051) ----------
+   No card: muted small text, the source's name in medium, the line after it. Calls in a row fold
+   into a run, <details class="steps">, one line of its own whose body holds the calls. */
+.tool, .steps { min-width: 0; border-radius: var(--radius-s); }
+.tool > summary, .steps > summary {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   min-height: var(--control);
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-2);
   border-radius: inherit;
+  color: var(--muted);
+  font-size: var(--text-s);
   cursor: pointer;
   list-style: none;
-  transition: background-color var(--motion) var(--ease);
+  transition: background-color var(--motion) var(--ease), color var(--motion) var(--ease);
 }
-.tool > summary:hover { background: var(--hover); }
-.tool > summary::-webkit-details-marker { display: none; }
-.tool > summary::before { content: "›"; color: var(--muted); transition: transform var(--motion) var(--ease); }
-.tool[open] > summary::before { transform: rotate(90deg); }
-.tool[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.tool-name { flex: none; font-size: var(--text-s); font-weight: var(--medium); }
-.tool-line { flex: 1; min-width: 0; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool > summary:hover, .steps > summary:hover { background: var(--hover); color: var(--text); }
+.tool > summary::-webkit-details-marker, .steps > summary::-webkit-details-marker { display: none; }
+.tool > summary::before, .steps > summary::before { content: "›"; transition: transform var(--motion) var(--ease); }
+.tool[open] > summary::before, .steps[open] > summary::before { transform: rotate(90deg); }
+.tool[open] { background: var(--surface); }
+.tool[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; color: var(--text); }
+.tool-name, .steps-count { flex: none; font-weight: var(--medium); }
+.tool-action { flex: none; }
+.tool-line, .steps-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-line { opacity: 0.8; }
+.tool-line.mono { font-size: var(--text-xs); }
 .tool-mark { flex: none; color: var(--danger); }
+.steps-body { display: grid; gap: var(--hairline); margin-left: var(--space-3); padding-left: var(--space-2); border-left: var(--hairline) solid var(--line); }
 .tool-body { display: grid; gap: var(--space-1); padding: var(--space-3); border-top: var(--hairline) solid var(--line); }
+
+/* ---------- working: the Ledge whose dot hops while a turn runs (D0051) ---------- */
+.working { display: flex; align-items: center; min-height: var(--control); padding-inline: var(--space-2); color: var(--muted); }
+.working-mark { width: var(--control-s); height: var(--control-s); overflow: visible; }
+.working-dot { transform-box: fill-box; transform-origin: 50% 100%; animation: hop var(--dur-hop) linear infinite; }
+@keyframes hop {
+  0% { transform: none; animation-timing-function: ease-out; }
+  12% { transform: scale(1.12, 0.86); animation-timing-function: ease-out; }
+  40% { transform: translateY(calc(var(--rise) * -0.7)) scale(0.96, 1.05); animation-timing-function: ease-in; }
+  62% { transform: scale(1.16, 0.82); animation-timing-function: ease-out; }
+  74%, 100% { transform: none; }
+}
+@keyframes breathe { 50% { opacity: 0.4; } }
+@media (prefers-reduced-motion: reduce) {
+  .working-dot { animation: breathe var(--dur-hop) var(--ease) infinite; }
+}
 .tool-body .label:not(:first-child) { margin-top: var(--space-2); }
 .tool-body pre { max-height: 50vh; overflow: auto; }
 .tool[data-error] .tool-result { border-color: var(--danger); }
