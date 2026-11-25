@@ -376,7 +376,7 @@ export function startServer(
     websocket: {
       open(ws) {
         ws.subscribe(TOPIC);
-        ws.send(JSON.stringify({ type: "hello", sessions: store.list() } satisfies ServerMessage));
+        ws.send(JSON.stringify({ type: "hello", sessions: store.list(), build: app.build } satisfies ServerMessage));
         if (ws.data.shell) {
           ws.subscribe(SHELL_TOPIC);
           shell.connect();

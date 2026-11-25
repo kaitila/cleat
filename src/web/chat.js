@@ -9,6 +9,7 @@ import {
   inputText,
   isOpenInTerminal,
   OPEN_IN_TERMINAL_HINT,
+  pagesChanged,
   pickSession,
   relativeTime,
   replyState,
@@ -1178,9 +1179,14 @@ window.addEventListener("popstate", () => selectWanted(wanted() ?? selected));
 
 let attempt = 0;
 
+/** The runner's build id from the first hello; another one later means new pages: reload (D0054). */
+let build = null;
+
 function onMessage(message) {
   switch (message?.type) {
     case "hello": {
+      if (pagesChanged(build, message.build)) return location.reload();
+      build ??= message.build ?? null;
       attempt = 0;
       els.connection.hidden = true;
       sessions.clear();

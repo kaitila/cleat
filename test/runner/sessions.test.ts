@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { EventsResponse, ServerMessage, SessionEvent, SessionMeta, SessionsResponse, WorkspacesResponse } from "../../src/shared/protocol";
 import type { AgentDriver } from "../../src/runner/agent";
 import { FAKE_ERROR, fakeReply } from "../../src/runner/agent-fake";
+import { buildId } from "../../src/runner/build";
 import { NO_RESULT } from "../../src/runner/sessions";
 import { RESTARTED } from "../../src/runner/store";
 import { connect, settled, testRunner } from "./helpers";
@@ -118,9 +119,10 @@ describe("WebSocket", () => {
   const runner = testRunner();
   afterAll(() => runner.stop());
 
-  test("sends hello with every session on connect", async () => {
+  test("sends hello with every session on connect, and the build id the pages reload on (D0054)", async () => {
     const first = await connect(runner);
-    expect(first.messages[0]).toEqual({ type: "hello", sessions: [] });
+    expect(first.messages[0]).toEqual({ type: "hello", sessions: [], build: buildId() });
+    expect(buildId()).toMatch(/^[0-9a-f]{12}$/);
     const session = await runner.startSession("hi");
     await settled(first, session.id);
     first.close();

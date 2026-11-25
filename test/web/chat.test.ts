@@ -30,6 +30,7 @@ import {
   unknownNote,
   WORKING_WORDS,
   workingWord,
+  pagesChanged,
 } from "../../src/web/chat-format.js";
 import { OPEN_IN_TERMINAL } from "../../src/shared/protocol";
 import { testRunner } from "../runner/helpers";
@@ -67,6 +68,22 @@ describe("served by the runner", () => {
     expect([...source("chat-manage.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     expect([...source("chat-resume.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     for (const file of imports) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
+  });
+});
+
+describe("pages reload when the runner serves new ones (D0054)", () => {
+  test("only a known build id that changes is a change", () => {
+    expect(pagesChanged(null, "abc123")).toBe(false);
+    expect(pagesChanged("abc123", "abc123")).toBe(false);
+    expect(pagesChanged("abc123", undefined)).toBe(false);
+    expect(pagesChanged("abc123", "")).toBe(false);
+    expect(pagesChanged("abc123", "def456")).toBe(true);
+  });
+
+  test("the chat and the dock reload on a hello with another build, before drawing anything", () => {
+    for (const script of ["chat.js", "dock.js"]) {
+      expect(source(script)).toMatch(/case "hello": \{\n(?:\s*\/\/[^\n]*\n)?\s*if \(pagesChanged\(build, message\.build\)\) return location\.reload\(\);\n\s*build \?\?= message\.build \?\? null;/);
+    }
   });
 });
 

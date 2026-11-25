@@ -46,7 +46,7 @@ Every `/api/sessions/:id/...` route answers 404 for an unknown session. Rename, 
 
 ## WebSocket
 `GET /ws`. The runner sends `ServerMessage`s; clients send nothing. The shell connects as `GET /ws?client=shell` (see "Platform").
-- On connect: `hello` with every session.
+- On connect: `hello` with every session, and `build`: the runner's build id, a hash of the code and the pages it serves (`src/runner/build.ts`). A page remembers the first `build` it was given; a `hello` with another one (the runner was restarted onto new code) reloads the page, so an open window never draws old pages against a new runner ([D0054](decisions/D0054-pages-reload-on-new-build.md)).
 - `session` whenever a session's metadata changes (status, title, lastSeq, archived, pinned). `hello` and `session` carry archived sessions too, with `archived: true`: the pages leave them out of their lists themselves.
 - `removed` when a session was deleted: its record and events are gone.
 - `event` for every stored event, for all sessions. A client that reconnects fetches what it missed with `GET /api/sessions/:id/events?after=<seq>`.
