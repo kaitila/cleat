@@ -24,8 +24,39 @@ export function inputText(input, indent = 0) {
 }
 
 /**
+ * A tool's name as a person reads it: { source, action }. An MCP tool (`mcp__<server>__<tool>`) is
+ * its server's name without the "claude.ai " prefix and its tool's words ("Gamma", "list funds");
+ * ToolSearch, which only loads other tools, is "Tools" / "load"; any other tool is its own name.
+ */
+const TOOL_SEARCH = { source: "Tools", action: "load" };
+
+export function toolLabel(name) {
+  const text = typeof name === "string" && name ? name : "Tool";
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(text);
+  if (mcp) {
+    const source = mcp[1].replace(/^claude_ai_/, "").replace(/_/g, " ");
+    const words = mcp[2].replace(/_/g, " ");
+    // "Slack" and "slack search": the action doesn't say the source again.
+    const prefix = `${source.toLowerCase()} `;
+    return { source, action: words.toLowerCase().startsWith(prefix) && words.length > prefix.length ? words.slice(prefix.length) : words };
+  }
+  if (text === "ToolSearch") return { ...TOOL_SEARCH };
+  return { source: text, action: "" };
+}
+
+/** A tool's label on one line: "Gamma list funds", "Bash". */
+export function toolLabelText(name) {
+  const { source, action } = toolLabel(name);
+  return action ? `${source} ${action}` : source;
+}
+
+/** The input fields whose value says best what a call is about, before any other text field. */
+const SUMMARY_KEYS = ["query", "q", "pattern", "url", "skill", "name", "description", "prompt"];
+
+/**
  * The line shown next to a tool's name while its call is collapsed: the command for Bash, the path
- * for file tools, otherwise the first 80 characters of the input.
+ * for file tools, the tools ToolSearch loads, otherwise the input's telling text field (a query, a
+ * name, else the first text it has), and the input as JSON when it has no text; at most 80 characters.
  */
 export function toolSummary(name, input) {
   const fields = typeof input === "object" && input !== null && !Array.isArray(input) ? input : {};
@@ -35,7 +66,31 @@ export function toolSummary(name, input) {
   for (const key of PATH_KEYS) {
     if (typeof fields[key] === "string" && fields[key]) return fields[key];
   }
-  return oneLine(inputText(input)).slice(0, SUMMARY_MAX);
+  if (name === "ToolSearch" && typeof fields.query === "string" && fields.query.startsWith("select:")) {
+    const names = fields.query.slice("select:".length).split(",");
+    return oneLine(names.map((n) => toolLabelText(n.trim())).join(", ")).slice(0, SUMMARY_MAX);
+  }
+  const texts = Object.entries(fields).filter(([, v]) => typeof v === "string" && v.trim());
+  const telling = SUMMARY_KEYS.map((key) => texts.find(([k]) => k === key)).find(Boolean) ?? texts[0];
+  if (telling) return oneLine(String(telling[1])).slice(0, SUMMARY_MAX);
+  if (input !== fields || Object.keys(fields).length > 0) return oneLine(inputText(input)).slice(0, SUMMARY_MAX);
+  return "";
+}
+
+/** At most this many sources are named on a folded run of steps; the rest are a count. */
+export const STEP_SOURCES = 3;
+
+/**
+ * What a folded run of tool calls says: { count: "11 steps", sources: "Gamma, Google Drive, Bash +2" },
+ * its sources in the order they were first used. Loading tools (ToolSearch) is left out of the
+ * sources while there is anything else: it says nothing about the work.
+ */
+export function stepsSummary(names) {
+  const all = [...new Set(names.map((n) => toolLabel(n).source))];
+  const sources = all.length > 1 ? all.filter((s) => s !== TOOL_SEARCH.source) : all;
+  const shown = sources.slice(0, STEP_SOURCES).join(", ");
+  const more = sources.length - STEP_SOURCES;
+  return { count: `${names.length} ${names.length === 1 ? "step" : "steps"}`, sources: more > 0 ? `${shown} +${more}` : shown };
 }
 
 /** The text a file tool is about to put into its file, by the input field that carries it. */

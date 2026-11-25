@@ -8,6 +8,10 @@ declare module "*/web/chat-format.js" {
   export const RESULT_MAX_LINES: number;
   export function inputText(input: unknown, indent?: number): string;
   export function toolSummary(name: string, input: unknown): string;
+  export function toolLabel(name: unknown): { source: string; action: string };
+  export function toolLabelText(name: unknown): string;
+  export const STEP_SOURCES: number;
+  export function stepsSummary(names: string[]): { count: string; sources: string };
   export const APPROVAL_MAX_CHARS: number;
   export const APPROVAL_MAX_LINES: number;
   export function approvalView(toolName: string, input: unknown): { path: string; text: string; full: string };

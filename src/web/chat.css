@@ -174,7 +174,6 @@
 .msg.user:not(:first-child) { margin-top: var(--space-3); }
 .user-text { white-space: pre-wrap; }
 .attachment { margin-top: var(--space-1); }
-.msg.streaming { color: var(--muted); }
 
 /* The end of a turn (and other one-line notes): quiet text, then a hairline to the edge. */
 .note { display: flex; align-items: center; gap: var(--space-3); min-width: 0; white-space: nowrap; overflow: hidden; }
@@ -203,10 +202,12 @@
 .stream > .approval.arrive { transform-origin: 50% 100%; animation: card-pop var(--dur-bouncy) var(--ease-bouncy) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
 /* A tool row: its body springs open from under the row (the rows below glide down with it, chat.js)
    and fades out before it closes; its chevron turns on the same spring. */
-.tool > summary::before { transition: transform var(--dur-bouncy) var(--ease-bouncy); }
-.tool[open] > .tool-body { transform-origin: 50% 0; animation: drop var(--dur-bouncy) var(--ease-bouncy), fade-in var(--dur-fade) var(--ease); }
-.tool[data-closing] > .tool-body { animation: fade-out var(--dur-out) var(--ease) forwards; }
-.tool[data-closing] > summary::before { transform: none; }
+.tool > summary::before, .steps > summary::before { transition: transform var(--dur-bouncy) var(--ease-bouncy); }
+.tool[open] > .tool-body, .steps[open] > .steps-body { transform-origin: 50% 0; animation: drop var(--dur-bouncy) var(--ease-bouncy), fade-in var(--dur-fade) var(--ease); }
+.tool[data-closing] > .tool-body, .steps[data-closing] > .steps-body { animation: fade-out var(--dur-out) var(--ease) forwards; }
+.tool[data-closing] > summary::before, .steps[data-closing] > summary::before { transform: none; }
+/* The working mark fades in where the turn's next thing will be. */
+.stream > .working { animation: fade-in var(--dur-gentle) var(--ease) backwards; }
 /* Selecting a session: the old stream, copied over the new one, fades away as the new one fades in. */
 .main { position: relative; }
 .stream-leaving { position: absolute; inset-inline: 0; overflow: hidden; background: transparent; pointer-events: none; animation: fade-out var(--dur-out) var(--ease) forwards; }
@@ -218,7 +219,7 @@
 @keyframes fade-out { to { opacity: 0; } }
 /* Reduced motion: no rise, no bounce, nothing glides; only short plain fades. */
 @media (prefers-reduced-motion: reduce) {
-  .stream > .arrive, .stream > .approval.arrive, .tool[open] > .tool-body, .entering { animation: fade-in var(--dur-fade) var(--ease) !important; }
+  .stream > .arrive, .stream > .approval.arrive, .tool[open] > .tool-body, .steps[open] > .steps-body, .entering { animation: fade-in var(--dur-fade) var(--ease) !important; }
   .stream-leaving { animation: fade-out var(--dur-out) var(--ease) forwards !important; }
 }
 
