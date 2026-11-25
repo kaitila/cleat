@@ -21,6 +21,7 @@ import {
   toolLabel,
   toolSummary,
   unknownNote,
+  workingWord,
 } from "./chat-format.js";
 import { canStop, manage, menuItems, renameInline, sessionMenu, visible } from "./chat-manage.js";
 import { renderMarkdown } from "./markdown.js";
@@ -563,7 +564,7 @@ const STAGGERED = 6;
 function add(el, still = false) {
   if (!still) el.classList.add("arrive");
   if (batch && !still) batch.push(el);
-  els.stream.insertBefore(el, streamedEl?.parentNode === els.stream ? streamedEl : null);
+  els.stream.insertBefore(el, tail());
   while (els.stream.childElementCount > RECENT_EVENTS + 10) els.stream.firstElementChild.remove();
   follow();
   edgesSoon();
@@ -572,6 +573,34 @@ function add(el, still = false) {
 
 function renderText(el, text, streaming = false) {
   el.replaceChildren(renderMarkdown(text, document, { streaming }));
+}
+
+/** The Ledge at the stream's end while the selected session's turn runs (renderWorking). */
+let workingEl = null;
+
+/** What stays at the stream's end: the streaming text, then the working mark. Null when neither is there. */
+function tail() {
+  if (streamedEl?.parentNode === els.stream) return streamedEl;
+  return workingEl?.parentNode === els.stream ? workingEl : null;
+}
+
+/** While the selected session's turn runs, the Ledge's dot hops at the stream's end, as in the chat (D0051). */
+function renderWorking() {
+  const session = selected ? sessions.get(selected) : undefined;
+  if (session?.status !== "running") {
+    workingEl?.remove();
+    workingEl = null;
+    return;
+  }
+  if (!workingEl) {
+    workingEl = document.getElementById("working-template").content.firstElementChild.cloneNode(true);
+    workingEl.querySelector(".working-word").textContent = workingWord();
+  }
+  if (els.stream.lastElementChild !== workingEl) {
+    els.stream.append(workingEl);
+    follow();
+    edgesSoon();
+  }
 }
 
 let streamQueued = false;
@@ -596,7 +625,7 @@ function renderStreamed() {
   }
   if (!streamedEl) streamedEl = h("div", "msg assistant md streaming arrive");
   renderText(streamedEl, text, true);
-  if (streamedEl.parentNode !== els.stream) els.stream.append(streamedEl);
+  if (streamedEl.parentNode !== els.stream) els.stream.insertBefore(streamedEl, workingEl?.parentNode === els.stream ? workingEl : null);
   follow();
   edgesSoon();
 }
@@ -1059,6 +1088,7 @@ stopButton.addEventListener("click", async () => {
 
 function renderHead() {
   const session = selected ? sessions.get(selected) : undefined;
+  renderWorking();
   els.session.hidden = !session;
   // With no session at all there is nothing to switch to (the line under the head says so).
   els.switcher.hidden = shown().length === 0;
@@ -1232,6 +1262,7 @@ function select(id) {
   tools.clear();
   approvals.clear();
   streamedEl = null;
+  workingEl = null;
   loadErrorEl = null;
   els.stream.replaceChildren();
   stick = true;

@@ -28,6 +28,8 @@ import {
   toolLabelText,
   toolSummary,
   unknownNote,
+  WORKING_WORDS,
+  workingWord,
 } from "../../src/web/chat-format.js";
 import { OPEN_IN_TERMINAL } from "../../src/shared/protocol";
 import { testRunner } from "../runner/helpers";
@@ -65,6 +67,26 @@ describe("served by the runner", () => {
     expect([...source("chat-manage.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     expect([...source("chat-resume.js").matchAll(/from "\.\/([^"]+)"/g)].map((m) => m[1]!)).toEqual(["chat-format.js"]);
     for (const file of imports) expect((await runner.get(`/assets/${file}`)).status).toBe(200);
+  });
+});
+
+describe("the working mark (D0051, D0053)", () => {
+  test("its word is island lingo, one of the list, ending in an ellipsis", () => {
+    expect(WORKING_WORDS.length).toBeGreaterThanOrEqual(12);
+    expect(new Set(WORKING_WORDS).size).toBe(WORKING_WORDS.length);
+    expect(workingWord(0)).toBe(`${WORKING_WORDS[0]}…`);
+    expect(workingWord(0.9999)).toBe(`${WORKING_WORDS.at(-1)}…`);
+    expect(workingWord(1)).toBe(`${WORKING_WORDS.at(-1)}…`);
+    expect(workingWord(-1)).toBe(`${WORKING_WORDS[0]}…`);
+    for (let i = 0; i < 50; i++) expect(WORKING_WORDS.map((w) => `${w}…`)).toContain(workingWord());
+  });
+
+  test("the chat and the dock both draw it: a template with the Ledge and its word, kept at the stream's end while a turn runs", () => {
+    for (const [page, script] of [["chat.html", "chat.js"], ["dock.html", "dock.js"]] as const) {
+      expect(source(page)).toMatch(/<template id="working-template"><div class="working"[^>]*><svg class="working-mark"[^]*<circle class="working-dot"[^]*<span class="working-word"><\/span><\/div><\/template>/);
+      expect(source(script)).toContain('session?.status !== "running"');
+      expect(source(script)).toContain("workingWord()");
+    }
   });
 });
 
