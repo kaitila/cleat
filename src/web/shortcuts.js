@@ -20,7 +20,7 @@ export function defaultHotkeys(mac = MAC) {
 
 /** The three global hotkeys: the settings key, the name Settings shows, what each does, and the guide's line for it. */
 export const GLOBAL = [
-  { key: "hotkey", name: "New task", what: "Opens the pop-up with the clipboard attached.", short: "New task, with the clipboard" },
+  { key: "hotkey", name: "New task", what: "Opens the pop-up for a new task: paste text or pictures straight in.", short: "New task" },
   { key: "snipHotkey", name: "Snip", what: "Freezes the screen to pick an area for a task.", short: "Snip a part of the screen" },
   { key: "chatHotkey", name: "Chat", what: "Opens the chat in the notch, and closes it again.", short: "Open or close the chat" },
 ];
@@ -69,7 +69,7 @@ export const PAGE_KEYS = [
       { id: "task.workspace", keys: [["cmd", "1–9"]], what: "Pick a workspace" },
       { id: "task.step", keys: [["Tab"], ["shift", "Tab"]], what: "Next or previous workspace (snip)" },
       { id: "task.agent", keys: [["alt", "A"]], what: "Switch between Claude and Codex" },
-      { id: "task.remove", keys: [["Backspace"]], what: "Remove the clipboard, in an empty task" },
+      { id: "task.paste", keys: [["cmd", "V"]], what: "Paste text or a picture at the cursor" },
       { id: "task.close", keys: [["Esc"]], what: "Close without starting" },
     ],
   },

@@ -9,7 +9,7 @@ Press a hotkey and a small pop-up appears in the middle of the screen with whate
 There is also a snip key: the screen freezes, you drag a box around something, and type the task right beside it.
 
 <!-- Screenshot to come: docs/images/ will hold one from the browser checks. -->
-*What it looks like:* the pop-up is a plain, frameless box, about 560 by 380, with the clipboard shown as a chip above a text field and the workspace picker beside it. The chat view is a two-pane window: sessions on the left, the conversation on the right, with tool calls folded into one-line rows and approval cards in the stream.
+*What it looks like:* the pop-up is a plain, frameless box, 520 wide, that opens small and grows as you type or paste: the workspace picker on top, a text field where pasted text and pictures go in at the cursor (a long paste or a picture as a chip). The chat view is a two-pane window: sessions on the left, the conversation on the right, with tool calls folded into one-line rows and approval cards in the stream.
 
 Cleat runs the agents with the [Claude Code](https://docs.claude.com/en/docs/claude-code/overview) you already have, logged in as you, with your own settings and permissions. It is not a hosted service: nothing leaves your machine except what Claude Code itself sends.
 
@@ -106,7 +106,7 @@ Without the tray app, the chat view is a web page at `http://127.0.0.1:4777/`.
 ## How it is built
 - **Runner** (`src/runner/`, bun and TypeScript): a small server on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, or OpenAI Codex sessions through the Codex SDK ([agents](docs/agents.md)), streams their events over a WebSocket and stores session metadata. On Windows it runs in WSL.
 - **Pages** (`src/web/`): the pop-up (`/prompt`), the chat view (`/`) and the dock, plain HTML, CSS and JavaScript served by the runner.
-- **Tray app** (`shell/`, Electron and TypeScript): the tray icon, the global hotkeys, clipboard capture, the snip, the dock and start at login.
+- **Tray app** (`shell/`, Electron and TypeScript): the tray icon, the global hotkeys, the pop-up, the snip, the dock and start at login.
 
 How the parts talk: [protocol](docs/protocol.md). The tray app in detail: [the Windows shell](docs/windows-shell.md). Why it is built this way: [decisions](docs/decisions/README.md). Security: [SECURITY.md](SECURITY.md).
 

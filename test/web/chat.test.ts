@@ -161,9 +161,10 @@ describe("tool icons (D0055)", () => {
   test("every key has a shape, and the markup is fixed: a tool's name only picks a key", () => {
     const code = source("tool-icons.js");
     for (const key of ICON_KEYS) expect(code).toContain(`${key}: '`);
-    // The only interpolations in the markup are the key and its shape, never the name itself.
+    // The only interpolations in the markup are a key checked against SHAPES and its shape, never a name itself.
     const inserted = [...code.matchAll(/\$\{([^}]+)\}/g)].map((m) => m[1]);
-    expect(inserted).toEqual(["iconKey(name)", "SHAPES[iconKey(name)]"]);
+    expect(inserted).toEqual(["key", "SHAPES[key]"]);
+    expect(code).toContain('const key = Object.hasOwn(SHAPES, wanted) ? wanted : "tool";');
     expect(code).not.toMatch(/\bdocument\b|\bwindow\b/);
   });
 });

@@ -24,8 +24,10 @@ import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Sett
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
 import { dockArea, dockNotchOf, dockTransparent, materialOptions, NOTCH_PROBE, parseNotch, windowMaterial, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
 import { RUNNER_START_MS } from "./wsl";
+import { acceptedFit, fittedHeight, POPUP_FIT, POPUP_MAX_HEIGHT, POPUP_MIN_HEIGHT, POPUP_PRELOAD, POPUP_WIDTH } from "./popup";
 
-const POPUP = { width: 560, height: 380 };
+/** The pop-up as it opens (D0056): small, growing with its task up to POPUP_MAX_HEIGHT (popup.ts). */
+const POPUP = { width: POPUP_WIDTH, height: POPUP_MIN_HEIGHT };
 const CHAT = { width: 1100, height: 720 };
 const ICON_SIZE = 32;
 /** The tray icon's size in points: the Ledge alone in a Mac's menu bar, its tile in a taskbar or panel. */
@@ -327,7 +329,8 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
         alwaysOnTop: true,
         skipTaskbar: true,
         title: "Cleat",
-        webPreferences: WEB_PREFERENCES,
+        // Its preload's one function: fit(height), the room its task needs (D0056).
+        webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), POPUP_PRELOAD) },
       });
       win.on("closed", () => {
         if (popup === win) popup = null;
@@ -347,13 +350,15 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
     }
     const win = popup;
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-    const bounds = { ...centred(area, POPUP.width, POPUP.height), ...POPUP };
+    // Its top where a fully grown pop-up's would be, centred (D0056): it opens a little above the
+    // middle and grows down from there without leaving the display.
+    const bounds = { ...centred(area, POPUP.width, POPUP_MAX_HEIGHT), ...POPUP };
     win.setBounds(bounds);
     // A window moved onto a display with another scale comes out sized by the scale it left: placed
     // again from there, it is right (seen on this machine with a display at 200% beside two at 100%).
     // Its content, not its outer bounds: at 200% those read a pixel taller than what was set.
     if (!sameArea(win.getContentBounds(), bounds)) win.setBounds(bounds);
-    // Loaded afresh each time, so the page starts empty and reads the new capture.
+    // Loaded afresh each time, so the page starts empty (and small again: it asks to fit as it draws).
     await win.loadURL(promptUrl(settings.runnerUrl));
     if (win.isDestroyed()) return null;
     if (inactive) win.showInactive();
@@ -374,10 +379,29 @@ async function openPopup(inactive = false): Promise<BrowserWindow | null> {
   }
 }
 
-/** The hotkey and "New task": the capture and the pop-up start together, neither waiting for the other. */
+/**
+ * The hotkey and "New task": the pop-up, empty. The clipboard is no longer captured for it (D0056):
+ * what is wanted is pasted into the task, at the caret.
+ */
 function newTask(): void {
-  void captureClipboard().catch((e) => console.error("capturing the clipboard failed", e));
   void openPopup();
+}
+
+/**
+ * The page's fit(height), through the pop-up's preload (D0056): the window takes that height, within
+ * its range, keeping its top edge and width. Taken only from the pop-up's own main frame on the
+ * runner's origin. A Mac animates the change.
+ */
+function onPopupFit(event: Electron.IpcMainEvent, value: unknown): void {
+  const win = popup;
+  const frame = event.senderFrame;
+  const fromPopup = win !== null && !win.isDestroyed() && event.sender === win.webContents;
+  if (!acceptedFit({ fromPopup, mainFrame: frame !== null && frame.parent === null, url: frame?.url ?? null }, settings.runnerUrl)) return;
+  const height = fittedHeight(value);
+  if (win === null || height === null) return;
+  const now = win.getContentBounds();
+  if (now.height === height) return;
+  win.setContentBounds({ x: now.x, y: now.y, width: POPUP_WIDTH, height }, OS === "macos");
 }
 
 /** The sessions the self-test saw the shell hand the dock to grow into the chat with ("" for the page's own pick). */
@@ -800,6 +824,8 @@ function onSnipClose(event: Electron.IpcMainEvent): void {
 }
 
 function snipEvents(): void {
+  // The pop-up's one ask (D0056), registered here with the other windows' bridges.
+  ipcMain.on(POPUP_FIT, onPopupFit);
   ipcMain.handle(SNIP_CAPTURE, onSnipCapture);
   ipcMain.handle(SNIP_CROP, onSnipCrop);
   ipcMain.on(SNIP_CLOSE, onSnipClose);
@@ -1596,7 +1622,8 @@ async function selfTest(): Promise<SelfTestResult> {
     r.popupUrl = win.webContents.getURL();
     r.popupVisible = win.isVisible();
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-    const middle = centred(area, bounds.width, bounds.height);
+    // Placed as a fully grown pop-up would be centred (D0056): across the middle, its top that one's.
+    const middle = centred(area, bounds.width, POPUP_MAX_HEIGHT);
     r.popupCentred = Math.abs(bounds.x - middle.x) <= 1 && Math.abs(bounds.y - middle.y) <= 1;
 
     // localhost is the same stub runner under another origin: it would load if the guard let it.

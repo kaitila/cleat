@@ -1,7 +1,7 @@
-/* The pop-up prompt: a 560x380 window. One floating glass card (D0028): a row of workspace pills,
-   the task box, the clipboard, one quiet line. Layout only: every colour, size, radius and border
-   is a token or a component of base.css (docs/design.md). The page itself is clear: the shell makes
-   the window see-through and the card floats over the desktop. */
+/* The pop-up prompt: a window 520 wide that opens small and grows with its task (D0056). One
+   floating glass card (D0028): a row of workspace pills, the task box, one quiet line. Layout only:
+   every colour, size, radius and border is a token or a component of base.css (docs/design.md). The
+   page itself is clear: the shell makes the window see-through and the card floats over the desktop. */
 html, body { background: transparent; }
 body { overflow: hidden; }
 /* The window's contents grow into place on the gentle spring as it opens, coming into focus as they
@@ -86,58 +86,90 @@ button.agent-switch.small { height: var(--control); padding: 0 var(--space-3) 0 
 .agent-switch[data-in] .agent-glyph { animation: turn-in var(--dur-bouncy) var(--ease-bouncy) backwards; }
 
 /* The task box is the window: no border, no ring (it holds the focus from the start, and its
-   caret says so). It takes the room that is left. */
+   caret says so). As tall as what it holds, two lines at least; the window grows with it (prompt.js
+   asks the shell), and past the window's largest the box scrolls. */
 .task {
-  flex: 1;
-  min-height: 0;
+  flex: 0 1 auto;
+  min-height: calc(var(--text-l) * var(--leading) * 2 + var(--space-4) * 2);
+  overflow-y: auto;
   width: 100%;
   padding: var(--space-4);
-  border: 0;
-  background: transparent;
-  resize: none;
   font-size: var(--text-l);
   line-height: var(--leading);
   letter-spacing: var(--track-l);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   caret-color: var(--accent);
+  cursor: text;
 }
-.task::placeholder { color: var(--muted); }
 .task:focus-visible { outline: none; }
+/* Its placeholder, while it holds nothing (prompt.js keeps an emptied box truly empty). */
+.task.empty::before { content: attr(data-placeholder); float: left; height: 0; color: var(--muted); pointer-events: none; }
 
-/* The clipboard attachment: one row above the foot, a label, the thumbnail or the first lines
-   of the text, and the remove control. */
-.clipboard {
-  flex: none;
-  display: flex;
+/* A chip in the text (composer.js): a picture's thumbnail and its number, or a long paste's page and
+   its size. It sits on the line like a word, pops in on the bouncy spring, and goes as one piece. */
+.chip {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-  margin: 0 var(--space-3) var(--space-2);
-  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-  border-radius: var(--radius-m);
+  gap: var(--space-1);
+  height: calc(var(--text-l) * var(--leading) - var(--space-1));
+  margin: 0 var(--hairline);
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-s);
+  line-height: 1;
+  letter-spacing: normal;
+  vertical-align: text-bottom;
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+  transform-origin: 50% 70%;
+  animation: chip-in var(--dur-bouncy) var(--ease-bouncy) backwards, fade-in var(--dur-fade) var(--ease) backwards;
+  transition: background-color var(--motion) var(--ease), border-color var(--motion) var(--ease);
 }
-/* It arrives (data-in) with a little spring, up from below. */
-.clipboard[data-in] { transform-origin: 50% 100%; animation: pop-in var(--dur-bouncy) var(--ease-bouncy) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
-.clip-label { flex: none; }
-.clip-text {
-  flex: 1;
-  min-width: 0;
-  max-height: calc(var(--text-s) * var(--leading) * 2);
-  overflow: hidden;
-  white-space: pre;
-  text-overflow: ellipsis;
+.chip:hover { background: var(--hover); border-color: var(--line-strong); }
+.chip[data-kind="paste"] { cursor: pointer; }
+.chip .tool-icon { color: var(--muted); }
+.chip-thumb {
+  height: calc(var(--text-l) * var(--leading) - var(--space-2));
+  width: auto;
+  max-width: calc(var(--control) * 2);
+  border-radius: var(--radius-xs);
+  object-fit: cover;
+  transition: opacity var(--motion) var(--ease);
+}
+/* While a picture goes up to the runner it breathes; one that didn't make it is marked. */
+.chip[data-state="uploading"] .chip-thumb { animation: uploading var(--dur-sweep) var(--ease) infinite; }
+.chip[data-state="failed"] { border-color: var(--danger); color: var(--danger); }
+/* Its ×, under the pointer only: the chip goes, and the caret stays where it stood. */
+.chip-remove {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin-right: calc(var(--space-1) * -1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
   color: var(--muted);
+  font-size: var(--text-s);
+  line-height: 1;
+  cursor: pointer;
 }
-.clip-image {
-  max-width: calc(var(--space-6) * 3);
-  height: var(--space-6);
-  margin-right: auto;
-  object-fit: contain;
-  border-radius: var(--radius-s);
-}
-.clip-remove { flex: none; }
+.chip:hover .chip-remove { display: inline-flex; }
+.chip-remove:hover { background: var(--hover); color: var(--text); }
+
+/* A picture dragged over the card: its edge lights up, and it goes where it is let go. */
+.prompt[data-drop] { outline: var(--ring) dashed var(--accent); outline-offset: calc(var(--ring) * -2); }
 
 .foot {
   flex: none;
+  margin-top: auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -159,11 +191,12 @@ button.agent-switch.small { height: var(--control); padding: 0 var(--space-3) 0 
 
 @keyframes page-in { from { transform: scale(calc((1 + var(--pop)) / 2)); } }
 @keyframes turn-in { from { transform: rotate(-60deg) scale(var(--pop)); } }
-@keyframes pop-in { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
+@keyframes chip-in { from { transform: scale(0.6); } }
+@keyframes uploading { 50% { opacity: 0.45; } }
 /* The fade in clears a blur as it goes. */
 @keyframes fade-in { from { opacity: 0; filter: var(--blur-in); } }
 
 /* Reduced motion: base.css stops every animation; the fades come back, plain. The mark jumps. */
 @media (prefers-reduced-motion: reduce) {
-  .prompt, .clipboard[data-in], .agent-switch[data-in] .agent-glyph { animation: fade-in var(--dur-fade) linear backwards !important; }
+  .prompt, .chip, .agent-switch[data-in] .agent-glyph { animation: fade-in var(--dur-fade) linear backwards !important; }
 }

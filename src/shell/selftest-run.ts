@@ -8,6 +8,7 @@ import { join, normalize } from "node:path";
 import { chatSize, DOCK_SIZES, dockBounds, type DockState, islandRect, type Notch } from "../../shell/src/dock";
 import { dockArea, opaqueDockBounds, windowMaterial } from "../../shell/src/os";
 import { cropPlan, SELF_TEST_CROP } from "../../shell/src/snip";
+import { POPUP_MIN_HEIGHT, POPUP_WIDTH } from "../../shell/src/popup";
 import type { Area } from "../../shell/src/geometry";
 import { parseRunnerSettings, type RunnerSettings, SELF_TEST_PREFS, SETTINGS_PAGE, SETTINGS_WINDOW } from "../../shell/src/prefs";
 import type { SelfTestResult } from "../../shell/src/result";
@@ -209,12 +210,13 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
     need(got === "none", `the ${which}'s material is ${JSON.stringify(got)}, not "none"`);
   }
   need(r.popupCreated, "the pop-up was not created");
-  // A pixel either way: on a display at 200% left of the primary one, Electron reads a 560x380 window back as 559x380 (outer bounds 560x381).
+  // A pixel either way: on a display at 200% left of the primary one, Electron read a 560x380 window back as 559x380 (outer bounds 560x381).
+  // It opens small (D0056); the stub's page asks for no other size, so it stays so.
   const near = (n: unknown, want: number) => typeof n === "number" && Math.abs(n - want) <= 1;
-  need(near(r.popupWidth, 560) && near(r.popupHeight, 380), `the pop-up is ${r.popupWidth}x${r.popupHeight}, not 560x380`);
+  need(near(r.popupWidth, POPUP_WIDTH) && near(r.popupHeight, POPUP_MIN_HEIGHT), `the pop-up is ${r.popupWidth}x${r.popupHeight}, not ${POPUP_WIDTH}x${POPUP_MIN_HEIGHT}`);
   need(r.popupUrl === `${runnerUrl}/prompt`, `the pop-up loaded ${r.popupUrl}, not ${runnerUrl}/prompt`);
   need(r.popupVisible, "the pop-up was not shown");
-  need(r.popupCentred, "the pop-up was not centred on the display under the cursor");
+  need(r.popupCentred, "the pop-up was not placed on the display under the cursor as a fully grown one is centred");
   need(r.foreignNavigationRefused, "a navigation to another origin was not refused");
   need(r.foreignWindowRefused, "a new window on another origin was not refused");
   need(r.pageClosedPopup, "window.close() from the page did not close the pop-up");
