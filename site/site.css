@@ -131,7 +131,7 @@ html, body { height: 100%; overflow: hidden; }
 .side-col { display: flex; flex: 0 1 calc(var(--measure) * 0.6); flex-direction: column; gap: var(--space-4); min-width: 0; }
 .name { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: var(--text-l); font-weight: var(--medium); line-height: var(--leading-tight); }
 /* The Ledge beside the name, in the text's colour: black on light, white on dark, never a status colour (D0044). */
-.name .mark { width: calc(var(--text-l) * 1.5); height: calc(var(--text-l) * 1.5); flex: none; }
+.name .mark { width: calc(var(--text-l) * 1.5); height: calc(var(--text-l) * 1.5); flex: none; overflow: visible; }
 .line { margin: var(--space-2) 0 var(--space-5); font-size: calc(var(--text-l) * 1.5); line-height: var(--leading-tight); letter-spacing: var(--track-l); }
 
 .keys { display: grid; margin: 0; border-top: var(--hairline) solid var(--line); }

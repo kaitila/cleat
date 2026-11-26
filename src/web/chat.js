@@ -22,7 +22,6 @@ import {
   toolLabelText,
   toolSummary,
   unknownNote,
-  workingWord,
 } from "./chat-format.js";
 import {
   archivedLine,
@@ -48,6 +47,8 @@ import { answersList, questionDecidedLabel, questionForm, questionsOf } from "./
 import { commandK, MAC } from "./keys.js";
 import { guide, tip } from "./shortcuts.js";
 import { shortcutsSheet, tooltips } from "./shortcuts-sheet.js";
+import { iconKey, toolIcon } from "./tool-icons.js";
+import { workingIndicator } from "./working.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -135,8 +136,11 @@ let loadAgain = false;
 const tools = new Map();
 /** A run of tool calls folded into one line (.steps) -> { el, body, count, line, mark, ids }. */
 const runs = new WeakMap();
-/** The Ledge at the stream's end while the selected session's turn runs (renderWorking). */
+/** The working indicator at the stream's end while the selected session's turn runs (renderWorking), and its element. */
+let working = null;
 let workingEl = null;
+/** When the selected session's latest turn began: its newest user message's time (ms), or null. */
+let turnStart = null;
 /** approvalId -> its card in the stream: { el, actions, error, buttons, decided }. */
 const approvals = new Map();
 /** sessionId -> assistant text streamed so far and not yet replaced by its assistant_text event. */
@@ -207,23 +211,35 @@ function tail() {
 }
 
 
-/** While the selected session's turn runs, the Ledge's dot hops at the stream's end (D0051). */
+/**
+ * While the selected session's turn runs, the working indicator sits at the stream's end (D0051,
+ * D0055, working.js): the step under way or an island word, and the time since the turn began. When
+ * the turn ends it fades away.
+ */
 function renderWorking() {
   const session = selected ? sessions.get(selected) : undefined;
   if (session?.status !== "running") {
-    workingEl?.remove();
+    working?.leave();
+    working = null;
     workingEl = null;
     return;
   }
-  // The Ledge in the text's colour (D0044), from chat.html's template: its dot hops (base.css, .working).
-  if (!workingEl) {
-    workingEl = document.getElementById("working-template").content.firstElementChild.cloneNode(true);
-    workingEl.querySelector(".working-word").textContent = workingWord();
+  if (!working) {
+    working = workingIndicator(document);
+    workingEl = working.el;
   }
+  working.update({ step: runningStep(), since: turnStart });
   if (els.stream.lastElementChild !== workingEl) {
     els.stream.append(workingEl);
     follow();
   }
+}
+
+/** The tool name of the newest call still waiting for its result, or null. */
+function runningStep() {
+  let step = null;
+  for (const tool of tools.values()) if (!tool.done) step = tool.name;
+  return step;
 }
 
 function renderText(el, text, streaming = false) {
@@ -275,37 +291,63 @@ function lastStep() {
 function foldIntoRun(first) {
   const el = h("details", "steps");
   const summary = h("summary");
+  const icons = h("span", "steps-icons");
   const count = h("span", "steps-count");
   const line = h("span", "steps-line");
   const mark = h("span", "tool-mark small");
-  summary.append(count, line, mark);
+  summary.append(icons, count, line, mark);
   const body = h("div", "steps-body");
   el.append(summary, body);
   summary.addEventListener("click", (e) => {
     e.preventDefault();
     toggleTool(el, body);
   });
-  const run = { el, body, count, line, mark, ids: [] };
+  const run = { el, body, icons, count, line, mark, ids: [], iconKeys: "" };
   runs.set(el, run);
   first.replaceWith(el);
   const tool = tools.get(first.dataset.toolUseId);
-  if (tool) joinRun(run, tool);
+  if (tool) joinRun(run, tool, false);
   else body.append(first);
   return run;
 }
 
-function joinRun(run, tool) {
+/** A call joins a run: it rises in when the page watches, and the run's count bumps. */
+function joinRun(run, tool, rising = live) {
+  if (rising) tool.details.classList.add("arrive");
   run.body.append(tool.details);
   run.ids.push(tool.id);
   tool.run = run;
   renderRun(run);
+  if (rising) {
+    run.count.classList.remove("bump");
+    void run.count.offsetWidth;
+    run.count.classList.add("bump");
+  }
 }
 
-/** A run's line: the call under way while one is, else the sources it used; and how many failed. */
+/** At most this many source icons sit on a run's line. */
+const RUN_ICONS = 3;
+
+/**
+ * A run's line: the icons of its first sources, its count, and the call under way while one is,
+ * else the sources it used; and how many failed.
+ */
 function renderRun(run) {
   const list = run.ids.map((id) => tools.get(id)).filter(Boolean);
   const { count, sources } = stepsSummary(list.map((t) => t.name));
   const last = list.at(-1);
+  // One icon a source, ToolSearch's left out while there is anything else (as in its sources).
+  const firsts = [];
+  for (const t of list) {
+    const key = iconKey(t.name);
+    if (!firsts.some((f) => iconKey(f) === key)) firsts.push(t.name);
+  }
+  const shown = (firsts.length > 1 ? firsts.filter((n) => n !== "ToolSearch") : firsts).slice(0, RUN_ICONS);
+  const keys = shown.map(iconKey).join(" ");
+  if (keys !== run.iconKeys) {
+    run.iconKeys = keys;
+    run.icons.replaceChildren(...shown.map((n) => toolIcon(document, n)));
+  }
   run.count.textContent = count;
   run.line.textContent = last && !last.done ? toolLabelText(last.name) : sources;
   const failed = list.filter((t) => t.failed).length;
@@ -318,7 +360,7 @@ function toolCard(toolUseId, name, input) {
   const summary = h("summary");
   const mark = h("span", "tool-mark small");
   const label = toolLabel(name);
-  summary.append(h("span", "tool-name", label.source));
+  summary.append(toolIcon(document, name), h("span", "tool-name", label.source));
   if (label.action) summary.append(h("span", "tool-action", label.action));
   summary.append(h("span", name === "Bash" ? "tool-line mono" : "tool-line", toolSummary(name, input)), mark);
   const body = h("div", "tool-body");
@@ -337,6 +379,7 @@ function toolCard(toolUseId, name, input) {
   else if (prev) joinRun(foldIntoRun(prev), tool);
   else add(details);
   follow();
+  renderWorking();
   return tool;
 }
 
@@ -358,6 +401,7 @@ function toolResult(event) {
   }
   if (tool.run) renderRun(tool.run);
   follow();
+  renderWorking();
 }
 
 /** A turn that ended leaves no call waiting: one without a result says so. */
@@ -369,6 +413,7 @@ function endOpenTools() {
     if (tool.run) touched.add(tool.run);
   }
   for (const run of touched) renderRun(run);
+  renderWorking();
 }
 
 // ---------- motion ----------
@@ -562,6 +607,10 @@ function apply(event) {
       const el = add(h("div", "msg user card"));
       el.append(h("div", "user-text", event.text));
       if (event.imagePath) el.append(h("div", "attachment mono muted", event.imagePath));
+      // The turn this message starts: the working indicator counts from here.
+      const at = Date.parse(event.ts);
+      turnStart = Number.isFinite(at) ? at : null;
+      renderWorking();
       break;
     }
     case "assistant_text":
@@ -1152,7 +1201,11 @@ function select(id, push = false, reveal = true) {
   tools.clear();
   approvals.clear();
   streamedEl = null;
+  // The stream is emptied below: the old indicator goes with it, its clock stopped.
+  working?.leave();
+  working = null;
   workingEl = null;
+  turnStart = null;
   loadErrorEl = null;
   els.stream.replaceChildren();
   stick = true;

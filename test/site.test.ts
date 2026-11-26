@@ -40,7 +40,9 @@ describe("the build", () => {
 
   test("the mark's dot hops now and then, and stays still under reduced motion (D0052)", () => {
     const base = readFileSync(join(WEB, "base.css"), "utf8");
-    expect(base).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{\s*\.mark-dot \{ animation: hop-now-and-then calc\(var\(--dur-hop\) \* 4\)/);
+    expect(base).toMatch(/@media \(prefers-reduced-motion: no-preference\) \{\s*\.mark-dot \{ animation: hop-now-and-then calc\(var\(--dur-hop\) \* 2\.5\)/);
+    // Its hop rises past the mark's box: the SVG must not clip it (the owner saw the top cut off).
+    expect(css).toMatch(/\.name \.mark \{[^}]*overflow: visible;/);
     expect(base).toContain("@keyframes hop-now-and-then");
   });
 

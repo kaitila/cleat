@@ -275,8 +275,21 @@ export const WORKING_WORDS = [
   "Raising the flag",
 ];
 
-/** A working word, as "Island-hopping…". `random` is a number in [0, 1), Math.random's by default. */
-export function workingWord(random = Math.random()) {
-  const i = Math.min(WORKING_WORDS.length - 1, Math.max(0, Math.floor(random * WORKING_WORDS.length)));
+/**
+ * A working word, as "Island-hopping…". `random` is a number in [0, 1), Math.random's by default.
+ * `not`: the word shown now, which the next one never repeats (D0055).
+ */
+export function workingWord(random = Math.random(), not = "") {
+  let i = Math.min(WORKING_WORDS.length - 1, Math.max(0, Math.floor(random * WORKING_WORDS.length)));
+  if (`${WORKING_WORDS[i]}…` === not) i = (i + 1) % WORKING_WORDS.length;
   return `${WORKING_WORDS[i]}…`;
+}
+
+/** How long a turn has run, beside the working mark: "4s", "1m 05s", "1h 02m". Nothing under a second. */
+export function elapsedLabel(ms) {
+  const s = Math.floor((Number.isFinite(ms) ? ms : 0) / 1000);
+  if (s < 1) return "";
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  return `${Math.floor(s / 3600)}h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}m`;
 }

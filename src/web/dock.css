@@ -266,7 +266,11 @@ button.live-session { flex: 0 1 auto; min-width: var(--control-s); max-width: ca
 .md :not(pre) > code { background: var(--surface); }
 /* A tool call: one line, its name and what it works on, small and muted so it reads as a step, not
    as the agent's words. Calls in a row stay together as one block. */
-.tool-row { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; color: var(--muted); font-size: var(--text-s); line-height: var(--leading-tight); }
+.tool-row { display: flex; align-items: center; gap: var(--space-2); min-width: 0; color: var(--muted); font-size: var(--text-s); line-height: var(--leading-tight); }
+/* Its icon (D0055): the text's size, and a row that arrives pops its icon in after it. */
+.tool-row .tool-icon { width: var(--text-m); height: var(--text-m); }
+.tool-row.arrive .tool-icon { animation: icon-pop var(--dur-bouncy) var(--ease-bouncy) var(--lag) backwards; }
+@keyframes icon-pop { from { transform: scale(0.5) rotate(-15deg); opacity: 0; } }
 .tool-row .tool-line { font-size: var(--text-s); }
 .tool-row + .tool-row { margin-top: calc(var(--space-2) - var(--space-3)); }
 .stream .approval-input { max-height: calc(var(--control) * 4); white-space: pre-wrap; overflow-wrap: anywhere; }

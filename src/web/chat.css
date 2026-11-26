@@ -206,8 +206,8 @@
 .tool[open] > .tool-body, .steps[open] > .steps-body { transform-origin: 50% 0; animation: drop var(--dur-bouncy) var(--ease-bouncy), fade-in var(--dur-fade) var(--ease); }
 .tool[data-closing] > .tool-body, .steps[data-closing] > .steps-body { animation: fade-out var(--dur-out) var(--ease) forwards; }
 .tool[data-closing] > summary::before, .steps[data-closing] > summary::before { transform: none; }
-/* The working mark fades in where the turn's next thing will be. */
-.stream > .working { animation: fade-in var(--dur-gentle) var(--ease) backwards; }
+/* A call that joins a run of steps while the page watches rises into it (D0055). */
+.steps-body > .arrive { animation: rise var(--dur-gentle) var(--ease-gentle) backwards, fade-in var(--dur-fade) var(--ease) backwards; }
 /* Selecting a session: the old stream, copied over the new one, fades away as the new one fades in. */
 .main { position: relative; }
 .stream-leaving { position: absolute; inset-inline: 0; overflow: hidden; background: transparent; pointer-events: none; animation: fade-out var(--dur-out) var(--ease) forwards; }

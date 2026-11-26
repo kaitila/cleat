@@ -178,8 +178,11 @@
   /* Rows that arrive together, one after the other; and how far the island's width lags its height. */
   --stagger: 40ms;
   --lag: 40ms;
-  /* One hop of the working mark's dot on its ledge, rest included (.working, D0051). */
-  --dur-hop: 1500ms;
+  /* One hop of the working mark's dot on its ledge, rest included (.working, D0051, D0055); the
+     bigger hop when it is pointed at; one pass of the light across its label. */
+  --dur-hop: 2400ms;
+  --dur-poke: 900ms;
+  --dur-sweep: 2600ms;
   /* How much of the island shows while nothing is going on. */
   --island-quiet: 0.55;
   /* The island's size as drawn. dock.js sets both on the island; until it has, nothing is drawn. */
@@ -680,28 +683,84 @@ kbd {
 .steps-body { display: grid; gap: var(--hairline); margin-left: var(--space-3); padding-left: var(--space-2); border-left: var(--hairline) solid var(--line); }
 .tool-body { display: grid; gap: var(--space-1); padding: var(--space-3); border-top: var(--hairline) solid var(--line); }
 
-/* ---------- working: the Ledge whose dot hops while a turn runs (D0051) ---------- */
-.working { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control); padding-inline: var(--space-2); color: var(--muted); font-size: var(--text-s); }
-/* Its word (D0053): island lingo, picked when the mark appears, small and muted beside it. */
-.working-word { white-space: nowrap; }
-.working-mark { width: var(--control-s); height: var(--control-s); overflow: visible; }
+/* Tool icons (tool-icons.js, D0055): line glyphs in the text's colour, 1em square, before a call's
+   source; under the pointer the icon lifts a little on the snappy spring. */
+.tool-icon { flex: none; width: var(--text-m); height: var(--text-m); transition: transform var(--dur-snappy) var(--ease-snappy); }
+.tool > summary:hover .tool-icon, .steps > summary:hover .tool-icon { transform: translateY(var(--lift)) scale(1.08); }
+/* A run's line: the icons of its first sources, overlapping a little, before its count. */
+.steps-icons { display: inline-flex; flex: none; gap: var(--space-1); }
+/* A run's count bumps when a call joins it (chat.js, .bump). */
+.steps-count.bump { animation: bump var(--dur-bouncy) var(--ease-bouncy); }
+@keyframes bump { from { transform: scale(1.18); } }
+.steps-count { display: inline-block; }
+
+/* ---------- working: the Ledge whose dot hops while a turn runs (D0051, D0053, D0055) ----------
+   working.js: the mark, the step under way (its icon and label) or an island word, the time. It
+   pops in on the bouncy spring and fades away when the turn ends; a label that changes rises in
+   out of a blur; a light sweeps across the label; pointed at, the dot hops higher, once. */
+.working {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control);
+  padding-inline: var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-s);
+  transform-origin: 0 50%;
+  animation: working-in var(--dur-bouncy) var(--ease-bouncy) backwards, working-fade var(--dur-fade) var(--ease) backwards;
+}
+@keyframes working-fade { from { opacity: 0; } }
+.working.leaving { animation: working-out var(--dur-out) var(--ease) forwards; }
+@keyframes working-in { from { transform: translateY(var(--rise)) scale(var(--pop)); } }
+@keyframes working-out { to { opacity: 0; transform: translateY(calc(var(--rise) * -0.5)); } }
+.working-mark { flex: none; width: var(--control-s); height: var(--control-s); overflow: visible; cursor: default; }
+.working-step { display: inline-flex; color: var(--text); }
+.working-step .tool-icon { width: var(--text-m); height: var(--text-m); }
+.working-step.swap { animation: step-in var(--dur-bouncy) var(--ease-bouncy); }
+@keyframes step-in { from { opacity: 0; transform: scale(0.6) rotate(-12deg); } }
+.working-word {
+  display: inline-block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* The sweep: the label drawn through a band of the text's colour moving across the muted. */
+  background: linear-gradient(100deg, var(--muted) 0 38%, var(--text) 50%, var(--muted) 62% 100%) 0 0 / 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: sweep var(--dur-sweep) linear infinite;
+}
+.working-word.swap { animation: word-in var(--dur-gentle) var(--ease-gentle), working-fade var(--dur-gentle) var(--ease), sweep var(--dur-sweep) linear infinite; }
+@keyframes word-in { from { transform: translateY(calc(var(--rise) * 0.6)); filter: var(--blur-in); } }
+@keyframes sweep { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.working-time { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; opacity: 0.7; }
 .working-dot { transform-box: fill-box; transform-origin: 50% 100%; animation: hop var(--dur-hop) linear infinite; }
+.working.poke .working-dot { animation: poke var(--dur-poke) linear; }
+/* One hop and a rest: a squash, up, a stretch at the top, a squash on landing, settle, wait. */
 @keyframes hop {
   0% { transform: none; animation-timing-function: ease-out; }
-  12% { transform: scale(1.12, 0.86); animation-timing-function: ease-out; }
-  40% { transform: translateY(calc(var(--rise) * -0.7)) scale(0.96, 1.05); animation-timing-function: ease-in; }
-  62% { transform: scale(1.16, 0.82); animation-timing-function: ease-out; }
-  74%, 100% { transform: none; }
+  7% { transform: scale(1.12, 0.86); animation-timing-function: ease-out; }
+  24% { transform: translateY(calc(var(--rise) * -0.7)) scale(0.95, 1.06); animation-timing-function: ease-in; }
+  38% { transform: scale(1.16, 0.82); animation-timing-function: ease-out; }
+  46% { transform: scale(0.98, 1.02); animation-timing-function: ease-in-out; }
+  52%, 100% { transform: none; }
 }
-@keyframes breathe { 50% { opacity: 0.4; } }
-@media (prefers-reduced-motion: reduce) {
-  .working-dot { animation: breathe var(--dur-hop) var(--ease) infinite; }
+/* Pointed at: a deeper squash, twice the height with a little turn, a bigger landing, a bounce. */
+@keyframes poke {
+  0% { transform: none; animation-timing-function: ease-out; }
+  12% { transform: scale(1.22, 0.74); animation-timing-function: ease-out; }
+  42% { transform: translateY(calc(var(--rise) * -1.4)) scale(0.9, 1.12) rotate(-8deg); animation-timing-function: ease-in; }
+  66% { transform: scale(1.24, 0.76); animation-timing-function: ease-out; }
+  80% { transform: translateY(calc(var(--rise) * -0.25)) scale(0.97, 1.04); animation-timing-function: ease-in; }
+  92% { transform: scale(1.04, 0.96); }
+  100% { transform: none; }
 }
-/* The mark beside the name on the landing page (D0052): the same hop, now and then. The hop takes
-   the first quarter of four --dur-hop, the rest is a wait; under reduced motion it stays still. */
+/* The mark beside the name on the landing page (D0052): the same hop, now and then: one hop, then
+   a wait, once every two and a half --dur-hop; under reduced motion it stays still. */
 .mark-dot { transform-box: fill-box; transform-origin: 50% 100%; }
 @media (prefers-reduced-motion: no-preference) {
-  .mark-dot { animation: hop-now-and-then calc(var(--dur-hop) * 4) linear var(--dur-hop) infinite; }
+  .mark-dot { animation: hop-now-and-then calc(var(--dur-hop) * 2.5) linear var(--dur-hop) infinite; }
 }
 @keyframes hop-now-and-then {
   0% { transform: none; animation-timing-function: ease-out; }
