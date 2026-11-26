@@ -1622,7 +1622,8 @@ async function selfTest(): Promise<SelfTestResult> {
     r.popupUrl = win.webContents.getURL();
     r.popupVisible = win.isVisible();
     const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-    const middle = centred(area, bounds.width, bounds.height);
+    // Placed as a fully grown pop-up would be centred (D0056): across the middle, its top that one's.
+    const middle = centred(area, bounds.width, POPUP_MAX_HEIGHT);
     r.popupCentred = Math.abs(bounds.x - middle.x) <= 1 && Math.abs(bounds.y - middle.y) <= 1;
 
     // localhost is the same stub runner under another origin: it would load if the guard let it.

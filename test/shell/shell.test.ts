@@ -951,7 +951,7 @@ describe("self-test runner", () => {
   const display = { x: 0, y: 0, width: 2560, height: 1440 };
   const good: SelfTestResult = {
     hotkeyRegistered: true, trayCreated: true, textCaptured: true, textPosted: true, imageCaptured: true, imagePosted: true, imagePath,
-    notificationsSupported: true, popupCreated: true, popupWidth: 560, popupHeight: 380, popupUrl: "http://127.0.0.1:5000/prompt",
+    notificationsSupported: true, popupCreated: true, popupWidth: 520, popupHeight: 172, popupUrl: "http://127.0.0.1:5000/prompt",
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
     noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
     // On 2560x1440 the chat is 1180x860 (chatSize), and the window is as large as that.
