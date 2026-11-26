@@ -27,9 +27,14 @@ export function titleOf(prompt: string): string {
   return (prompt.trim().split("\n")[0] ?? "").trim().slice(0, 80);
 }
 
-/** The prompt Claude sees: the task, then the attached image's path for it to read. */
-export function promptWithImage(prompt: string, imagePath?: string): string {
-  return imagePath ? `${prompt}\n\nAttached image (read this file): ${imagePath}` : prompt;
+/**
+ * The prompt Claude sees: the task, then the attached image's path for it to read; then the pictures
+ * pasted into the task (D0056), each by the "[Image #n]" the text names it with, and its path.
+ */
+export function promptWithImage(prompt: string, imagePath?: string, images: string[] = []): string {
+  let out = imagePath ? `${prompt}\n\nAttached image (read this file): ${imagePath}` : prompt;
+  if (images.length > 0) out += `\n\nAttached images (read these files):\n${images.map((path, i) => `[Image #${i + 1}]: ${path}`).join("\n")}`;
+  return out;
 }
 
 /** Told when a runner turn starts and ends, while the turn is still counted as running (the transcript sync, sync.ts). */
@@ -65,7 +70,7 @@ export class Sessions {
    * Creates the session on `agent`, stores the prompt as its first event and starts the turn in the
    * background. The agent is the session's for good: every reply goes to it.
    */
-  start(workspace: Workspace, prompt: string, imagePath?: string, agent: AgentKind = DEFAULT_AGENT): SessionMeta {
+  start(workspace: Workspace, prompt: string, imagePath?: string, agent: AgentKind = DEFAULT_AGENT, images?: string[]): SessionMeta {
     const now = new Date().toISOString();
     const session = this.store.create({
       id: crypto.randomUUID(),
@@ -81,7 +86,7 @@ export class Sessions {
       lastSeq: 0,
     });
     this.store.lastWorkspace = workspace.name;
-    this.begin(session.id, prompt, imagePath);
+    this.begin(session.id, prompt, imagePath, images);
     return session;
   }
 
@@ -92,18 +97,18 @@ export class Sessions {
    * runner, since that id is on disk. A session that failed before Claude Code reported an id has
    * no conversation to resume: its turn starts a new one in the same workspace.
    */
-  reply(id: string, prompt: string, imagePath?: string): SessionMeta {
-    this.begin(id, prompt, imagePath);
+  reply(id: string, prompt: string, imagePath?: string, images?: string[]): SessionMeta {
+    this.begin(id, prompt, imagePath, images);
     return this.store.get(id)!;
   }
 
   /**
    * Stores the prompt as a user event, with the session running, and starts its turn. The event
-   * keeps the text and the image's path apart; the agent gets them as one prompt.
+   * keeps the text and the images' paths apart; the agent gets them as one prompt.
    */
-  private begin(id: string, text: string, imagePath?: string): void {
-    this.record(id, { kind: "user", text, ...(imagePath ? { imagePath } : {}) }, "running");
-    const prompt = promptWithImage(text, imagePath);
+  private begin(id: string, text: string, imagePath?: string, images?: string[]): void {
+    this.record(id, { kind: "user", text, ...(imagePath ? { imagePath } : {}), ...(images?.length ? { images } : {}) }, "running");
+    const prompt = promptWithImage(text, imagePath, images);
     const abort = new AbortController();
     const interrupt = new AbortController();
     const entry = {

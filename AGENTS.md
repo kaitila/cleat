@@ -1,11 +1,11 @@
 # Cleat
 
-A background app that fires tasks at Claude Code agents: a global hotkey opens a small pop-up with the clipboard attached, you pick a workspace and type a task, and a chat window shows every session streaming. Setup and layout: [README](README.md). The contract between the parts: [protocol](docs/protocol.md). Decisions: [decisions](docs/decisions/README.md). It runs in one of three layouts ([platforms](docs/platforms.md), `src/shell/platform.ts`): `windows-wsl` (the runner in WSL 2, the shell on Windows; the owner's machine), `macos` and `linux` (the runner and the shell on one machine).
+A background app that fires tasks at Claude Code agents: a global hotkey opens a small pop-up where you pick a workspace and type a task (pasting text or pictures in at the cursor), and a chat window shows every session streaming. Setup and layout: [README](README.md). The contract between the parts: [protocol](docs/protocol.md). Decisions: [decisions](docs/decisions/README.md). It runs in one of three layouts ([platforms](docs/platforms.md), `src/shell/platform.ts`): `windows-wsl` (the runner in WSL 2, the shell on Windows; the owner's machine), `macos` and `linux` (the runner and the shell on one machine).
 
 Three parts:
 - **Runner** (`src/runner/`, bun + TypeScript; in WSL for windows-wsl, on the machine itself otherwise): a daemon on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK (and OpenAI Codex sessions through the Codex SDK: [agents](docs/agents.md)), streams their events over a WebSocket and stores session metadata.
 - **Web UI** (`src/web/`, served by the runner): the pop-up prompt (`/prompt`) and the chat view (`/`). Plain HTML, CSS and JavaScript modules, no build step.
-- **Shell** (`shell/`, Electron + TypeScript; on Windows, macOS or Linux): tray icon (the menu bar on a Mac), global hotkey, clipboard capture, the dock, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun, with what differs per OS in `shell/src/os.ts`; Electron itself is installed into the layout's shell folder by `cleat shell install`.
+- **Shell** (`shell/`, Electron + TypeScript; on Windows, macOS or Linux): tray icon (the menu bar on a Mac), global hotkey, the pop-up that grows with its task, the dock, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun, with what differs per OS in `shell/src/os.ts`; Electron itself is installed into the layout's shell folder by `cleat shell install`.
 
 ## Commands
 - `bun run check`: typecheck and tests. Run it before every commit; CI runs the same.

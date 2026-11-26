@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { DOCK_PRELOAD } from "../../shell/src/dock";
 import { fetchElectron } from "./electron-fetch";
 import type { LoginResult } from "../../shell/src/login";
+import { POPUP_PRELOAD } from "../../shell/src/popup";
 import { SNIP_PRELOAD } from "../../shell/src/snip";
 import { DEFAULT_SETTINGS, PID_FILE, withWsl } from "../../shell/src/settings";
 import type { WslSettings } from "../../shell/src/wsl";
@@ -40,6 +41,7 @@ async function bundle(entry: string, outDir: string, name: string): Promise<stri
 export async function buildShell(outDir: string): Promise<string> {
   await bundle("dock-preload.ts", outDir, DOCK_PRELOAD);
   await bundle("snip-preload.ts", outDir, SNIP_PRELOAD);
+  await bundle("popup-preload.ts", outDir, POPUP_PRELOAD);
   return bundle("main.ts", outDir, BUNDLE);
 }
 
@@ -73,7 +75,7 @@ export async function install(paths?: ShellPaths, log: (line: string) => void = 
   mkdirSync(paths.app, { recursive: true });
   await buildShell(paths.app);
   copyFileSync(join(SHELL_SRC, "package.json"), join(paths.app, "package.json"));
-  log(`bundle: ${join(paths.app, BUNDLE)}, ${DOCK_PRELOAD} and ${SNIP_PRELOAD}`);
+  log(`bundle: ${join(paths.app, BUNDLE)}, ${DOCK_PRELOAD}, ${SNIP_PRELOAD} and ${POPUP_PRELOAD}`);
   const wanted = wantedElectron();
   if (installedElectron(paths) === wanted) {
     log(`Electron ${wanted} is already installed`);
@@ -88,11 +90,11 @@ export async function install(paths?: ShellPaths, log: (line: string) => void = 
 
 /** True when Electron and every bundle are in the app folder. An install from before the dock or the snip lacks a preload, and counts as not installed. */
 export function isInstalled(paths: ShellPaths): boolean {
-  return existsSync(paths.electronExe) && [BUNDLE, DOCK_PRELOAD, SNIP_PRELOAD].every((name) => existsSync(join(paths.app, name)));
+  return existsSync(paths.electronExe) && [BUNDLE, DOCK_PRELOAD, SNIP_PRELOAD, POPUP_PRELOAD].every((name) => existsSync(join(paths.app, name)));
 }
 
 /** The files an install writes into the app folder, besides Electron. */
-const INSTALLED_FILES = [BUNDLE, DOCK_PRELOAD, SNIP_PRELOAD, "package.json"];
+const INSTALLED_FILES = [BUNDLE, DOCK_PRELOAD, SNIP_PRELOAD, POPUP_PRELOAD, "package.json"];
 
 function same(a: string, b: string): boolean {
   return existsSync(a) && existsSync(b) && readFileSync(a).equals(readFileSync(b));

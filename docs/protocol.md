@@ -6,7 +6,7 @@ The runner is one bun process on `127.0.0.1:4777` (`port` in the config file). I
 | Path | Page |
 |---|---|
 | `/` | Chat view: sessions in a sidebar, the selected one streaming. `/?session=<id>` opens one. `/?embed=dock` is the same page inside the dock's chat (see "Dock"). |
-| `/prompt` | Pop-up prompt: workspace picker, task box, the clipboard attachment. |
+| `/prompt` | Pop-up prompt: workspace picker and task box, where pasted text and pictures go in at the caret ([D0056](decisions/D0056-pop-up-paste-at-the-caret.md)). |
 | `/dock` | The dock: a pill, a peek and an open view of the sessions. See "Dock". |
 | `/settings` | The settings page: every setting of `GET /api/settings`, saved with `PUT /api/settings`. See "Settings". |
 | `/assets/<file>` | Files from `src/web/`. |
@@ -21,9 +21,9 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 | `GET /health` | | `HealthResponse`: `{ ok: true, version, build }`. `build` is a hash of the code the runner process loaded ([D0011](decisions/D0011-stale-runner-and-shell.md)): `start` and `up` restart a runner whose `build` differs from the repo's. |
 | `GET /api/workspaces` | | `WorkspacesResponse`: the config's workspaces and the last one used. Each has `exists` (its folder is there) and `agent`, the agent a new session there runs on (its own `agent`, else the top-level one; see "Agents"): the pop-up's and the snip's agent switch starts on it. |
 | `GET /api/sessions?archived=1` | | `SessionsResponse`: the sessions that aren't archived, pinned first, then newest first. With `archived=1`, only the archived ones (same order). 400 for an `archived` other than `0` or `1`. |
-| `POST /api/sessions` | `StartSessionRequest` | 201 `SessionResponse`. The turn runs in the background. Remembers the workspace as last used. `agent` (`"claude"` or `"codex"`), when given, runs the session on that agent instead of the workspace's (see "Agents"); any other value is a 400. 400 for an `imagePath` that is refused (see "Clipboard images"). |
+| `POST /api/sessions` | `StartSessionRequest` | 201 `SessionResponse`. The turn runs in the background. Remembers the workspace as last used. `agent` (`"claude"` or `"codex"`), when given, runs the session on that agent instead of the workspace's (see "Agents"); any other value is a 400. 400 for an `imagePath` that is refused (see "Clipboard images"), and for `images` that aren't a list of at most 20 pasted pictures (see "Pasted pictures"). |
 | `GET /api/sessions/:id/events?after=<seq>` | | `EventsResponse`: stored events with a higher seq (all without `after`). The first request for an imported session reads its history from the transcript first. |
-| `POST /api/sessions/:id/messages` | `ReplyRequest` | 202 `SessionResponse`, the session `running`. Stores the reply as a `user` event and runs a turn in the background that resumes the Claude Code session. 404 for an unknown session, 400 for an empty prompt or an `imagePath` that is refused, 409 while a turn runs or an approval is open, and 409 `OPEN_IN_TERMINAL` ("it looks open in a terminal: ...") when another process wrote to the session's transcript in the last two minutes, unless the body has `force: true` (see "Terminal sessions"). 400 for a `force` that isn't a boolean. A session in `error` takes a reply too: it resumes its conversation, or starts a new one in the same workspace when it never got a Claude Code session id. |
+| `POST /api/sessions/:id/messages` | `ReplyRequest` | 202 `SessionResponse`, the session `running`. Stores the reply as a `user` event and runs a turn in the background that resumes the Claude Code session. 404 for an unknown session, 400 for an empty prompt, an `imagePath` that is refused, or `images` as a start refuses them (see "Pasted pictures"), 409 while a turn runs or an approval is open, and 409 `OPEN_IN_TERMINAL` ("it looks open in a terminal: ...") when another process wrote to the session's transcript in the last two minutes, unless the body has `force: true` (see "Terminal sessions"). 400 for a `force` that isn't a boolean. A session in `error` takes a reply too: it resumes its conversation, or starts a new one in the same workspace when it never got a Claude Code session id. |
 | `POST /api/sessions/:id/approvals/:approvalId` | `ApprovalRequest` | 200 `SessionResponse`. 404 for an unknown or already answered approval. An `AskUserQuestion` call is allowed only with `answers`, one non-empty answer (at most 4000 characters) per question, keyed by its text; 400 without them, and for `answers` with any other tool or with `deny` ([D0039](decisions/D0039-answering-agent-questions.md)). |
 | `POST /api/sessions/:id/rename` | `RenameRequest` | 200 `SessionResponse`. The title is cut as any title (first line, 80 characters); 400 when that leaves nothing. Also the transcript's custom title, so `claude --resume` shows it (see "Managing sessions"). |
 | `POST /api/sessions/:id/stop` | `{}` | 200 `SessionResponse` once the interrupted turn has ended (at most 10 seconds): `idle`, with a `stopped` event. 409 `NOT_RUNNING` when the runner runs no turn of the session (a turn arriving from a terminal isn't the runner's to stop). |
@@ -31,7 +31,9 @@ JSON in, JSON out. Errors are `{ "error": "<text>" }` with a 4xx or 5xx status.
 | `POST /api/sessions/:id/pin` | `PinRequest` | 200 `SessionResponse`. 400 for a value that isn't a boolean. |
 | `POST /api/sessions/:id/fork` | `{}` | 201 `SessionResponse`: a new session of the runner's from the conversation so far, idle, titled `<title> (fork)`. 409 while a turn runs, and when the session has no Claude Code conversation yet. |
 | `POST /api/sessions/:id/delete` | `{}` | 200 `DeletedResponse` `{ deleted: id }`: the session, its events and its transcript are gone. 409 `TERMINAL_NOT_DELETED` for a session from the terminal (archive it instead), 409 while a turn runs; 500 when the transcript can't be deleted and is still there (the session stays). |
-| `GET /api/clipboard` | | The latest `ClipboardCapture`, or `{}` before the first one |
+| `POST /api/images` | `ImageUploadRequest` | 201 `ImageUploadResponse`: a picture pasted or dropped into the pop-up, a base64 PNG of at most 15 MB, saved as `<dataDir>/images/<uuid>.png` and answered with its path, to name in `images` (see "Pasted pictures"). 400 for anything that isn't a PNG. |
+| `GET /api/images/<uuid>.png` | | A pasted picture (`image/png`), for the chat's thumbnails. 404 for any other name, or a picture that is gone. |
+| `GET /api/clipboard` | | The latest `ClipboardCapture`, or `{}` before the first one. The pop-up no longer asks for it (D0056); the shell's self-test does. |
 | `POST /api/clipboard` | `ClipboardPostRequest` | 200 the stored `ClipboardCapture`, which replaces the one before (an empty body stores an empty capture). Sent by the Windows shell on the hotkey. `text` is cut to 20,000 characters. 400 for an `imagePath` that is refused, and the capture before it stays. |
 | `GET /api/clipboard/image` | | The latest capture's PNG (`image/png`), for the pop-up's thumbnail. 404 when the latest capture has no image or its file is gone. The request names no file. |
 | `GET /api/settings` | | `Settings`. See "Settings". |
@@ -111,6 +113,11 @@ A session that asked for `auto` and runs in another mode gets one `permission_mo
 
 The pages show `auto_denied` and `permission_mode` as quiet notes, as any kind they don't know.
 
+## Pasted pictures
+The pop-up attaches nothing by itself (D0056). A picture pasted or dropped into its task is drawn into a PNG by the page (at most 3000 px on its longer side) and posted to `POST /api/images`, which saves it as `<dataDir>/images/<uuid>.png` and answers its path. The task shows it as a chip, "Image 1", "Image 2" in reading order. A start (`StartSessionRequest`) or a reply (`ReplyRequest`) names the pictures in `images`, in that order, and the prompt names each where it stood as `[Image #n]`. `images` takes at most 20 paths, each a PNG directly in the runner's images folder or one the clipboard rule below takes (a snip); anything else is a 400 (`BAD_IMAGES`).
+
+The prompt the agent sees gets, after the task (and after an `imagePath`'s line), a blank line, `Attached images (read these files):` and a line `[Image #n]: <path>` for each. The stored `user` event keeps `images` apart from the text; the chat draws them as thumbnails from `GET /api/images/<uuid>.png`.
+
 ## Clipboard images
 The shell saves a clipboard image (and a snip) as a PNG in its OS's temp folder, under `cleat` (`clip-<time>.png` or `snip-<time>.png`, the newest 20 kept), and posts its path. Which paths the runner takes depends on the layout ([platforms](platforms.md)):
 
@@ -119,7 +126,7 @@ The shell saves a clipboard image (and a snip) as a PNG in its OS's temp folder,
 
 On every layout, anything else (`/etc/passwd`, a path that climbs out with `..`, a missing file, a file that doesn't start as a PNG) is a 400, and the error text names both rules.
 
-The capture is kept in memory only, the latest one. The pop-up asks for it on load and a few more times over its first two seconds, since the shell captures while the window opens, and attaches one whose `capturedAt` is within the last 30 seconds: a thumbnail for an image, the first lines for text, with a remove control (also Alt+Backspace). An attached image is sent as the session's `imagePath`; attached text goes into the prompt after the task, under a line `Clipboard:`.
+The capture is kept in memory only, the latest one. The pop-up no longer asks for it or attaches it (D0056): the shell no longer captures on the hotkey, and its self-test is what posts one now.
 
 A session started, or replied to, with `imagePath` gets the path in the prompt Claude sees, after the task: a blank line, then `Attached image (read this file): <path>`, so Claude reads the file. The stored `user` event keeps `text` and `imagePath` apart. Reading a file outside the workspace is a tool call like any other: it may need the person's approval.
 

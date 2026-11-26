@@ -12,9 +12,8 @@ import { capsText, comboCaps, defaultHotkeys, GLOBAL, guide, HINTS, hintLine, ho
 
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
 const source = (file: string) => readFileSync(join(WEB, file), "utf8");
-const { workspaceDigit, isRemoveKey } = (await import(join(WEB, "prompt.js"))) as {
+const { workspaceDigit } = (await import(join(WEB, "prompt.js"))) as {
   workspaceDigit(event: unknown, mac?: boolean): number | null;
-  isRemoveKey(event: unknown, text: string): boolean;
 };
 
 type Ev = { key: string; code: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; shiftKey: boolean };
@@ -132,7 +131,6 @@ describe("the guide and the handlers agree", () => {
         ["chat.find", (e) => commandK(e, mac)],
         ["task.workspace", (e) => workspaceDigit(e, mac) !== null],
         ["task.agent", (e) => isAgentKey(e)],
-        ["task.remove", (e) => isRemoveKey(e, "")],
         ["dock.guide", (e) => isGuideKey(e)],
       ];
       for (const [id, takes] of checks) {
@@ -143,12 +141,12 @@ describe("the guide and the handlers agree", () => {
     });
   }
 
-  test("Backspace removes the attachment only in an empty task, once per press, and Option+Backspace is the text box's again", () => {
-    expect(isRemoveKey({ key: "Backspace" }, "")).toBe(true);
-    expect(isRemoveKey({ key: "Backspace" }, "fix it")).toBe(false);
-    expect(isRemoveKey({ key: "Backspace", repeat: true }, "")).toBe(false);
-    expect(isRemoveKey({ key: "Backspace", altKey: true }, "")).toBe(false);
-    expect(source("prompt.js")).not.toMatch(/Backspace" && e\.altKey/);
+  test("nothing is attached by itself any more: no Backspace key of its own, and pasting goes in at the cursor (D0056)", () => {
+    expect(pageRow("task.remove")).toBeUndefined();
+    expect(pageRow("task.paste")!.keys).toEqual([["cmd", "V"]]);
+    expect(source("prompt.js")).not.toMatch(/Backspace/);
+    expect(source("composer.js")).toContain('box.addEventListener("paste"');
+    expect(GLOBAL.find((g) => g.key === "hotkey")!.what).not.toMatch(/clipboard attached/);
   });
 
   test("the keys handled in the pages' sources are in the guide", () => {

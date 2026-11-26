@@ -91,7 +91,13 @@ export const ICON_KEYS = Object.keys(SHAPES);
 
 /** A tool call's icon: an aria-hidden <svg class="tool-icon"> in the text's colour, 1em square. */
 export function toolIcon(doc, name) {
+  return iconByKey(doc, iconKey(name));
+}
+
+/** One of the icons by its key (a pasted text's page, D0056), the wrench for an unknown key. */
+export function iconByKey(doc, wanted) {
+  const key = Object.hasOwn(SHAPES, wanted) ? wanted : "tool";
   const holder = doc.createElement("span");
-  holder.innerHTML = `<svg class="tool-icon" data-icon="${iconKey(name)}" viewBox="0 0 16 16" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${SHAPES[iconKey(name)]}</svg>`;
+  holder.innerHTML = `<svg class="tool-icon" data-icon="${key}" viewBox="0 0 16 16" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${SHAPES[key]}</svg>`;
   return holder.firstElementChild;
 }

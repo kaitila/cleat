@@ -598,6 +598,28 @@ function endOpenApprovals() {
   for (const card of approvals.values()) approvalDecided(card, undefined);
 }
 
+/**
+ * The pictures pasted into a message (D0056): a thumbnail each, titled by the "[Image #n]" its text
+ * names it with. A picture the runner saved is served by its name; any other path is shown as text.
+ */
+function pictures(paths) {
+  const row = h("div", "msg-images");
+  paths.forEach((path, i) => {
+    const name = String(path).split("/").at(-1) ?? "";
+    if (/^[0-9a-f-]{36}\.png$/.test(name)) {
+      const img = h("img", "msg-image");
+      img.alt = `Image ${i + 1}`;
+      img.title = `[Image #${i + 1}]`;
+      img.loading = "lazy";
+      img.src = `/api/images/${name}`;
+      // Gone from the runner (its data folder was cleared): say so, quietly.
+      img.addEventListener("error", () => img.replaceWith(h("span", "attachment mono muted", `[Image #${i + 1}] ${path}`)), { once: true });
+      row.append(img);
+    } else row.append(h("span", "attachment mono muted", `[Image #${i + 1}] ${path}`));
+  });
+  return row;
+}
+
 /** Draws one stored event. Events arrive in seq order; one already on the page is skipped. */
 function apply(event) {
   if (!event || typeof event.seq !== "number" || event.seq <= lastSeq) return;
@@ -607,6 +629,7 @@ function apply(event) {
       const el = add(h("div", "msg user card"));
       el.append(h("div", "user-text", event.text));
       if (event.imagePath) el.append(h("div", "attachment mono muted", event.imagePath));
+      if (Array.isArray(event.images) && event.images.length > 0) el.append(pictures(event.images));
       // The turn this message starts: the working indicator counts from here.
       const at = Date.parse(event.ts);
       turnStart = Number.isFinite(at) ? at : null;

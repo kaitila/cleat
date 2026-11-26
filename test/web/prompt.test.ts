@@ -1,18 +1,22 @@
 // The pop-up prompt page: the runner serves it, and its pure helpers.
 import { afterAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { testRunner } from "../runner/helpers";
 
 const WEB = join(import.meta.dir, "..", "..", "src", "web");
 // A plain JavaScript module with no types: imported by a computed path, so tsc leaves it alone.
 const modulePath = join(WEB, "prompt.js");
-type Attachment = { capturedAt: string; kind: "image"; imagePath: string } | { capturedAt: string; kind: "text"; text: string };
-const { initialWorkspace, noWorkspaceText, workspaceDigit, errorText, UNREACHABLE, attachmentOf, preview, sessionBody, FRESH_MS, CLIPBOARD_POLLS } = (await import(modulePath)) as {
-  attachmentOf(capture: unknown, now?: number): Attachment | null;
-  preview(text: string): string;
-  sessionBody(workspace: string, task: string, attachment: Attachment | null, agent?: string | null): { workspace: string; prompt: string; imagePath?: string; agent?: string };
-  FRESH_MS: number;
-  CLIPBOARD_POLLS: number[];
+const { cleanPaste, isLongPaste, pastedLabel, serializeParts, LONG_PASTE_LINES, LONG_PASTE_CHARS } = (await import(join(WEB, "composer.js"))) as {
+  cleanPaste(text: unknown): string;
+  isLongPaste(text: string): boolean;
+  pastedLabel(text: string): string;
+  serializeParts(parts: ({ kind: "text" | "paste"; text: string } | { kind: "image"; path: string })[]): { prompt: string; images: string[] };
+  LONG_PASTE_LINES: number;
+  LONG_PASTE_CHARS: number;
+};
+const { initialWorkspace, noWorkspaceText, workspaceDigit, errorText, UNREACHABLE, sessionBody } = (await import(modulePath)) as {
+  sessionBody(workspace: string, prompt: string, images?: string[], agent?: string | null): { workspace: string; prompt: string; images?: string[]; agent?: string };
   initialWorkspace(workspaces: { name: string; exists: boolean }[], lastUsed: string | null): string | null;
   noWorkspaceText(workspaces: unknown[]): string;
   workspaceDigit(event: { altKey?: boolean; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; code?: string; key?: string }, mac?: boolean): number | null;
@@ -24,14 +28,14 @@ describe("the runner serves the pop-up", () => {
   const runner = testRunner();
   afterAll(() => runner.stop());
 
-  test("/prompt is the page, with the task box, the workspace row and the hidden clipboard element", async () => {
+  test("/prompt is the page, with the task box and the workspace row, and no clipboard attachment (D0056)", async () => {
     const res = await runner.get("/prompt");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
-    expect(html).toContain('id="task"');
     expect(html).toContain('id="workspaces"');
-    expect(html).toMatch(/<div id="clipboard"[^>]*\shidden>\s*<\/div>/);
+    expect(html).not.toContain('id="clipboard"');
+    expect(html).toMatch(/<div id="task" class="task empty" role="textbox" aria-multiline="true"/);
   });
 
   test("everything the page loads is served", async () => {
@@ -109,64 +113,58 @@ describe("errorText", () => {
   test("the line for a runner that doesn't answer", () => expect(UNREACHABLE).toBe("the runner is not reachable"));
 });
 
-describe("attachmentOf", () => {
-  const now = Date.parse("2026-11-13T10:00:30.000Z");
-  const at = (secondsAgo: number) => new Date(now - secondsAgo * 1000).toISOString();
-
-  test("a capture from the last 30 seconds is attached: its text, or its image", () => {
-    expect(FRESH_MS).toBe(30_000);
-    expect(attachmentOf({ capturedAt: at(1), text: "copied" }, now)).toEqual({ capturedAt: at(1), kind: "text", text: "copied" });
-    expect(attachmentOf({ capturedAt: at(30), imagePath: "/mnt/c/a.png" }, now)).toEqual({ capturedAt: at(30), kind: "image", imagePath: "/mnt/c/a.png" });
-  });
-  test("an image wins over text", () => {
-    expect(attachmentOf({ capturedAt: at(1), text: "copied", imagePath: "/mnt/c/a.png" }, now)?.kind).toBe("image");
-  });
-  test("an older capture is not attached", () => {
-    expect(attachmentOf({ capturedAt: at(31), text: "copied" }, now)).toBeNull();
-    expect(attachmentOf({ capturedAt: at(3600), imagePath: "/mnt/c/a.png" }, now)).toBeNull();
-  });
-  test("nothing is attached for no capture, an empty one, or one without a readable time", () => {
-    expect(attachmentOf({}, now)).toBeNull();
-    expect(attachmentOf(null, now)).toBeNull();
-    expect(attachmentOf({ capturedAt: at(1) }, now)).toBeNull();
-    expect(attachmentOf({ capturedAt: at(1), text: "  \n " }, now)).toBeNull();
-    expect(attachmentOf({ capturedAt: "soon", text: "copied" }, now)).toBeNull();
-    expect(attachmentOf({ capturedAt: at(-60), text: "copied" }, now)).toBeNull();
-    expect(attachmentOf({ text: "copied" }, now)).toBeNull();
-  });
-  test("the page asks on load and a few more times over the first two seconds", () => {
-    expect(CLIPBOARD_POLLS[0]).toBe(0);
-    expect(CLIPBOARD_POLLS.length).toBeGreaterThanOrEqual(4);
-    expect(Math.max(...CLIPBOARD_POLLS)).toBe(2000);
-  });
-});
-
-describe("preview", () => {
-  test("is the first two lines with something on them", () => {
-    expect(preview("\n  one  \n\ntwo\nthree")).toBe("one\ntwo");
-    expect(preview("only")).toBe("only");
-    expect(preview("a\r\nb\r\nc")).toBe("a\nb");
-  });
-  test("cuts a long line", () => expect(preview("x".repeat(5000))).toHaveLength(200));
-});
-
 describe("sessionBody", () => {
-  test("carries the agent on the switch, with or without an attachment; nothing for no agent or an unknown one", () => {
-    expect(sessionBody("work", "Do it", null, "codex")).toEqual({ workspace: "work", prompt: "Do it", agent: "codex" });
-    expect(sessionBody("work", "Do it", { capturedAt: "t", kind: "image", imagePath: "/mnt/c/a.png" }, "claude")).toEqual({ workspace: "work", prompt: "Do it", imagePath: "/mnt/c/a.png", agent: "claude" });
-    expect(sessionBody("work", "Do it", null, null)).toEqual({ workspace: "work", prompt: "Do it" });
-    expect(sessionBody("work", "Do it", null, "gpt")).toEqual({ workspace: "work", prompt: "Do it" });
+  test("is the task, its pictures when there are any, and the agent on the switch", () => {
+    expect(sessionBody("work", "Do it", [], "codex")).toEqual({ workspace: "work", prompt: "Do it", agent: "codex" });
+    expect(sessionBody("work", "Look at [Image #1]", ["/data/images/a.png"], "claude")).toEqual({ workspace: "work", prompt: "Look at [Image #1]", images: ["/data/images/a.png"], agent: "claude" });
+    expect(sessionBody("work", "Do it")).toEqual({ workspace: "work", prompt: "Do it" });
+    expect(sessionBody("work", "Do it", [], "gpt")).toEqual({ workspace: "work", prompt: "Do it" });
   });
-  test("without an attachment it is the task", () => {
-    expect(sessionBody("work", "Do it", null)).toEqual({ workspace: "work", prompt: "Do it" });
+});
+
+describe("the task box (composer.js, D0056)", () => {
+  test("a paste is plain text: Windows and old Mac line ends become new lines, and one final newline goes", () => {
+    expect(cleanPaste("a\r\nb\rc\n")).toBe("a\nb\nc");
+    expect(cleanPaste("one\n\n")).toBe("one\n");
+    expect(cleanPaste(undefined)).toBe("");
   });
-  test("an attached image goes as imagePath", () => {
-    expect(sessionBody("work", "Do it", { capturedAt: "t", kind: "image", imagePath: "/mnt/c/a.png" })).toEqual({ workspace: "work", prompt: "Do it", imagePath: "/mnt/c/a.png" });
+
+  test("a paste of more than 8 lines, or 1200 characters, becomes a chip", () => {
+    expect(LONG_PASTE_LINES).toBe(8);
+    expect(LONG_PASTE_CHARS).toBe(1200);
+    expect(isLongPaste(Array(8).fill("x").join("\n"))).toBe(false);
+    expect(isLongPaste(Array(9).fill("x").join("\n"))).toBe(true);
+    expect(isLongPaste("x".repeat(1200))).toBe(false);
+    expect(isLongPaste("x".repeat(1201))).toBe(true);
   });
-  test("attached text goes after the task, under a line 'Clipboard:'", () => {
-    expect(sessionBody("work", "Explain this\n", { capturedAt: "t", kind: "text", text: "line 1\nline 2" })).toEqual({
-      workspace: "work",
-      prompt: "Explain this\n\nClipboard:\nline 1\nline 2",
-    });
+
+  test("a chip says how much it holds", () => {
+    expect(pastedLabel(Array(42).fill("x").join("\n"))).toBe("Pasted text · 42 lines");
+    expect(pastedLabel("x".repeat(4321))).toBe("Pasted text · 4,321 characters");
+  });
+
+  test("what is sent: the text in order, each picture as [Image #n] in its place, each pasted text in full, the paths in order", () => {
+    const sent = serializeParts([
+      { kind: "text", text: "Compare " },
+      { kind: "image", path: "/i/a.png" },
+      { kind: "text", text: " and " },
+      { kind: "image", path: "/i/b.png" },
+      { kind: "text", text: " against​ this:\n" },
+      { kind: "paste", text: "line 1\nline 2" },
+    ]);
+    expect(sent).toEqual({ prompt: "Compare [Image #1] and [Image #2] against this:\nline 1\nline 2", images: ["/i/a.png", "/i/b.png"] });
+    expect(serializeParts([])).toEqual({ prompt: "", images: [] });
+  });
+
+  test("the page: no clipboard of its own; the box a plain-text editable that takes paste and drop, and the window fits it", () => {
+    const page = readFileSync(join(WEB, "prompt.js"), "utf8");
+    expect(page).not.toMatch(/api\/clipboard|attachment/);
+    expect(page).toContain("window.cleatPopup.fit(pick.offsetHeight + task.scrollHeight + foot.offsetHeight)");
+    const box = readFileSync(join(WEB, "composer.js"), "utf8");
+    expect(box).toContain('box.contentEditable = "plaintext-only"');
+    for (const event of ["paste", "drop", "dragover", "input"]) expect(box).toContain(`addEventListener("${event}"`);
+    // Untrusted text is never markup: a paste goes in as text, a chip is built from its parts.
+    expect(box).not.toMatch(/innerHTML|outerHTML|insertAdjacentHTML|insertHTML|DOMParser/);
+    expect(box).toContain('doc.execCommand("insertText", false, text)');
   });
 });

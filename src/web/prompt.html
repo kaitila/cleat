@@ -18,9 +18,9 @@
       <!-- The agent the task starts on: the workspace's own until flipped (a click, or Alt+A). -->
       <button id="agent" class="agent-switch quiet small" type="button" aria-keyshortcuts="Alt+A" hidden></button>
     </div>
-    <textarea id="task" class="task" aria-label="Task" placeholder="What should Claude do?" spellcheck="false" autofocus></textarea>
-    <!-- The clipboard attachment. Empty and hidden until prompt.js finds a fresh capture. -->
-    <div id="clipboard" class="clipboard card" hidden></div>
+    <!-- The task (composer.js, D0056): plain text, and what is pasted or dropped goes in at the caret,
+         a long paste or a picture as a chip. Empty until typed into: its placeholder is drawn by prompt.css. -->
+    <div id="task" class="task empty" role="textbox" aria-multiline="true" aria-label="Task" data-placeholder="What should Claude do?" spellcheck="false" tabindex="0"></div>
     <footer class="foot small">
       <span id="status" class="status" role="status" aria-live="polite"></span>
       <!-- The hint line: shortcuts.js's HINTS.prompt, in this platform's words. -->

@@ -2,13 +2,16 @@
 // The shell opens it in a small window on the hotkey, so everything works from the keyboard:
 // Enter starts, Shift+Enter is a new line, ⌘1..9 (Ctrl+1..9 off a Mac) picks a workspace, Alt+A flips the agent
 // (Claude Code or Codex, the workspace's own until flipped), Esc closes.
-// The shell captures the clipboard as the window opens: the capture shows under the task box and
-// goes with the task, unless it is removed (its ×, or Backspace in an empty task: D0046).
+// Nothing is attached by itself (D0056): what is pasted or dropped into the task goes in at the caret
+// (composer.js), and the window grows with it (window.cleatPopup.fit, the shell's preload).
 // The API is docs/protocol.md; the types are src/shared/protocol.ts.
 import { agentName, agentSvg, flipAgent, isAgentKey, pickAgent, taskPlaceholder } from "./agent.js";
+import { composer, sessionBody } from "./composer.js";
 import { commandAria, commandDigit, MAC } from "./keys.js";
 import { hintLine, tip } from "./shortcuts.js";
 import { renderHint, tooltips } from "./shortcuts-sheet.js";
+
+export { sessionBody };
 
 export const UNREACHABLE = "the runner is not reachable";
 
@@ -30,15 +33,6 @@ export function workspaceDigit(event, mac = MAC) {
   return digit === null ? null : digit - 1;
 }
 
-/**
- * True for the key that removes the clipboard attachment: Backspace alone, pressed (not held) in an
- * empty task box, as a recipient's chip goes in a mail's To field. Never Alt+Backspace: on a Mac
- * Option+Backspace deletes a word in every text box, and taking it surprised (D0046).
- */
-export function isRemoveKey(event, text) {
-  return Boolean(event && event.key === "Backspace" && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.repeat && !event.isComposing && text === "");
-}
-
 /** The line shown for an answer that isn't a success: the runner's own error text if it sent one. */
 export function errorText(status, body) {
   const text = body && typeof body === "object" && typeof body.error === "string" ? body.error.trim() : "";
@@ -48,48 +42,6 @@ export function errorText(status, body) {
 /** Why no workspace can be picked: there are none yet, or none of their folders exists. Settings (the tray menu) adds and fixes them. */
 export function noWorkspaceText(workspaces) {
   return workspaces.length === 0 ? "no workspaces yet: add one in Settings, from the tray menu" : "no workspace folder exists: fix the paths in Settings, from the tray menu";
-}
-
-/** A capture older than this was not made for this pop-up, and is not attached. */
-export const FRESH_MS = 30_000;
-/** When the page asks for the capture, in ms after it loads: the shell posts it while the window opens. */
-export const CLIPBOARD_POLLS = [0, 150, 400, 800, 1300, 2000];
-
-/**
- * What a capture attaches: its image, else its text, or null when it has neither, is older than
- * FRESH_MS, or is not a capture at all.
- */
-export function attachmentOf(capture, now = Date.now()) {
-  if (!capture || typeof capture !== "object" || typeof capture.capturedAt !== "string") return null;
-  const age = now - Date.parse(capture.capturedAt);
-  // A little slack for a capture stamped just ahead of this clock.
-  if (!(age <= FRESH_MS && age >= -5000)) return null;
-  const base = { capturedAt: capture.capturedAt };
-  if (typeof capture.imagePath === "string" && capture.imagePath) return { ...base, kind: "image", imagePath: capture.imagePath };
-  if (typeof capture.text === "string" && capture.text.trim()) return { ...base, kind: "text", text: capture.text };
-  return null;
-}
-
-/** The first two lines of clipboard text that have something on them, each cut to 200 characters. */
-export function preview(text) {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((line) => line.slice(0, 200))
-    .join("\n");
-}
-
-/**
- * The body of POST /api/sessions: an attached image goes by its path, attached text after the task,
- * and the agent shown on the switch, when there is one.
- */
-export function sessionBody(workspace, task, attachment, agent = null) {
-  const on = agent === "claude" || agent === "codex" ? { agent } : {};
-  if (attachment?.kind === "image") return { workspace, prompt: task, imagePath: attachment.imagePath, ...on };
-  if (attachment?.kind === "text") return { workspace, prompt: `${task.trimEnd()}\n\nClipboard:\n${attachment.text}`, ...on };
-  return { workspace, prompt: task, ...on };
 }
 
 /** Fetches JSON from the runner. Throws an Error whose message is the line to show. */
@@ -110,14 +62,33 @@ function start() {
   const row = document.getElementById("workspaces");
   const task = document.getElementById("task");
   const status = document.getElementById("status");
+  const pick = form.querySelector(".pick");
+  const foot = form.querySelector(".foot");
   let loaded = false;
   let busy = false;
-  const clip = document.getElementById("clipboard");
-  /** The capture that goes with the task, or null. */
-  let attachment = null;
-  /** capturedAt of the capture that was removed: a later poll doesn't bring it back. */
-  let removed = null;
   const agentButton = document.getElementById("agent");
+
+  /**
+   * The window's height follows what the page needs (D0056): the workspace row, the task's whole
+   * content and the foot, asked of the shell once a frame at most. In a browser tab there is no
+   * bridge, and the page simply scrolls its task.
+   */
+  let fitQueued = false;
+  const fit = () => {
+    if (fitQueued || typeof window.cleatPopup?.fit !== "function") return;
+    fitQueued = true;
+    requestAnimationFrame(() => {
+      fitQueued = false;
+      window.cleatPopup.fit(pick.offsetHeight + task.scrollHeight + foot.offsetHeight);
+    });
+  };
+  const box = composer(task, {
+    changed: fit,
+    upload: async (data) => {
+      const { imagePath } = await api("/api/images", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }) });
+      return imagePath;
+    },
+  });
   /** The workspaces as the runner sent them, for each one's agent. */
   let listed = [];
   /** The agent the person flipped to, or null to follow the workspace's. */
@@ -217,7 +188,7 @@ function start() {
     agentButton.replaceChildren(agentSvg(document, kind), name);
     agentButton.title = `Starts on ${agentName(kind)}. ${tip(`Switch to ${agentName(flipAgent(kind))}`, "task.agent")}`;
     agentButton.setAttribute("aria-label", `Agent: ${agentName(kind)}. Switch to ${agentName(flipAgent(kind))}`);
-    task.placeholder = taskPlaceholder(kind);
+    task.dataset.placeholder = taskPlaceholder(kind);
   }
 
   function flip() {
@@ -229,65 +200,8 @@ function start() {
     agentButton.setAttribute("data-in", "");
   }
 
-  function drawAttachment() {
-    clip.hidden = attachment === null;
-    if (attachment === null) return clip.replaceChildren();
-    let what;
-    if (attachment.kind === "image") {
-      what = document.createElement("img");
-      what.className = "clip-image";
-      what.alt = "Image from the clipboard";
-      what.src = `/api/clipboard/image?at=${encodeURIComponent(attachment.capturedAt)}`;
-    } else {
-      what = document.createElement("span");
-      what.className = "clip-text mono";
-      what.textContent = preview(attachment.text);
-    }
-    const label = document.createElement("span");
-    label.className = "clip-label label";
-    label.textContent = attachment.kind === "image" ? "Clipboard image" : "Clipboard";
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "clip-remove quiet small";
-    remove.textContent = "×";
-    remove.title = tip("Remove the clipboard", "task.remove");
-    remove.setAttribute("aria-label", "Remove the clipboard attachment");
-    remove.setAttribute("aria-keyshortcuts", "Backspace");
-    remove.addEventListener("click", removeAttachment);
-    clip.replaceChildren(label, what, remove);
-    // It springs in each time a capture arrives (prompt.css).
-    clip.removeAttribute("data-in");
-    void clip.offsetWidth;
-    clip.setAttribute("data-in", "");
-  }
-
-  function removeAttachment() {
-    if (attachment === null) return;
-    removed = attachment.capturedAt;
-    attachment = null;
-    drawAttachment();
-    task.focus();
-  }
-
-  /** Takes the runner's latest capture when it is fresh, new to the page and not the one removed. */
-  async function pollClipboard() {
-    let found;
-    try {
-      found = attachmentOf(await api("/api/clipboard"));
-    } catch {
-      return; // The workspace load already says when the runner can't be reached.
-    }
-    if (busy || found === null || found.capturedAt === removed || found.capturedAt === attachment?.capturedAt) return;
-    // An older answer that arrives late doesn't replace a newer capture.
-    if (attachment !== null && Date.parse(found.capturedAt) < Date.parse(attachment.capturedAt)) return;
-    attachment = found;
-    drawAttachment();
-  }
-
   function started(session) {
-    task.value = "";
-    attachment = null;
-    drawAttachment();
+    box.clear();
     window.close();
     // Still here a moment later: the browser refused to close a window it didn't open.
     setTimeout(() => {
@@ -300,8 +214,7 @@ function start() {
   }
 
   async function submit() {
-    const prompt = task.value;
-    if (busy || !prompt.trim()) return;
+    if (busy || box.isEmpty()) return;
     busy = true;
     try {
       if (!loaded) draw(await api("/api/workspaces"));
@@ -311,10 +224,13 @@ function start() {
         return;
       }
       say("Starting…");
+      // Pictures still on their way up are waited for; one that failed stops the send and says so.
+      const { prompt, images } = await box.read();
+      if (!prompt.trim()) return say("");
       const { session } = await api("/api/sessions", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(sessionBody(workspace, prompt, attachment, agent())),
+        body: JSON.stringify(sessionBody(workspace, prompt, images, agent())),
       });
       started(session);
     } catch (e) {
@@ -333,10 +249,10 @@ function start() {
   });
   agentButton.addEventListener("click", (e) => {
     flip();
-    if (e.detail > 0) task.focus();
+    if (e.detail > 0) box.focus();
   });
   row.addEventListener("click", (e) => {
-    if (e.detail > 0) task.focus();
+    if (e.detail > 0) box.focus();
   });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
@@ -348,11 +264,6 @@ function start() {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !(e.target instanceof HTMLAnchorElement)) {
       e.preventDefault();
       void submit();
-      return;
-    }
-    if (attachment !== null && e.target === task && isRemoveKey(e, task.value)) {
-      e.preventDefault();
-      removeAttachment();
       return;
     }
     if (isAgentKey(e)) {
@@ -377,13 +288,19 @@ function start() {
     markAt = null;
     placeMark();
   };
-  void document.fonts?.ready.then(replaceMark);
+  void document.fonts?.ready.then(() => {
+    replaceMark();
+    fit();
+  });
   window.addEventListener("resize", replaceMark);
+  // The workspaces wrapping onto a second row, a status line, a font arriving: the window follows.
+  new ResizeObserver(fit).observe(form);
+  new ResizeObserver(fit).observe(task);
   renderHint(document, document.getElementById("keys"), hintLine("prompt", MAC));
   tooltips(document, document.body);
-  task.focus();
+  box.focus();
+  fit();
   void load();
-  for (const ms of CLIPBOARD_POLLS) setTimeout(() => void pollClipboard(), ms);
 }
 
 if (typeof document !== "undefined") start();

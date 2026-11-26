@@ -137,7 +137,7 @@ describe("start at login on Linux: an XDG autostart file", () => {
     const app = join(home, "shell");
     const paths = { home, app, electronExe: electronExe(app, "linux") };
     mkdirSync(dirname(paths.electronExe), { recursive: true });
-    for (const f of [paths.electronExe, join(app, BUNDLE), join(app, "dock-preload.cjs"), join(app, "snip-preload.cjs")]) writeFileSync(f, "");
+    for (const f of [paths.electronExe, join(app, BUNDLE), join(app, "dock-preload.cjs"), join(app, "snip-preload.cjs"), join(app, "popup-preload.cjs")]) writeFileSync(f, "");
     return paths;
   }
 

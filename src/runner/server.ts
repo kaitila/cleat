@@ -14,6 +14,7 @@ import {
   type ErrorResponse,
   type EventsResponse,
   type HealthResponse,
+  type ImageUploadResponse,
   type NotificationsResponse,
   type PlatformResponse,
   type SentResponse,
@@ -29,6 +30,7 @@ import { driverFor, type AgentDriver } from "./agent";
 import { fakeStatus, machineStatus, type AgentStatusSource } from "./agent-status";
 import { buildId } from "./build";
 import { Clipboard, defaultImageRule, type ImageRule, NOT_AN_IMAGE, imagePathOf } from "./clipboard";
+import { BAD_IMAGES, IMAGE_NAME, imagesFolder, imagesOf, savePasted } from "./images";
 import { DELETING, Manage, fakeOps, sdkOps, type Refused, type TranscriptOps } from "./manage";
 import { agentFor, applySettings, permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
@@ -130,8 +132,27 @@ async function startSession(req: Request, app: App): Promise<Response> {
   if (b.agent !== undefined && !AGENTS.includes(b.agent as AgentKind)) return fail(400, `agent must be one of ${AGENTS.join(", ")}`);
   const imagePath = imageOf(b, app);
   if (imagePath === null) return fail(400, NOT_AN_IMAGE);
+  const images = imagesOf(b.images, app.config.dataDir, app.mounts);
+  if (images === null) return fail(400, BAD_IMAGES);
   const agent = (b.agent as AgentKind | undefined) ?? agentFor(app.config, workspace.name);
-  return json({ session: app.sessions.start(workspace, b.prompt, imagePath, agent) } satisfies SessionResponse, 201);
+  return json({ session: app.sessions.start(workspace, b.prompt, imagePath, agent, images) } satisfies SessionResponse, 201);
+}
+
+/** POST /api/images: saves a pasted picture (D0056). */
+async function postImage(req: Request, app: App): Promise<Response> {
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  const saved = savePasted(app.config.dataDir, b.data);
+  if ("error" in saved) return fail(400, saved.error);
+  return json(saved satisfies ImageUploadResponse, 201);
+}
+
+/** GET /api/images/<uuid>.png: a pasted picture, for the chat's thumbnails. */
+function getImage(name: string, app: App): Response {
+  if (!IMAGE_NAME.test(name)) return fail(404, "not found");
+  const path = join(imagesFolder(app.config.dataDir), name);
+  if (!existsSync(path)) return fail(404, "not found");
+  return new Response(Bun.file(path), { headers: { "content-type": "image/png", "cache-control": "no-store" } });
 }
 
 async function reply(req: Request, app: App, id: string): Promise<Response> {
@@ -141,6 +162,8 @@ async function reply(req: Request, app: App, id: string): Promise<Response> {
   if (typeof b.prompt !== "string" || !b.prompt.trim()) return fail(400, "prompt is empty");
   const imagePath = imageOf(b, app);
   if (imagePath === null) return fail(400, NOT_AN_IMAGE);
+  const images = imagesOf(b.images, app.config.dataDir, app.mounts);
+  if (images === null) return fail(400, BAD_IMAGES);
   if (b.force !== undefined && typeof b.force !== "boolean") return fail(400, "force must be true or false");
   // The history (of an imported session) and what a terminal wrote since the last round are stored
   // first, so the reply follows them. A session another process wrote to lately waits for force.
@@ -153,7 +176,7 @@ async function reply(req: Request, app: App, id: string): Promise<Response> {
   if (app.manage.deleting.has(id)) return fail(409, DELETING);
   const why = !app.sessions.isRunning(id) && app.sync.isLive(id) ? null : busy(session);
   if (why) return fail(409, why);
-  return json({ session: app.sessions.reply(id, b.prompt, imagePath) } satisfies SessionResponse, 202);
+  return json({ session: app.sessions.reply(id, b.prompt, imagePath, images) } satisfies SessionResponse, 202);
 }
 
 async function answerApproval(req: Request, app: App, id: string, approvalId: string): Promise<Response> {
@@ -274,6 +297,7 @@ async function handle(req: Request, app: App): Promise<Response> {
     if (path === "/api/sessions") return startSession(req, app);
     if (path === "/api/platform/open-screen-recording") return openScreenRecording(req, app);
     if (path === "/api/clipboard") return postClipboard(req, app);
+    if (path === "/api/images") return postImage(req, app);
     const messages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path);
     if (messages) return reply(req, app, messages[1]!);
     const approval = /^\/api\/sessions\/([^/]+)\/approvals\/([^/]+)$/.exec(path);
@@ -308,6 +332,7 @@ async function handle(req: Request, app: App): Promise<Response> {
     }
     if (path === "/api/clipboard") return json(app.clipboard.get() ?? {});
     if (path === "/api/clipboard/image") return clipboardImage(app);
+    if (path.startsWith("/api/images/")) return getImage(path.slice("/api/images/".length), app);
     if (path === "/health") return json({ ok: true, version: VERSION, build: app.build } satisfies HealthResponse);
     if (path === "/") return page("chat.html");
     if (path === "/prompt") return page("prompt.html");

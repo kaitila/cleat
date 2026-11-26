@@ -13,6 +13,7 @@ import { hotkeyNotice, migratedPrefs, parseRunnerSettings, releaseBoth, parseShe
 import type { SelfTestResult } from "../../shell/src/result";
 import { DEFAULT_SETTINGS, dropLegacy, hasLegacy, loadSettings, parseSettings, PID_FILE, SETTINGS_FILE, withoutLegacy, withWsl } from "../../shell/src/settings";
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
+import { acceptedFit, fittedHeight, POPUP_FIT, POPUP_MAX_HEIGHT, POPUP_MIN_HEIGHT, POPUP_PRELOAD, POPUP_WIDTH } from "../../shell/src/popup";
 import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
 import { defaultHotkeys, dockArea, opaqueDockBounds, shellOs } from "../../shell/src/os";
@@ -36,7 +37,7 @@ describe("bundle", () => {
   test("the dock's preload is its own small file beside it, and exposes setState, onChat and onChatKey and nothing else", async () => {
     const out = join(dir, "bundle-preload");
     await buildShell(out);
-    expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, SNIP_PRELOAD, BUNDLE].sort());
+    expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, SNIP_PRELOAD, POPUP_PRELOAD, BUNDLE].sort());
     const code = readFileSync(join(out, DOCK_PRELOAD), "utf8");
     expect(code).toContain('require("electron")');
     expect(code).not.toMatch(/^\s*(import|export)\s/m);
@@ -76,6 +77,43 @@ describe("bundle", () => {
     expect(src.match(/ipcRenderer\.\w+\([^)]*\)/g)).toEqual(["ipcRenderer.invoke(SNIP_CAPTURE)", "ipcRenderer.invoke(SNIP_CROP, rect)", "ipcRenderer.send(SNIP_CLOSE)"]);
   });
 
+  test("the pop-up's preload is its own small file, and exposes fit and nothing else (D0056)", async () => {
+    const out = join(dir, "bundle-popup-preload");
+    await buildShell(out);
+    const code = readFileSync(join(out, POPUP_PRELOAD), "utf8");
+    expect(code.match(/require\("[^"]+"\)/g)).toEqual(['require("electron")']);
+    expect(code).not.toMatch(/^\s*(import|export)\s/m);
+    expect(code).toContain(POPUP_FIT);
+    expect(code.length).toBeLessThan(5_000);
+
+    const src = readFileSync(join(REPO, "shell", "src", "popup-preload.ts"), "utf8");
+    expect(src.match(/exposeInMainWorld\(/g)).toHaveLength(1);
+    expect(src).toContain('contextBridge.exposeInMainWorld("cleatPopup", {');
+    const bridge = src.slice(src.indexOf("exposeInMainWorld"));
+    expect([...bridge.matchAll(/^  (\w+):/gm)].map((m) => m[1])).toEqual(["fit"]);
+    // One way out, a number only; nothing comes back in.
+    expect(src.match(/ipcRenderer\.\w+\([^)]*\)/g)).toEqual(["ipcRenderer.send(POPUP_FIT, height)"]);
+  });
+
+  test("the pop-up opens small and grows with its task, within its range, and only its own page may ask (D0056)", () => {
+    expect(POPUP_WIDTH).toBe(520);
+    expect(POPUP_MIN_HEIGHT).toBeLessThan(POPUP_MAX_HEIGHT);
+    expect(fittedHeight(10)).toBe(POPUP_MIN_HEIGHT);
+    expect(fittedHeight(300.2)).toBe(301);
+    expect(fittedHeight(5000)).toBe(POPUP_MAX_HEIGHT);
+    expect(fittedHeight("300")).toBeNull();
+    expect(fittedHeight(Number.NaN)).toBeNull();
+    const runner = "http://127.0.0.1:4777";
+    expect(acceptedFit({ fromPopup: true, mainFrame: true, url: `${runner}/prompt` }, runner)).toBe(true);
+    expect(acceptedFit({ fromPopup: false, mainFrame: true, url: `${runner}/prompt` }, runner)).toBe(false);
+    expect(acceptedFit({ fromPopup: true, mainFrame: false, url: `${runner}/prompt` }, runner)).toBe(false);
+    expect(acceptedFit({ fromPopup: true, mainFrame: true, url: "https://example.com/" }, runner)).toBe(false);
+    expect(acceptedFit({ fromPopup: true, mainFrame: true, url: null }, runner)).toBe(false);
+    const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
+    // The hotkey opens the pop-up and captures nothing for it.
+    expect(main).toMatch(/function newTask\(\): void \{\n  void openPopup\(\);\n\}/);
+  });
+
   test("an install without the preload counts as not installed, so `up` installs again", () => {
     const app = join(dir, "installed");
     const paths = { home: dir, app, electronExe: join(app, "electron.exe") };
@@ -87,6 +125,9 @@ describe("bundle", () => {
     // Nor without the snip's.
     expect(isInstalled(paths)).toBe(false);
     writeFileSync(join(app, SNIP_PRELOAD), "");
+    // Nor without the pop-up's (D0056).
+    expect(isInstalled(paths)).toBe(false);
+    writeFileSync(join(app, POPUP_PRELOAD), "");
     expect(isInstalled(paths)).toBe(true);
   });
 
@@ -137,22 +178,23 @@ describe("bundle", () => {
     expect(wantedElectron()).toBe(root.devDependencies.electron);
   });
 
-  test("only main.ts and the preloads import electron, and the windows are sandboxed without Node; only the dock and the snip have a preload", () => {
+  test("only main.ts and the preloads import electron, and the windows are sandboxed without Node; only the dock, the snip and the pop-up have a preload", () => {
     const src = join(REPO, "shell", "src");
     for (const name of readdirSync(src)) {
       const imports = /from "electron"|require\("electron"\)/.test(readFileSync(join(src, name), "utf8"));
-      expect(`${name}: ${imports}`).toBe(`${name}: ${["main.ts", "dock-preload.ts", "snip-preload.ts"].includes(name)}`);
+      expect(`${name}: ${imports}`).toBe(`${name}: ${["main.ts", "dock-preload.ts", "snip-preload.ts", "popup-preload.ts"].includes(name)}`);
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
     expect(main).toContain("sandbox: true, contextIsolation: true, nodeIntegration: false");
     expect(main.match(/new BrowserWindow\(/g)).toHaveLength(6);
-    // The pop-up, the chat, the Settings window and the dock's keyboard sink (a Mac's, it loads nothing): no preload.
-    // The dock and the snip overlays: the same preferences, plus their preload.
-    expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(4);
+    // The chat, the Settings window and the dock's keyboard sink (a Mac's, it loads nothing): no preload.
+    // The dock, the snip overlays and the pop-up: the same preferences, plus their preload.
+    expect(main.match(/webPreferences: WEB_PREFERENCES/g)).toHaveLength(3);
     expect(main.match(/webPreferences:/g)).toHaveLength(6);
     expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), DOCK_PRELOAD) }");
     expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, backgroundThrottling: false, preload: join(app.getAppPath(), SNIP_PRELOAD) }");
-    expect(main.match(/preload\s*:/g)).toHaveLength(2);
+    expect(main).toContain("webPreferences: { ...WEB_PREFERENCES, preload: join(app.getAppPath(), POPUP_PRELOAD) }");
+    expect(main.match(/preload\s*:/g)).toHaveLength(3);
     expect(main).not.toMatch(/nodeIntegration: true|sandbox: false|contextIsolation: false|webSecurity: false/);
   });
 });
@@ -725,7 +767,7 @@ describe("the dock", () => {
   test("main.ts: one listener on the dock's channel, and it takes a state only through the validation", () => {
     const main = readFileSync(join(REPO, "shell", "src", "main.ts"), "utf8");
     // The dock's one channel, and the snip's three (see "the snip" for those).
-    expect(main.match(/ipcMain\.\w+\([^)]*\)/g)).toEqual(["ipcMain.handle(SNIP_CAPTURE, onSnipCapture)", "ipcMain.handle(SNIP_CROP, onSnipCrop)", "ipcMain.on(SNIP_CLOSE, onSnipClose)", "ipcMain.on(DOCK_CHANNEL, onDockState)"]);
+    expect(main.match(/ipcMain\.\w+\([^)]*\)/g)).toEqual(["ipcMain.on(POPUP_FIT, onPopupFit)", "ipcMain.handle(SNIP_CAPTURE, onSnipCapture)", "ipcMain.handle(SNIP_CROP, onSnipCrop)", "ipcMain.on(SNIP_CLOSE, onSnipClose)", "ipcMain.on(DOCK_CHANNEL, onDockState)"]);
     expect(main).toContain("ipcMain.on(DOCK_CHANNEL, onDockState);");
     const handler = main.slice(main.indexOf("function onDockState("), main.indexOf("/** Listens for the page's setState"));
     expect(handler).toContain("event.sender === dock.webContents");

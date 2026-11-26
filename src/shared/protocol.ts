@@ -80,7 +80,8 @@ interface EventBase {
 
 export type SessionEvent = EventBase &
   (
-    | { kind: "user"; text: string; imagePath?: string }
+    /** `images`: the pictures pasted into the text, in the order its "[Image #n]" names them (D0056). */
+    | { kind: "user"; text: string; imagePath?: string; images?: string[] }
     | { kind: "assistant_text"; text: string }
     | { kind: "tool_use"; toolUseId: string; name: string; input: unknown }
     | { kind: "tool_result"; toolUseId: string; content: string; isError: boolean }
@@ -222,10 +223,17 @@ export interface ClipboardCapture {
 export interface HealthResponse { ok: true; version: string; build: string }
 export interface WorkspacesResponse { workspaces: Workspace[]; lastUsed: string | null }
 export interface SessionsResponse { sessions: SessionMeta[] }
-/** agent: run this session on that agent, instead of the workspace's (config `agent`). */
-export interface StartSessionRequest { workspace: string; prompt: string; imagePath?: string; agent?: AgentKind }
+/**
+ * agent: run this session on that agent, instead of the workspace's (config `agent`). images: the
+ * paths POST /api/images answered, in the order the prompt's "[Image #n]" names them (D0056).
+ */
+export interface StartSessionRequest { workspace: string; prompt: string; imagePath?: string; images?: string[]; agent?: AgentKind }
 /** force: reply even when another process wrote to the transcript in the last two minutes (else 409, OPEN_IN_TERMINAL). */
-export interface ReplyRequest { prompt: string; imagePath?: string; force?: boolean }
+export interface ReplyRequest { prompt: string; imagePath?: string; images?: string[]; force?: boolean }
+/** POST /api/images: a pasted picture as a base64 PNG (D0056). */
+export interface ImageUploadRequest { data: string }
+/** 201: where the runner saved it, to name in a StartSessionRequest's or ReplyRequest's images. */
+export interface ImageUploadResponse { imagePath: string }
 /** The 409 error for a reply to a session another process is writing to, without force. */
 export const OPEN_IN_TERMINAL = "it looks open in a terminal: reply with force to continue it here anyway";
 export interface SessionResponse { session: SessionMeta }

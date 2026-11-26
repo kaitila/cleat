@@ -1,8 +1,8 @@
-// Drives the pop-up prompt in headless Chromium at the size the shell opens it (560x380), against a
+// Drives the pop-up prompt in headless Chromium, 520 wide as the shell shows it (the shell grows it with fit(); here it is
+// held at 380 tall, and a stand-in bridge records the fits), against a
 // runner with the fake agent. Run it on this machine: `bun test/web/prompt-ui.ts`.
 // It uses the playwright installed globally for bun, and prints "skipped" and exits 0 without one.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { deflateSync } from "node:zlib";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EventsResponse, SessionsResponse, WorkspacesResponse } from "../../src/shared/protocol";
@@ -13,7 +13,7 @@ import { atRest, frameStrip, pauseAll, type FramePage } from "./motion-frames";
 // The little of playwright's API this script uses (the package isn't a dependency, so no types).
 interface Page {
   goto(url: string): Promise<unknown>;
-  evaluate<T>(fn: () => T): Promise<T>;
+  evaluate<T>(fn: (() => T) | string): Promise<T>;
   click(selector: string): Promise<void>;
   fill(selector: string, value: string): Promise<void>;
   waitForFunction(fn: () => unknown, arg?: unknown, options?: { timeout?: number }): Promise<unknown>;
@@ -82,37 +82,7 @@ const runner = startServer(loadConfig(env));
 const shots = join(dir, "screenshots");
 mkdirSync(shots);
 
-/** An 8x8 grey PNG in a new folder under a Windows user's temp folder, by its WSL path. Null where there is none. */
-function windowsTempPng(): string | null {
-  try {
-    const users = "/mnt/c/Users";
-    const temp = readdirSync(users).map((u) => join(users, u, "AppData", "Local", "Temp")).find((t) => existsSync(t));
-    if (!temp) return null;
-    mkdirSync(join(temp, "cleat"), { recursive: true });
-    const folder = mkdtempSync(join(temp, "cleat", "prompt-ui-"));
-    const chunk = (type: string, data: Buffer) => {
-      const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
-      const out = Buffer.alloc(body.length + 8);
-      out.writeUInt32BE(data.length, 0);
-      body.copy(out, 4);
-      out.writeUInt32BE(Bun.hash.crc32(body), body.length + 4);
-      return out;
-    };
-    const header = Buffer.alloc(13);
-    header.writeUInt32BE(8, 0);
-    header.writeUInt32BE(8, 4);
-    header.set([8, 0, 0, 0, 0], 8); // 8 bits, greyscale
-    const rows = Buffer.alloc(8 * 9, 128);
-    for (let y = 0; y < 8; y++) rows[y * 9] = 0; // each row's filter byte
-    const file = join(folder, "clip.png");
-    writeFileSync(file, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]));
-    return file;
-  } catch {
-    return null;
-  }
-}
-
-const SIZE = { width: 560, height: 380 };
+const SIZE = { width: 520, height: 380 };
 const state = () => ({
   focus: document.activeElement?.id ?? "",
   workspaces: [...document.querySelectorAll<HTMLInputElement>("#workspaces input")].map((r) => ({
@@ -120,13 +90,13 @@ const state = () => ({
     disabled: r.disabled,
     checked: r.checked,
   })),
-  task: document.querySelector<HTMLTextAreaElement>("#task")!.value,
-  placeholder: document.querySelector<HTMLTextAreaElement>("#task")!.placeholder,
+  task: document.querySelector<HTMLElement>("#task")!.textContent ?? "",
+  placeholder: document.querySelector<HTMLElement>("#task")!.dataset.placeholder ?? "",
   agent: document.querySelector<HTMLElement>("#agent")!.hidden ? null : (document.querySelector<HTMLElement>("#agent")!.dataset.agent ?? null),
   agentText: document.querySelector<HTMLElement>("#agent")!.textContent ?? "",
   status: document.querySelector("#status")!.textContent ?? "",
   link: document.querySelector<HTMLAnchorElement>("#status a")?.getAttribute("href") ?? null,
-  clipboardHidden: document.querySelector<HTMLElement>("#clipboard")!.hidden && document.querySelector("#clipboard")!.childNodes.length === 0,
+  noClipboard: document.querySelector("#clipboard") === null,
   // No scrollbars: nothing is wider or taller than the window, and no scrollbar takes room from it.
   overflow: [document.documentElement, document.body, document.querySelector("#task")!].some(
     (el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight,
@@ -142,7 +112,13 @@ const requested: string[] = [];
 async function newPage(colorScheme: "light" | "dark", from = browser, reducedMotion: "reduce" | "no-preference" = "no-preference"): Promise<Page> {
   const context = await from.newContext({ viewport: SIZE, colorScheme, reducedMotion, ...(from === dense ? { deviceScaleFactor: 2 } : {}) });
   context.on("request", (r) => requested.push(r.url()));
-  return context.newPage();
+  const page = await context.newPage();
+  // The shell's preload, stood in for: the fits the page asks for are kept (D0056).
+  await page.addInitScript(() => {
+    (window as unknown as { __fits: number[] }).__fits = [];
+    (window as unknown as { cleatPopup: { fit(h: number): void } }).cleatPopup = { fit: (h: number) => (window as unknown as { __fits: number[] }).__fits.push(h) };
+  });
+  return page;
 }
 async function open(colorScheme: "light" | "dark", from = browser, reducedMotion: "reduce" | "no-preference" = "no-preference"): Promise<Page> {
   const page = await newPage(colorScheme, from, reducedMotion);
@@ -156,14 +132,12 @@ const motion = () => {
   const mark = document.querySelector<HTMLElement>(".workspace-mark")!;
   const chip = document.querySelector("#workspaces input:checked + span")!.getBoundingClientRect();
   const at = mark.getBoundingClientRect();
-  const clip = document.querySelector<HTMLElement>("#clipboard")!;
   return {
     page: prompt.animationName,
     pageEasing: prompt.animationTimingFunction,
     markTransition: getComputedStyle(mark).transitionProperty + " " + getComputedStyle(mark).transitionTimingFunction,
     markOnChip: Math.abs(at.x - chip.x) <= 1 && Math.abs(at.y - chip.y) <= 1 && Math.abs(at.width - chip.width) <= 1,
     markBehind: getComputedStyle(mark).backgroundColor !== "rgba(0, 0, 0, 0)" && getComputedStyle(document.querySelector("#workspaces input:checked + span")!).backgroundColor === "rgba(0, 0, 0, 0)",
-    clip: clip.getAnimations().map((a) => (a as CSSAnimation).animationName),
   };
 };
 const blank = async () => (await (await browser.newContext({ viewport: { width: 1200, height: 400 }, colorScheme: "light" })).newPage()) as unknown as FramePage;
@@ -184,8 +158,8 @@ try {
   check("the missing workspace is disabled", s.workspaces.find((w) => w.name === "gone")?.disabled === true);
   check("the workspaces that exist can be picked", s.workspaces.filter((w) => !w.disabled).map((w) => w.name).join() === "alpha,beta");
   check("with none used yet, the first that exists is selected", checkedOf(s) === "alpha", String(checkedOf(s)));
-  check("the clipboard element is there, empty and hidden", s.clipboardHidden);
-  check("no scrollbars at 560x380", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
+  check("there is no clipboard attachment element (D0056)", s.noClipboard);
+  check("no scrollbars at 520x380", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
   check("the agent switch shows alpha's agent, Claude Code, and the box asks Claude", s.agent === "claude" && s.agentText === "Claude Code" && s.placeholder === "What should Claude do?", JSON.stringify([s.agent, s.agentText, s.placeholder]));
   const keysFit = await page.evaluate(() => {
     const keys = document.querySelector(".keys")!.getBoundingClientRect();
@@ -291,149 +265,83 @@ try {
   check("Tab reaches the workspace row", focused === "beta", focused);
   await shot(again, "dark-workspace-focus");
 
-  // The clipboard attachment. The shell posts its capture while the window opens: here, just before.
-  const post = (body: unknown) =>
-    fetch(`${runner.url}/api/clipboard`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const clipState = () => {
-    const el = document.querySelector<HTMLElement>("#clipboard")!;
-    return {
-      hidden: el.hidden,
-      empty: el.childNodes.length === 0,
-      text: el.querySelector(".clip-text")?.textContent ?? null,
-      image: el.querySelector("img")?.naturalWidth ?? null,
-      remove: el.querySelector("button") !== null,
-    };
-  };
-  const attached = () => !document.querySelector<HTMLElement>("#clipboard")!.hidden;
+  // Nothing is attached by itself any more (D0056): what is wanted is pasted into the task, at the caret.
   const userTexts = async (id: string) =>
     ((await (await fetch(`${runner.url}/api/sessions/${id}/events`)).json()) as EventsResponse).events.flatMap((e) => (e.kind === "user" ? [e] : []));
   /** Types a task, presses Enter and returns the session it started. */
-  async function send(p: Page, task: string) {
+  async function send(p: Page, task: string, title = task) {
     const before = (await sessions()).length;
-    await p.keyboard.type(task);
+    if (task) await p.keyboard.type(task);
     const gone = p.waitForEvent("close", { timeout: 5000 }).then(() => true, () => false);
     await p.keyboard.press("Enter");
     await Promise.race([gone, p.waitForFunction(() => document.querySelector("#status a") !== null, undefined, { timeout: 5000 }).catch(() => {})]);
     const list = await sessions();
-    check(`"${task}" starts one session`, list.length === before + 1, `${list.length - before} started`);
+    check(`"${title}" starts one session`, list.length === before + 1, `${list.length - before} started`);
     if (!p.isClosed()) await p.close();
-    return list.find((x) => x.title === task);
+    return list.find((x) => x.title === title);
   }
-  const COPIED = "const answer = 42;\nconsole.log(answer);\n// a third line";
+  /** Pastes text into the task, as the browser hands a paste to the page. */
+  const pasteText = (p: Page, text: string) =>
+    p.evaluate(`(() => { const dt = new DataTransfer(); dt.setData("text/plain", ${JSON.stringify(text)}); document.getElementById("task").dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); })()`);
+  /** Pastes an 8x8 grey picture. */
+  const pastePicture = (p: Page) =>
+    p.evaluate(`(async () => { const c = document.createElement("canvas"); c.width = 8; c.height = 8; const g = c.getContext("2d"); g.fillStyle = "#808080"; g.fillRect(0, 0, 8, 8); const blob = await new Promise((r) => c.toBlob(r, "image/png")); const dt = new DataTransfer(); dt.items.add(new File([blob], "grey.png", { type: "image/png" })); document.getElementById("task").dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); })()`);
+  const chips = (p: Page) => p.evaluate<{ kind: string; state: string; label: string }[]>(`[...document.querySelectorAll("#task .chip")].map((c) => ({ kind: c.dataset.kind, state: c.dataset.state ?? "", label: c.querySelector(".chip-label").textContent }))`);
+  const CODE = "const answer = 42;\nconsole.log(answer);\n// a third line";
 
-  // A fresh text capture: shown, and sent after the task.
-  await post({ text: COPIED });
-  const withText = await open("light");
-  await withText.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
-  await pauseAll(withText as unknown as FramePage);
-  const arriving = (await withText.evaluate(motion)).clip;
-  check("the attachment springs in as it arrives", arriving.includes("pop-in") && arriving.includes("fade-in"), JSON.stringify(arriving));
-  const clipFrames = await frameStrip(withText as unknown as FramePage, await blank(), { selector: "#clipboard", clip: { x: 0, y: 250, width: 560, height: 90 }, times: TIMES, path: join(shots, "strip-clipboard-arriving.png"), title: "The clipboard attachment arriving (pop-in on --ease-bouncy)" });
-  console.log(`screenshot: ${join(shots, "strip-clipboard-arriving.png")}`);
-  check("the strip stepped its spring", clipFrames >= 1, String(clipFrames));
-  let c = await withText.evaluate(clipState);
-  check("a fresh text capture is shown with its first two lines", !c.hidden && c.text === "const answer = 42;\nconsole.log(answer);", JSON.stringify(c));
-  check("the attachment has a remove control", c.remove);
-  s = await withText.evaluate(state);
-  check("the task box keeps the focus with an attachment", s.focus === "task", s.focus);
-  check("no scrollbars with a text attachment", !s.overflow && s.gutter === 0, JSON.stringify({ overflow: s.overflow, gutter: s.gutter }));
-  await shot(withText, "light-clipboard-text");
-  check(
-    "the code font is loaded for the clipboard text, from the runner's /assets/fonts",
-    (await withText.evaluate(() => document.fonts.check('12px "Geist Mono Variable"'))) && requested.some((u) => new URL(u).pathname === "/assets/fonts/geist-mono-latin.woff2"),
-  );
-  const sent = await send(withText, "Explain this code");
-  const sentUser = sent ? await userTexts(sent.id) : [];
-  check("the session's user event has the task, then the clipboard text under 'Clipboard:'", sentUser[0]?.text === `Explain this code\n\nClipboard:\n${COPIED}`, JSON.stringify(sentUser));
+  // A capture posted for the old attachment is not attached.
+  await fetch(`${runner.url}/api/clipboard`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: CODE }) });
+  const plain = await open("light");
+  await Bun.sleep(600);
+  s = await plain.evaluate(state);
+  check("nothing from the clipboard is attached, and there is no attachment element", s.noClipboard && (await chips(plain)).length === 0, JSON.stringify(s));
+  check("the page asks the shell to fit its small size as it opens", (await plain.evaluate<number[]>("window.__fits")).some((h) => h > 100 && h < 200), JSON.stringify(await plain.evaluate("window.__fits")));
 
-  // Removed with Backspace in the empty task (D0046): not sent, and the later polls don't bring it back.
-  // Option+Backspace and Backspace in a task with words are the text box's: they delete, nothing else.
-  await post({ text: COPIED });
-  const removedByKey = await open("dark");
-  await removedByKey.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
-  check("the capture is attached again on a new visit", !(await removedByKey.evaluate(clipState)).hidden);
-  await shot(removedByKey, "dark-clipboard-text");
-  await removedByKey.keyboard.type("two words");
-  await removedByKey.keyboard.press("Alt+Backspace");
-  await removedByKey.keyboard.press("Backspace");
-  c = await removedByKey.evaluate(clipState);
-  check("in a task with words, Option+Backspace and Backspace edit the text and keep the attachment", !c.hidden, JSON.stringify(c));
-  await removedByKey.fill("#task", "");
-  await removedByKey.keyboard.press("Backspace");
-  c = await removedByKey.evaluate(clipState);
-  check("Backspace in the empty task removes the attachment", c.hidden && c.empty, JSON.stringify(c));
-  await Bun.sleep(2300);
-  c = await removedByKey.evaluate(clipState);
-  s = await removedByKey.evaluate(state);
-  check("a removed attachment stays removed after the last poll", c.hidden && c.empty && s.focus === "task", JSON.stringify(c));
-  const unsent = await send(removedByKey, "Without the clipboard");
-  const unsentUser = unsent ? await userTexts(unsent.id) : [];
-  check("a removed attachment is not sent", unsentUser[0]?.text === "Without the clipboard" && unsentUser[0]?.imagePath === undefined, JSON.stringify(unsentUser));
+  // A short paste goes in as text, where the caret is: here between two words.
+  await plain.keyboard.type("Explain before the release");
+  await plain.evaluate(`(() => { const t = document.getElementById("task").firstChild; const r = document.createRange(); r.setStart(t, "Explain".length); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r); })()`);
+  await pasteText(plain, ` this code:\n${CODE}\n`);
+  s = await plain.evaluate(state);
+  check("a short paste goes in as text at the caret", s.task.startsWith("Explain this code:") && s.task.endsWith(" before the release") && (await chips(plain)).length === 0, JSON.stringify(s.task));
+  await shot(plain, "light-pasted-text");
+  const explained = await send(plain, "", "Explain this code:");
+  check("the session's text is the task with the paste in its place", (explained ? await userTexts(explained.id) : [])[0]?.text === `Explain this code:\n${CODE} before the release`);
 
-  // Removed with its control.
-  await post({ text: COPIED });
-  const removedByClick = await open("light");
-  await removedByClick.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
-  await removedByClick.click("#clipboard button");
-  c = await removedByClick.evaluate(clipState);
-  s = await removedByClick.evaluate(state);
-  check("the remove control removes the attachment and typing goes on in the task box", c.hidden && c.empty && s.focus === "task", JSON.stringify(c));
-  const clicked = await send(removedByClick, "Removed by a click");
-  check("removed by its control, it is not sent", (clicked ? await userTexts(clicked.id) : [])[0]?.text === "Removed by a click");
+  // A long paste becomes a chip at the caret; a click opens it back into the text; Backspace takes one whole.
+  const chipped = await open("dark");
+  await chipped.keyboard.type("Logs: ");
+  const LOG = Array.from({ length: 30 }, (_, i) => `10:${String(i).padStart(2, "0")} INFO step ${i}`).join("\n");
+  await pasteText(chipped, LOG);
+  let c = await chips(chipped);
+  check("a long paste becomes one chip, saying how many lines", c.length === 1 && c[0]!.kind === "paste" && c[0]!.label === "Pasted text · 30 lines", JSON.stringify(c));
+  const springing = await chipped.evaluate<string[]>(`document.querySelector("#task .chip").getAnimations().map((a) => a.animationName)`);
+  check("the chip pops in", springing.includes("chip-in"), JSON.stringify(springing));
+  await shot(chipped, "dark-pasted-chip");
+  await chipped.keyboard.press("Backspace");
+  await chipped.keyboard.press("Backspace");
+  c = await chips(chipped);
+  check("Backspace takes the space after a chip, then the chip whole", c.length === 0 && (await chipped.evaluate(state)).task === "Logs: ", JSON.stringify(c));
+  await pasteText(chipped, LOG);
+  await chipped.click("#task .chip");
+  s = await chipped.evaluate(state);
+  check("a click on the chip opens it back into the text", (await chips(chipped)).length === 0 && s.task.includes("10:29 INFO step 29"), s.task.slice(0, 60));
+  await chipped.close();
 
-  // A capture that arrives after the page loaded is picked up by a later poll.
-  await post({});
-  const late = await open("light");
-  check("an empty capture attaches nothing", (await late.evaluate(clipState)).hidden);
-  await post({ text: "arrived late" });
-  await late.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
-  c = await late.evaluate(clipState);
-  check("a capture posted after the page loaded is attached by a later poll", !c.hidden && c.text === "arrived late", JSON.stringify(c));
-  await late.close();
-
-  // An older capture is not attached. The page's clock is moved on instead of waiting 31 seconds.
-  await post({ text: "copied a while ago" });
-  const old = await newPage("light");
-  await old.addInitScript(() => {
-    const real = Date.now.bind(Date);
-    Date.now = () => real() + 31_000;
-  });
-  await old.goto(`${runner.url}/prompt`);
-  await old.waitForFunction(ready);
-  await Bun.sleep(2300);
-  c = await old.evaluate(clipState);
-  check("a capture older than 30 seconds is not attached", c.hidden && c.empty, JSON.stringify(c));
-  const stale = await send(old, "After an old capture");
-  check("an older capture is not sent", (stale ? await userTexts(stale.id) : [])[0]?.text === "After an old capture");
-
-  // An image capture, where this machine has a Windows temp folder to put one in.
-  const imageFile = windowsTempPng();
-  if (imageFile === null) {
-    console.log("skipped: the image attachment (no writable Windows temp folder under /mnt/c)");
-  } else {
-    try {
-      const posted = await post({ imagePath: imageFile });
-      check("the runner takes the image capture", posted.status === 200, String(posted.status));
-      const withImage = await open("dark");
-      await withImage.waitForFunction(() => (document.querySelector<HTMLImageElement>("#clipboard img")?.naturalWidth ?? 0) > 0, undefined, { timeout: 3000 }).catch(() => {});
-      c = await withImage.evaluate(clipState);
-      s = await withImage.evaluate(state);
-      check("a fresh image capture is shown as a thumbnail", !c.hidden && c.image === 8 && c.remove, JSON.stringify(c));
-      check("no scrollbars with an image attachment", !s.overflow && s.gutter === 0);
-      await shot(withImage, "dark-clipboard-image");
-      const imaged = await send(withImage, "What is in the image");
-      const imagedUser = imaged ? await userTexts(imaged.id) : [];
-      check("an attached image goes as imagePath, apart from the text", imagedUser[0]?.text === "What is in the image" && imagedUser[0]?.imagePath === imageFile, JSON.stringify(imagedUser));
-    } finally {
-      rmSync(join(imageFile, ".."), { recursive: true, force: true });
-    }
-  }
+  // A picture becomes a chip with its thumbnail, numbered, uploaded, and sent as [Image #1] and its path.
+  const pictured = await open("light");
+  await pictured.keyboard.type("What is in ");
+  await pastePicture(pictured);
+  await pictured.waitForFunction(() => document.querySelector("#task .chip[data-kind=image]:not([data-state])") !== null, undefined, { timeout: 5000 }).catch(() => {});
+  c = await chips(pictured);
+  check("a pasted picture is a chip, numbered, uploaded", c.length === 1 && c[0]!.kind === "image" && c[0]!.label === "Image 1" && c[0]!.state === "", JSON.stringify(c));
+  await shot(pictured, "light-pasted-picture");
+  const imaged = await send(pictured, "this", "What is in [Image #1] this");
+  const imagedUser = imaged ? await userTexts(imaged.id) : [];
+  check("the picture goes as [Image #1] in the text and its path in images", imagedUser[0]?.text === "What is in [Image #1] this" && imagedUser[0]?.images?.length === 1 && imagedUser[0]!.images![0]!.endsWith(".png"), JSON.stringify(imagedUser));
 
   // Two device pixels per CSS pixel, light and dark: hairlines are half a CSS pixel, and still nothing scrolls.
-  await post({ text: COPIED });
   for (const scheme of ["light", "dark"] as const) {
     const twice = await open(scheme, dense);
-    await twice.waitForFunction(attached, undefined, { timeout: 3000 }).catch(() => {});
     await twice.keyboard.type("Rename the config loader and update its tests");
     s = await twice.evaluate(state);
     const width = await twice.evaluate(() => `${devicePixelRatio} ${getComputedStyle(document.querySelector("#workspaces .workspace span")!).borderBottomWidth}`);
