@@ -65,7 +65,7 @@ ${rows([
 
 ${h("PLUGINS")}  tabs in the dock (docs/plugins.md)
 ${rows([
-  ["plugin new <name>", "write a plugin to start from, beside the config"],
+  ["plugin new <name>", "write a plugin to start from"],
 ])}
 
 ${h("MORE")}

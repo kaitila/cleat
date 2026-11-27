@@ -3,9 +3,8 @@
 // they define and what they give back, keeps each one's last view (on disk too, so a tab shows at once
 // after a restart), and runs their searches. A plugin is code the person chose to run: it runs in the
 // runner's process, but whatever it throws or returns stays its own problem, never the runner's.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { PluginContext, PluginDefinition } from "../plugin";
 import { PLUGIN_ICONS, type PluginInfo, type PluginView, type PluginViewResponse, type ServerMessage } from "../shared/protocol";
@@ -136,6 +135,29 @@ function folders(dir: string): string[] {
   }
 }
 
+/** Each plugin file's content (a hash) when this process first imported it. Bun's module cache is the process's. */
+const firstImport = new Map<string, string>();
+
+/**
+ * Imports a plugin file as it is now. Bun keeps a module once imported, by its path, and ignores a
+ * query added to it: a file whose content changed since its first import is imported through a copy
+ * beside it under a name of its own (so its relative imports still resolve), removed once loaded.
+ */
+async function importFresh(file: string): Promise<unknown> {
+  const text = readFileSync(file, "utf8");
+  const hash = Bun.hash(text).toString(36);
+  const first = firstImport.get(file);
+  if (first === undefined) firstImport.set(file, hash);
+  if (first === undefined || first === hash) return import(file);
+  const copy = join(dirname(file), `.${PLUGIN_FILE.replace(/\.ts$/, "")}-${hash}.ts`);
+  writeFileSync(copy, text);
+  try {
+    return await import(copy);
+  } finally {
+    rmSync(copy, { force: true });
+  }
+}
+
 function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
@@ -171,8 +193,7 @@ export class Plugins {
         let definition: PluginDefinition | null = null;
         let error: string | null = null;
         try {
-          // The file's time in the address: Bun keeps a module once imported, and a changed one must load anew.
-          const module: unknown = await import(`${pathToFileURL(file).href}?t=${statSync(file).mtimeMs}`);
+          const module: unknown = await importFresh(file);
           const d = definitionOf(module);
           if ("error" in d) error = d.error;
           else definition = d;
