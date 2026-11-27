@@ -196,6 +196,8 @@ export const STOP_GRACE_MS = 5000;
 export const MCP_WAIT_MS = 10_000;
 /** How often the MCP servers' status is asked while some are still connecting. */
 export const MCP_POLL_MS = 250;
+/** How long an empty server list is taken as "not read yet" before it counts as no servers (D0058). */
+export const MCP_EMPTY_MS = 1500;
 
 /**
  * Resolves once no MCP server is still connecting (status "pending"), or after `capMs`, or when
@@ -203,12 +205,23 @@ export const MCP_POLL_MS = 250;
  * take seconds to connect in one: a prompt sent at once reaches the model without their tools, and
  * the agent tells the person the connector "disconnected". A server that failed or needs a sign-in
  * is settled too: waiting would not bring it. A status call that fails ends the wait.
+ *
+ * The first answers, before Claude Code has read its MCP config, are an empty list (D0058): an empty
+ * list is not settled until it has stayed empty `emptyMs` after the first answer, which is how a
+ * machine with no MCP servers at all looks (its list never fills, and `system/init` only comes after
+ * the prompt, so it can't be waited for).
  */
 export async function mcpSettled(
   status: () => Promise<McpServerStatus[]>,
-  { capMs = MCP_WAIT_MS, pollMs = MCP_POLL_MS, signal }: { capMs?: number; pollMs?: number; signal?: AbortSignal } = {},
+  {
+    capMs = MCP_WAIT_MS,
+    pollMs = MCP_POLL_MS,
+    emptyMs = MCP_EMPTY_MS,
+    signal,
+  }: { capMs?: number; pollMs?: number; emptyMs?: number; signal?: AbortSignal } = {},
 ): Promise<void> {
   const until = Date.now() + capMs;
+  let firstAnswer: number | null = null;
   while (!signal?.aborted && Date.now() < until) {
     let servers: McpServerStatus[];
     try {
@@ -216,7 +229,8 @@ export async function mcpSettled(
     } catch {
       return;
     }
-    if (!servers.some((s) => s.status === "pending")) return;
+    firstAnswer ??= Date.now();
+    if (servers.length === 0 ? Date.now() - firstAnswer >= emptyMs : !servers.some((s) => s.status === "pending")) return;
     await new Promise((r) => setTimeout(r, Math.min(pollMs, Math.max(0, until - Date.now()))));
   }
 }
