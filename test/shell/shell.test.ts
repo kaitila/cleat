@@ -14,6 +14,7 @@ import type { SelfTestResult } from "../../shell/src/result";
 import { DEFAULT_SETTINGS, dropLegacy, hasLegacy, loadSettings, parseSettings, PID_FILE, SETTINGS_FILE, withoutLegacy, withWsl } from "../../shell/src/settings";
 import { parseWsl, RUNNER_START_MS, runnerCommand } from "../../shell/src/wsl";
 import { acceptedFit, fittedHeight, POPUP_FIT, POPUP_MAX_HEIGHT, POPUP_MIN_HEIGHT, POPUP_PRELOAD, POPUP_WIDTH } from "../../shell/src/popup";
+import { shellRunning } from "../../src/cli/up";
 import { buildShell, BUNDLE, isCurrent, isInstalled, pidFile, runnerLocation, wantedElectron, writeRunnerLocation } from "../../src/shell/install";
 import { REPO } from "../../src/shell/paths";
 import { defaultHotkeys, dockArea, opaqueDockBounds, shellOs } from "../../shell/src/os";
@@ -154,14 +155,30 @@ describe("bundle", () => {
     expect(await isCurrent(paths)).toBe(true);
   });
 
+  test("a shell counts as running when its pid file names a live process", () => {
+    const pids = join(dir, "running-pid");
+    expect(shellRunning(pids, () => true)).toBe(false);
+    writeFileSync(pids, "4242\n");
+    expect(shellRunning(pids, (pid) => pid === 4242)).toBe(true);
+    expect(shellRunning(pids, () => false)).toBe(false);
+    writeFileSync(pids, "not a pid");
+    expect(shellRunning(pids, () => true)).toBe(false);
+  });
+
   test("`up` stops an outdated shell, waits for its process to end, installs and starts it", () => {
     const cli = readFileSync(join(REPO, "src", "cli.ts"), "utf8");
     const up = cli.slice(cli.indexOf("  up: async"), cli.indexOf("  setup: "));
     // The shell half is src/cli/up.ts, which setup shares.
     const shellHalf = readFileSync(join(REPO, "src", "cli", "up.ts"), "utf8");
     expect(shellHalf).toContain("!(await isCurrent(paths))");
-    expect(shellHalf.indexOf("await stopAndWait(paths, pidFile(platform.settingsFile()), undefined, platform);")).toBeGreaterThan(-1);
-    expect(shellHalf.indexOf("await stopAndWait(")).toBeLessThan(shellHalf.lastIndexOf("await install(paths, log, platform);"));
+    expect(shellHalf).toContain("const pids = pidFile(platform.settingsFile());");
+    expect(shellHalf.match(/await stopAndWait\(paths, pids, undefined, platform\);/g)).toHaveLength(2);
+    expect(shellHalf.indexOf("await stopAndWait(")).toBeLessThan(shellHalf.indexOf("await install(paths, log, platform);"));
+    // An install that counts as missing (a newer shell has a file it lacks) stops a shell still running
+    // the old bundle first: the owner's ran on after the pop-up's preload came in (D0056).
+    const missing = shellHalf.slice(shellHalf.indexOf("if (!isInstalled(paths))"), shellHalf.indexOf("} else if"));
+    expect(missing).toContain("if (shellRunning(pids, platform.pidAlive))");
+    expect(missing.indexOf("await stopAndWait(")).toBeLessThan(missing.indexOf("await install("));
     // up runs it under a spinner: shellInstall is installCurrentShell(platform, log).
     expect(cli).toContain("(log) => installCurrentShell(platform, log)");
     expect(up.indexOf("await shellInstall(platform)")).toBeGreaterThan(-1);
