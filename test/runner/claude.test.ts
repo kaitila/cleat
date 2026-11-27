@@ -151,6 +151,24 @@ describe("mcpSettled", () => {
     expect(calls).toBe(3);
   });
 
+  test("an empty list before Claude Code has read its MCP config is not settled (D0058)", async () => {
+    // Measured: the first answers are [] for ~0.3–0.5 s, then the claude.ai connectors appear pending.
+    const answers = [[], [], [server("gamma", "pending")], [server("gamma", "connected")]];
+    let calls = 0;
+    await mcpSettled(async () => answers[Math.min(calls++, answers.length - 1)]!, { pollMs: 1, emptyMs: 1000 });
+    expect(calls).toBe(4);
+  });
+
+  test("a list that stays empty is no servers: settled after emptyMs, not the cap", async () => {
+    const start = Date.now();
+    let calls = 0;
+    await mcpSettled(async () => (calls++, []), { capMs: 5000, pollMs: 5, emptyMs: 60 });
+    const took = Date.now() - start;
+    expect(took).toBeGreaterThanOrEqual(55);
+    expect(took).toBeLessThan(1000);
+    expect(calls).toBeGreaterThan(1);
+  });
+
   test("a failed, signed-out or disabled server doesn't hold the turn up", async () => {
     let calls = 0;
     await mcpSettled(async () => (calls++, [server("a", "failed"), server("b", "needs-auth"), server("c", "disabled")]));
