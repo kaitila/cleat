@@ -1,10 +1,74 @@
 // `cleat plugin new <name>`: a working plugin to start from, in plugins/<name>/plugin.ts beside the
 // config file (D0057, docs/plugins.md). It searches Hacker News as the person types (a plain fetch,
 // no connector), and shows in comments how a view calls a connector's tool.
+// `cleat plugin login <id>`: runs a plugin's login() in the terminal (D0059), such as Calendar's
+// Google sign-in.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { configPath, PLUGIN_ID } from "../runner/config";
-import { PLUGIN_FILE } from "../runner/plugins";
+import type { PluginLoginContext } from "../plugin";
+import { configPath, loadConfig, PLUGIN_ID } from "../runner/config";
+import { BUILT_IN_DIR, definitionOf, PLUGIN_FILE } from "../runner/plugins";
+import { detectLayout, type Layout } from "../shell/platform";
+
+/** The program that opens a link in the person's browser, per layout (an argument array, no shell). */
+export function openCommand(url: string, layout: Layout): string[] {
+  if (layout === "macos") return ["open", url];
+  // From WSL the browser is Windows': explorer.exe takes a URL as is (cmd's start would split it at &).
+  if (layout === "windows-wsl") return ["explorer.exe", url];
+  return ["xdg-open", url];
+}
+
+/** A plugin's file by id: the person's own first (it replaces a built-in one), else the built-in one. */
+export function pluginFile(id: string, userDir: string, builtInDir = BUILT_IN_DIR): string | null {
+  for (const dir of [userDir, builtInDir]) {
+    const file = join(dir, id, PLUGIN_FILE);
+    if (existsSync(file)) return file;
+  }
+  return null;
+}
+
+/**
+ * Runs plugin `id`'s login(): the plugin's options from the config, its data folder as the runner
+ * gives it, the browser and the terminal for the person. Gives back its line, or why it could not.
+ */
+export async function loginPlugin(
+  id: string,
+  io: Pick<PluginLoginContext, "openUrl" | "input" | "log">,
+  env: Record<string, string | undefined> = process.env,
+  builtInDir = BUILT_IN_DIR,
+): Promise<{ done: string } | { error: string }> {
+  if (!PLUGIN_ID.test(id)) return { error: `no plugin is called "${id}"` };
+  const config = loadConfig(env);
+  const file = pluginFile(id, config.pluginsDir, builtInDir);
+  if (!file) return { error: `no plugin is called "${id}" (looked in ${config.pluginsDir} and the built-in ones)` };
+  const definition = definitionOf(await import(file));
+  if ("error" in definition) return { error: `${file}: ${definition.error}` };
+  if (!definition.login) return { error: `the ${id} plugin has no sign-in: it needs no login` };
+  const dataDir = join(config.dataDir, "plugins", id);
+  mkdirSync(dataDir, { recursive: true });
+  const stop = new AbortController();
+  const interrupt = () => stop.abort();
+  process.once("SIGINT", interrupt);
+  try {
+    const done = await definition.login({ id, options: config.plugins[id]?.options ?? {}, dataDir, signal: stop.signal, ...io });
+    return { done };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  } finally {
+    process.off("SIGINT", interrupt);
+  }
+}
+
+/** Opens a link in the browser for this machine's layout; the link is printed too, for when no browser opens. */
+export async function openUrl(url: string, log: (line: string) => void): Promise<void> {
+  log(`Opening your browser. If it doesn't open, go to:\n  ${url}`);
+  try {
+    const p = Bun.spawn(openCommand(url, detectLayout()), { stdout: "ignore", stderr: "ignore" });
+    await p.exited;
+  } catch {
+    // No opener here: the printed link is the way.
+  }
+}
 
 /** The plugin API's file in this install: the template imports its types from there. */
 export const PLUGIN_API = join(import.meta.dir, "..", "plugin.ts");

@@ -33,6 +33,24 @@ export interface PluginContext {
   log(...parts: unknown[]): void;
 }
 
+/**
+ * What `cleat plugin login <id>` hands a plugin's login(): it runs in the terminal, not the runner, so
+ * it can open the browser and ask the person (D0059). It keeps what it gets (a refresh token) in
+ * `dataDir`, where view() and search() find it.
+ */
+export interface PluginLoginContext {
+  id: string;
+  options: Record<string, unknown>;
+  dataDir: string;
+  signal: AbortSignal;
+  /** Opens a link in the person's browser (and prints it, for when that can't happen). */
+  openUrl(url: string): Promise<void>;
+  /** Asks the person in the terminal; `secret` hides what they type. Empty when they give nothing. */
+  input(question: string, options?: { secret?: boolean; initial?: string }): Promise<string>;
+  /** A line in the terminal. */
+  log(...parts: unknown[]): void;
+}
+
 export interface PluginSearch {
   /** The find field's placeholder. Default: "Search <title>". */
   placeholder?: string;
@@ -63,6 +81,11 @@ export interface PluginDefinition {
   /** The tab's content when it opens (and while the find field is empty). */
   view?(ctx: PluginContext): Promise<PluginView>;
   search?: PluginSearch;
+  /**
+   * A sign-in the plugin needs before it can work, such as an OAuth grant for an API it calls
+   * directly: `cleat plugin login <id>` runs it. Gives back one line saying what it did.
+   */
+  login?(ctx: PluginLoginContext): Promise<string>;
 }
 
 /** Marks a plugin's definition, for the types: `export default definePlugin({ ... })`. */

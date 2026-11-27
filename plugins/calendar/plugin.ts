@@ -1,8 +1,12 @@
-// Calendar: today's and tomorrow's events from the person's Google Calendar connector in Claude.
+// Calendar: today's and tomorrow's events, read from the Google Calendar API directly (D0059): no
+// Claude in between. `cleat plugin login calendar` signs in once with the person's own OAuth client.
 // A built-in plugin (docs/plugins.md): off until turned on in Settings or the config file.
-import { definePlugin, type PluginRow } from "../../src/plugin";
+import { definePlugin, type PluginLoginContext, type PluginRow, type PluginView } from "../../src/plugin";
+import { accessToken, authUrl, exchangeCode, type Fetch, listEvents, loopback, pkce, readGrant, writeGrant } from "./google";
 
-const LIST_EVENTS = "mcp__claude_ai_Google_Calendar__list_events";
+/** How long the sign-in waits for the person in the browser. */
+export const LOGIN_WAIT_MS = 5 * 60_000;
+export const NOT_SIGNED_IN = "Not signed in to Google Calendar: run cleat plugin login calendar in a terminal.";
 
 interface When {
   dateTime?: string;
@@ -103,28 +107,81 @@ export function eventRow(e: CalendarEvent, day: string, now: Date, zone?: string
   };
 }
 
+/** The calendars to show: `options.calendars` (ids, as Google's settings name them), else the primary one. */
+export function calendarsOf(options: Record<string, unknown>): string[] {
+  const c = options.calendars;
+  const ids = Array.isArray(c) ? c.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
+  return ids.length ? ids : ["primary"];
+}
+
+const byStart = (e: CalendarEvent) => new Date(e.start?.dateTime ?? `${e.start?.date ?? "9999-12-31"}T00:00:00`).getTime();
+
+/** Today's and tomorrow's sections from the API, through `fetcher` (tests pass their own). */
+export async function calendarView(
+  ctx: { options: Record<string, unknown>; dataDir: string; signal: AbortSignal },
+  fetcher: Fetch = fetch,
+  now = new Date(),
+): Promise<PluginView> {
+  const grant = readGrant(ctx.dataDir);
+  if (!grant) return { sections: [], note: NOT_SIGNED_IN };
+  const token = await accessToken(fetcher, grant, ctx.signal);
+  // From yesterday to three days on in the runner's time, so the calendar's today and tomorrow are
+  // inside it even when its zone is a day apart from the runner's (WSL's TZ).
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
+  const answers = await Promise.all(
+    calendarsOf(ctx.options).map((calendar) => listEvents<CalendarEvent>(fetcher, token, { calendar, timeMin: from, timeMax: to, signal: ctx.signal })),
+  );
+  const zone = knownZone(answers[0]?.timeZone);
+  const events = answers
+    .flatMap((a) => a.items)
+    .filter((e) => e.status !== "cancelled" && e.eventType !== "workingLocation" && e.eventType !== "WORKING_LOCATION")
+    .sort((a, b) => byStart(a) - byStart(b));
+  const today = dateIn(now, zone);
+  const tomorrow = addDays(today, 1);
+  const on = (day: string) => events.filter((e) => overlaps(e, day, zone));
+  return {
+    sections: [
+      { title: "Today", rows: on(today).map((e) => eventRow(e, "today", now, zone)), empty: "Nothing else today." },
+      { title: "Tomorrow", rows: on(tomorrow).map((e) => eventRow(e, "tomorrow", now, zone)), empty: "Nothing tomorrow." },
+    ],
+  };
+}
+
+/** The sign-in: the person's OAuth client, Google's consent page, the refresh token kept in dataDir. */
+export async function calendarLogin(ctx: PluginLoginContext, fetcher: Fetch = fetch): Promise<string> {
+  const saved = readGrant(ctx.dataDir);
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : "");
+  const clientId =
+    str(ctx.options.clientId) ||
+    (await ctx.input("Your Google OAuth client ID (a Desktop app client; how: docs/plugins.md)", { initial: saved?.clientId ?? "" })).trim();
+  if (!clientId) throw new Error("no client ID given");
+  const clientSecret =
+    str(ctx.options.clientSecret) || (saved?.clientId === clientId ? saved.clientSecret : "") || (await ctx.input("Its client secret", { secret: true })).trim();
+  if (!clientSecret) throw new Error("no client secret given");
+  const { verifier, challenge } = await pkce();
+  const state = crypto.randomUUID();
+  const back = loopback(state, AbortSignal.any([ctx.signal, AbortSignal.timeout(LOGIN_WAIT_MS)]));
+  try {
+    await ctx.openUrl(authUrl(clientId, back.redirectUri, challenge, state));
+    ctx.log("Waiting for you to sign in in the browser…");
+    const code = await back.code;
+    const refreshToken = await exchangeCode(fetcher, { clientId, clientSecret, code, verifier, redirectUri: back.redirectUri });
+    const file = writeGrant(ctx.dataDir, { clientId, clientSecret, refreshToken });
+    const view = await calendarView({ options: ctx.options, dataDir: ctx.dataDir, signal: ctx.signal }, fetcher);
+    const today = view.sections[0]?.rows.length ?? 0;
+    return `signed in to Google Calendar (kept in ${file}): ${today} event${today === 1 ? "" : "s"} today`;
+  } finally {
+    back.stop();
+  }
+}
+
 export default definePlugin({
   title: "Calendar",
   icon: "calendar",
   hotkey: "CommandOrControl+Alt+C",
-  tools: [LIST_EVENTS],
-  refreshMs: 10 * 60_000,
-  async view(ctx) {
-    const now = new Date();
-    // Asked from yesterday to three days on in the runner's time, so the calendar's today and
-    // tomorrow are inside it even when its zone is a day apart from the runner's (WSL's TZ).
-    const local = (days: number) => localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() + days));
-    const answer = await ctx.tool<{ events?: CalendarEvent[]; timeZone?: string }>(LIST_EVENTS, { startTime: local(-1), endTime: local(3), orderBy: "startTime", pageSize: 100 });
-    const zone = knownZone(answer?.timeZone);
-    const events = (answer?.events ?? []).filter((e) => e.status !== "cancelled" && e.eventType !== "WORKING_LOCATION");
-    const today = dateIn(now, zone);
-    const tomorrow = addDays(today, 1);
-    const on = (day: string) => events.filter((e) => overlaps(e, day, zone));
-    return {
-      sections: [
-        { title: "Today", rows: on(today).map((e) => eventRow(e, "today", now, zone)), empty: "Nothing else today." },
-        { title: "Tomorrow", rows: on(tomorrow).map((e) => eventRow(e, "tomorrow", now, zone)), empty: "Nothing tomorrow." },
-      ],
-    };
-  },
+  // A plain API call is cheap: worked out again every two minutes while the tab is looked at.
+  refreshMs: 2 * 60_000,
+  view: (ctx) => calendarView(ctx),
+  login: (ctx) => calendarLogin(ctx),
 });

@@ -9,7 +9,7 @@ import type { PluginInfo, PluginSearchResponse, PluginView, PluginViewResponse, 
 import { loadConfig, pluginSettingsOf, type PluginSettings } from "../../src/runner/config";
 import { fakePluginAgent, type AskCall, type PluginAgent, type ToolCall } from "../../src/runner/plugin-agent";
 import { BUILT_IN_DIR, cleanView, definitionOf, MAX_QUERY, MAX_ROWS, MAX_SECTIONS, MAX_TEXT, Plugins, RETRY_MS } from "../../src/runner/plugins";
-import { newPlugin, PLUGIN_API as CLI_PLUGIN_API, template, titleOf } from "../../src/cli/plugin";
+import { loginPlugin, newPlugin, openCommand, PLUGIN_API as CLI_PLUGIN_API, pluginFile, template, titleOf } from "../../src/cli/plugin";
 import { connect, testRunner, type TestRunner } from "./helpers";
 
 const PLUGIN_API = join(import.meta.dir, "..", "..", "src", "plugin.ts");
@@ -104,7 +104,7 @@ describe("loading", () => {
       search: false,
       placeholder: null,
       live: false,
-      tools: ["mcp__claude_ai_Google_Calendar__list_events"],
+      tools: [],
       error: null,
     });
     expect(gamma).toMatchObject({
@@ -746,113 +746,23 @@ describe("definitionOf", () => {
 
 // ---------- The built-in plugins through Plugins, with a scripted connector ----------
 
+// The Calendar plugin's own tests (the Google API, its sign-in): calendar.test.ts.
 describe("Calendar (built in)", () => {
-  test("lists today's and tomorrow's events, without cancelled ones and working locations", async () => {
-    const now = new Date();
-    const at = (dayOffset: number, hour: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour).toISOString();
-    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const events = [
-      { summary: "Standup", start: { dateTime: at(0, 0) }, end: { dateTime: at(0, 0) } },
-      { summary: "Cancelled thing", status: "cancelled", start: { dateTime: at(0, 1) }, end: { dateTime: at(0, 2) } },
-      { summary: "Home", eventType: "WORKING_LOCATION", start: { dateTime: at(0, 1) }, end: { dateTime: at(0, 2) } },
-      { summary: "Offsite", start: { date: `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}` }, end: {} },
-    ];
-    const h = harness({ builtInDir: BUILT_IN_DIR, settings: { calendar: { enabled: true } }, tool: () => JSON.stringify({ events }) });
-    await h.plugins.load();
-    const v = await settle(h, "calendar");
-    expect(v?.error).toBeNull();
-    const [today, next] = v!.view!.sections;
-    expect(today!.title).toBe("Today");
-    expect(today!.rows.map((r) => r.title)).toEqual(["Standup"]);
-    expect(next!.title).toBe("Tomorrow");
-    expect(next!.rows).toMatchObject([{ title: "Offsite", meta: "All day" }]);
-    expect(h.tools).toHaveLength(1);
-    expect(h.tools[0]!.tool).toBe("mcp__claude_ai_Google_Calendar__list_events");
-    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-    const last = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
-    expect(h.tools[0]!.args).toMatchObject({
-      startTime: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}T00:00:00`,
-      endTime: `${last.getFullYear()}-${pad(last.getMonth() + 1)}-${pad(last.getDate())}T00:00:00`,
-      orderBy: "startTime",
-    });
-  });
-
-  test("lists an event that started before the day and still runs: several days, overnight", async () => {
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const date = (offset: number) => {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    };
-    const at = (dayOffset: number, hour: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour).toISOString();
-    const events = [
-      { summary: "Conference", start: { date: date(-1) }, end: { date: date(2) } },
-      { summary: "Yesterday's offsite", start: { date: date(-1) }, end: { date: date(0) } },
-      { summary: "Night shift", start: { dateTime: at(-1, 22) }, end: { dateTime: at(0, 2) } },
-      { summary: "Last night", start: { dateTime: at(-1, 20) }, end: { dateTime: at(-1, 23) } },
-      { summary: "Into tomorrow", start: { dateTime: at(0, 23) }, end: { dateTime: at(1, 1) } },
-    ];
-    const h = harness({ builtInDir: BUILT_IN_DIR, settings: { calendar: { enabled: true } }, tool: () => JSON.stringify({ events }) });
-    await h.plugins.load();
-    const v = await settle(h, "calendar");
-    expect(v?.error).toBeNull();
-    const [today, next] = v!.view!.sections;
-    expect(today!.rows.map((r) => r.title)).toEqual(["Conference", "Night shift", "Into tomorrow"]);
-    expect(today!.rows[0]).toMatchObject({ meta: "All day" });
-    expect(next!.rows.map((r) => r.title)).toEqual(["Conference", "Into tomorrow"]);
-  });
-
-  test("days and times are the calendar's time zone's, not the runner's", async () => {
-    const { addDays, dateIn, eventRow, midnightIn, overlaps } = await import("../../plugins/calendar/plugin");
-    // Midnight in Helsinki (UTC+2 in winter, +3 in summer) and in Los Angeles (UTC-8, -7).
-    expect(midnightIn("2026-11-27", "Europe/Helsinki").toISOString()).toBe("2026-11-26T22:00:00.000Z");
-    expect(midnightIn("2026-07-01", "Europe/Helsinki").toISOString()).toBe("2026-06-30T21:00:00.000Z");
-    expect(midnightIn("2026-11-27", "America/Los_Angeles").toISOString()).toBe("2026-11-27T08:00:00.000Z");
-    expect(midnightIn("2026-03-08", "America/Los_Angeles").toISOString()).toBe("2026-03-08T08:00:00.000Z");
-    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
-    // 23:30 UTC on the 26th is already the 27th in Helsinki.
-    const late = new Date("2026-11-26T23:30:00Z");
-    expect(dateIn(late, "Europe/Helsinki")).toBe("2026-11-27");
-    expect(dateIn(late, "America/Los_Angeles")).toBe("2026-11-26");
-    const meeting = { summary: "Sync", start: { dateTime: "2026-11-26T23:30:00Z" }, end: { dateTime: "2026-11-27T00:30:00Z" } };
-    expect(overlaps(meeting, "2026-11-27", "Europe/Helsinki")).toBe(true);
-    expect(overlaps(meeting, "2026-11-26", "Europe/Helsinki")).toBe(false);
-    expect(overlaps(meeting, "2026-11-26", "America/Los_Angeles")).toBe(true);
-    expect(eventRow(meeting, "today", late, "Europe/Helsinki").meta).toBe("01:30–02:30");
-  });
-
-  test("a calendar's time zone in the answer decides which day an event is on", async () => {
-    // An event at the runner's 12:00 today, in a zone 14 hours away either way, falls on another day there.
-    const now = new Date();
-    const noon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
-    const zone = "Pacific/Kiritimati"; // UTC+14
-    const { dateIn } = await import("../../plugins/calendar/plugin");
-    const events = [{ summary: "Lunch", start: { dateTime: noon.toISOString() }, end: { dateTime: new Date(noon.getTime() + 3_600_000).toISOString() } }];
-    const h = harness({ builtInDir: BUILT_IN_DIR, settings: { calendar: { enabled: true } }, tool: () => JSON.stringify({ events, timeZone: zone }) });
-    await h.plugins.load();
-    const v = await settle(h, "calendar");
-    const [today, next] = v!.view!.sections;
-    const onToday = dateIn(noon, zone) === dateIn(now, zone);
-    expect(today!.rows.map((r) => r.title)).toEqual(onToday ? ["Lunch"] : []);
-    expect(next!.rows.map((r) => r.title)).toEqual(onToday ? [] : ["Lunch"]);
-  });
-
-  test("an empty calendar says so", async () => {
-    const h = harness({ builtInDir: BUILT_IN_DIR, settings: { calendar: { enabled: true } }, tool: () => JSON.stringify({}) });
-    await h.plugins.load();
-    const v = await settle(h, "calendar");
-    expect(v!.view!.sections.map((s) => [s.rows.length, s.empty])).toEqual([
-      [0, "Nothing else today."],
-      [0, "Nothing tomorrow."],
-    ]);
-  });
-
-  test("off until turned on: no view, no call", async () => {
+  test("off until turned on: no view", async () => {
     const h = harness({ builtInDir: BUILT_IN_DIR });
     await h.plugins.load();
     expect(h.plugins.view("calendar")).toBeNull();
     expect(h.tools).toHaveLength(0);
+  });
+
+  test("turned on but not signed in: the tab says how to sign in, and no Claude Code call is made", async () => {
+    const h = harness({ builtInDir: BUILT_IN_DIR, settings: { calendar: { enabled: true } } });
+    await h.plugins.load();
+    const v = await settle(h, "calendar");
+    expect(v?.error).toBeNull();
+    expect(v!.view!.note).toContain("cleat plugin login calendar");
+    expect(h.tools).toHaveLength(0);
+    expect(h.asks).toHaveLength(0);
   });
 });
 
@@ -892,6 +802,55 @@ describe("Gamma (built in)", () => {
 });
 
 // ---------- cleat plugin new ----------
+
+describe("cleat plugin login", () => {
+  function envIn(): { env: Record<string, string>; dir: string } {
+    const dir = mkdtempSync(join(tmpdir(), "cleat-plugin-login-"));
+    dirs.push(dir);
+    return { dir, env: { CLEAT_CONFIG: join(dir, "config.json"), CLEAT_DATA_DIR: join(dir, "data"), CLEAT_PORT: "0" } };
+  }
+  const io = { openUrl: async () => {}, input: async () => "", log: () => {} };
+
+  test("the browser is opened with each layout's own program, the link as one argument", () => {
+    const url = "https://accounts.google.com/o/oauth2/v2/auth?a=1&b=2";
+    expect(openCommand(url, "macos")).toEqual(["open", url]);
+    expect(openCommand(url, "linux")).toEqual(["xdg-open", url]);
+    expect(openCommand(url, "windows-wsl")).toEqual(["explorer.exe", url]);
+  });
+
+  test("runs the plugin's login with its options and its data folder; the person's own plugin wins over a built-in one", async () => {
+    const { env, dir } = envIn();
+    const own = join(dir, "plugins", "calendar");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(
+      join(own, "plugin.ts"),
+      `export default { title: "Mine", view: async () => ({ sections: [] }), login: async (ctx) => "logged in " + ctx.id + " " + ctx.options.who + " " + ctx.dataDir };`,
+    );
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ workspaces: [], plugins: { calendar: { options: { who: "me" } } } }));
+    expect(pluginFile("calendar", join(dir, "plugins"))).toBe(join(own, "plugin.ts"));
+    expect(pluginFile("gamma", join(dir, "plugins"))).toBe(join(BUILT_IN_DIR, "gamma", "plugin.ts"));
+    const result = await loginPlugin("calendar", io, env);
+    expect(result).toEqual({ done: `logged in calendar me ${join(dir, "data", "plugins", "calendar")}` });
+    expect(existsSync(join(dir, "data", "plugins", "calendar"))).toBe(true);
+  });
+
+  test("an unknown plugin, a bad name, or one with no login says so", async () => {
+    const { env, dir } = envIn();
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ workspaces: [] }));
+    expect(await loginPlugin("nope", io, env)).toMatchObject({ error: expect.stringContaining('no plugin is called "nope"') });
+    expect(await loginPlugin("../etc", io, env)).toMatchObject({ error: expect.stringContaining("no plugin") });
+    expect(await loginPlugin("gamma", io, env)).toEqual({ error: "the gamma plugin has no sign-in: it needs no login" });
+  });
+
+  test("a login that fails gives its reason", async () => {
+    const { env, dir } = envIn();
+    const own = join(dir, "plugins", "broken");
+    mkdirSync(own, { recursive: true });
+    writeFileSync(join(own, "plugin.ts"), `export default { title: "B", view: async () => ({ sections: [] }), login: async () => { throw new Error("Google said no"); } };`);
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ workspaces: [] }));
+    expect(await loginPlugin("broken", io, env)).toEqual({ error: "Google said no" });
+  });
+});
 
 describe("cleat plugin new", () => {
   function envIn(): Record<string, string> {
