@@ -289,15 +289,14 @@ async function startTask(prompt) {
 function pluginKey(id) {
   if (!deck.has(id)) return;
   if (state === "open" && deck.current === id) return close();
-  deck.show(id);
   if (state === "chat") stepDown();
   else if (state !== "open") {
     open();
     // Opened by a key, not the pointer: it stays until the pointer has been on it and left, or Esc.
     steppedDown = true;
   }
-  deck.opened();
-  deck.focus();
+  // After the opening, which starts on Sessions: the tab loads its view and its find field gets the keyboard.
+  deck.show(id, true);
 }
 /** A refusal of Stop, Rename, Pin or Archive, said in the head for a few seconds. */
 let manageError = "";
@@ -1464,6 +1463,9 @@ function open(onto = null) {
   queue = [];
   lastPeeked = null;
   showList(false);
+  // Every opening starts on Sessions: a peek or a glance at the notch is about them. A plugin's tab
+  // is a click or its hotkey away (pluginKey switches to it after this).
+  deck.show(SESSIONS);
   go("open");
   renderList();
   // The rows rise in one after the other as the panel comes in; one added later rises on its own.
@@ -1474,13 +1476,8 @@ function open(onto = null) {
   renderHead();
   renderReply();
   grow();
-  // The keyboard is the dock's while it is open (the shell focuses the window): typing goes straight
-  // into the reply, or on a plugin's tab into its find field.
-  if (deck.current === SESSIONS) focusReply(true);
-  else {
-    deck.opened();
-    deck.focus();
-  }
+  // The keyboard is the dock's while it is open (the shell focuses the window): typing goes straight into the reply.
+  focusReply(true);
 }
 
 function close() {
