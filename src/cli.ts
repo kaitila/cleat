@@ -4,6 +4,7 @@
 import { join } from "node:path";
 import { pick } from "./cli/command";
 import { link, unlink } from "./cli/link";
+import { newPlugin } from "./cli/plugin";
 import { resume } from "./cli/resume";
 import * as runner from "./cli/runner";
 import { parseLogin } from "../shell/src/login";
@@ -60,6 +61,11 @@ ${rows([
   ["shell stop", "quit the shell"],
   ["shell login on|off|status", "start the shell when you log in"],
   ["shell selftest", "install it and run its self-test"],
+])}
+
+${h("PLUGINS")}  tabs in the dock (docs/plugins.md)
+${rows([
+  ["plugin new <name>", "write a plugin to start from, beside the config"],
 ])}
 
 ${h("MORE")}
@@ -246,6 +252,22 @@ const commands: Record<string, (rest: string[]) => Promise<number | void> | numb
   link: (rest) => link(rest[0]),
   unlink: (rest) => unlink(rest[0]),
   help: () => console.log(usage()),
+  "plugin new": async (rest) => {
+    if (rest.length !== 1) usageError("plugin new takes a name, such as hacker-news");
+    const made = newPlugin(rest[0]!);
+    if ("error" in made) {
+      ui.line(`${ui.mark("fail")} ${made.error}`);
+      return 1;
+    }
+    ui.line(`${ui.mark("ok")} wrote ${made.file}`);
+    // A running runner reads it at once; it starts on, as the person's own plugins do.
+    const url = await runner.runnerUrl();
+    const reloaded = url
+      ? await fetch(new URL("/api/plugins/reload", url), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).then((r) => r.ok, () => false)
+      : false;
+    ui.line(reloaded ? `${ui.mark("ok")} the runner loaded it: its tab is in the dock` : `${ui.mark("skip")} the runner is not running: it loads the plugin when it starts`);
+    ui.line(`  edit it, then Settings → Plugins → Reload plugins. How: docs/plugins.md`);
+  },
   "shell selftest": async () => {
     process.exitCode = await (await import("./shell/selftest-run")).selfTestRun();
   },
@@ -257,7 +279,7 @@ const picked = words.length === 0 && firstRun() ? { name: "setup", rest: [] } : 
 if (!picked) usageError(`unknown command: ${words.join(" ")}`);
 const { name, rest } = picked;
 /** How many words each command takes after its name; the others take none. */
-const takes: Record<string, number> = { setup: Infinity, uninstall: Infinity, login: 1, start: 1, restart: 1, resume: 1, doctor: 1, "shell login": 1, link: 1, unlink: 1 };
+const takes: Record<string, number> = { setup: Infinity, uninstall: Infinity, login: 1, start: 1, restart: 1, resume: 1, doctor: 1, "shell login": 1, "plugin new": 1, link: 1, unlink: 1 };
 if (rest.length > (takes[name] ?? 0)) usageError(`${name} does not take ${rest.join(" ")}`);
 try {
   const code = await commands[name]!(rest);
