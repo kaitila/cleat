@@ -43,6 +43,12 @@
 .setting-text { display: grid; gap: var(--space-1); min-width: 0; }
 .card > .field-error { margin: calc(var(--space-2) * -1) var(--space-4) 0; padding-bottom: var(--space-3); }
 .card-note { padding: var(--space-3) var(--space-4); border-top: var(--hairline) solid var(--line); }
+/* Plugins (D0057, settings-plugins.js): each one's switch, its hotkey under it; a hairline between plugins. */
+.plugins > .plugin-setting + .plugin-setting, .plugin-setting > .setting + .setting { border-top: var(--hairline) solid var(--line); }
+.plugin-setting > .field-error { margin: calc(var(--space-2) * -1) var(--space-4) 0; padding-bottom: var(--space-3); }
+.plugin-keys { flex: none; display: inline-flex; align-items: center; gap: var(--space-2); }
+.plugins > .empty { margin: 0; padding: var(--space-3) var(--space-4); }
+.plugins + .card-foot { border-top: var(--hairline) solid var(--line); }
 .card-foot {
   display: flex;
   align-items: center;

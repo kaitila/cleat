@@ -13,7 +13,7 @@ import { app, BrowserWindow, clipboard, ClipboardItem, desktopCapturer, globalSh
 import { dropOldLoginItem } from "./legacy";
 import { parseArgs } from "./args";
 import { type Capture, captureBody, isPng, saveClip } from "./clip";
-import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_SIZES, DOCK_CHAT_CHANNEL, DOCK_CHAT_KEY_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, type Size, takesMouse, watchMs } from "./dock";
+import { acceptedState, chatSize, DOCK_CHANNEL, DOCK_SIZES, DOCK_CHAT_CHANNEL, DOCK_CHAT_KEY_CHANNEL, DOCK_PLUGIN_CHANNEL, movesDock, DOCK_CHECK_MS, DOCK_STALE_RUNNER, DOCK_MISSES, DOCK_PRELOAD, DOCK_WATCH_FAR_MS, type DockState, dockBounds, dockFocusable, islandRect, type Notch, type Size, takesMouse, watchMs } from "./dock";
 import { centred, markBitmap, tileBitmap } from "./geometry";
 import { APP_ID, autostartEntry, autostartFile, launchAgentFile, launchAgentPlist, loginItem, type LoginResult } from "./login";
 import { chatUrl, dockUrl, externalLink, isSettingsLink, promptUrl, sameOrigin, settingsUrl, windowTarget } from "./origin";
@@ -24,6 +24,7 @@ import { dropLegacy, hasLegacy, loadSettings, PID_FILE, SETTINGS_FILE, type Sett
 import { acceptedRect, acceptedSender, captureSize, cropPlan, matchSources, SNIP_CAPTURE, SNIP_CLOSE, SNIP_CROP, SNIP_PRELOAD, SELF_TEST_CROP, SNIP_SHOW_MS, SNIP_VIEW_QUALITY, snipUrl } from "./snip";
 import { dockArea, dockNotchOf, dockTransparent, materialOptions, NOTCH_PROBE, parseNotch, windowMaterial, isGnome, linuxNotices, linuxOzone, opaqueDockBounds, runnerDownHint, runnerSpawn, SCREEN_RECORDING_NOTICE, SCREEN_RECORDING_PANE, screenAllowed, shellOs } from "./os";
 import { RUNNER_START_MS } from "./wsl";
+import { type PluginKey, pluginKeys, pluginsMessage, PLUGINS_PATH } from "./plugin-keys";
 import { acceptedFit, fittedHeight, POPUP_FIT, POPUP_MAX_HEIGHT, POPUP_MIN_HEIGHT, POPUP_PRELOAD, POPUP_WIDTH } from "./popup";
 
 /** The pop-up as it opens (D0056): small, growing with its task up to POPUP_MAX_HEIGHT (popup.ts). */
@@ -1332,6 +1333,66 @@ function registerHotkeys(): void {
   activeHotkey = one("hotkey", activeHotkey, prefs.hotkey, unlessSettings(newTask));
   activeSnipHotkey = one("snip hotkey", activeSnipHotkey, prefs.snipHotkey, unlessSettings(() => void snip()));
   activeChatHotkey = one("chat hotkey", activeChatHotkey, prefs.chatHotkey, unlessSettings(chatKey));
+  // The plugins' keys after the shell's own, which they never take.
+  registerPluginKeys();
+}
+
+// --- The plugins' hotkeys (D0057) ---
+
+/** The runner's plugin list as last read: the hotkeys are registered again from it when the shell's own change. */
+let pluginList: unknown[] = [];
+/** The plugins' hotkeys registered now. */
+let heldPluginKeys: PluginKey[] = [];
+/** The accelerators said once as not registered, so a 'plugins' message does not say them again. */
+const pluginKeySaid = new Set<string>();
+
+/** A plugin's hotkey: the dock opens on its tab (the page decides, as for the chat's key). With no dock, a notice says so. */
+function pluginKeyPressed(id: string): void {
+  if (prefs.dock && dockLoaded && dock && !dock.isDestroyed()) {
+    dock.webContents.send(DOCK_PLUGIN_CHANNEL, id);
+    return;
+  }
+  notify("Cleat: the dock is off", "A plugin's tab is in the dock: turn the dock on in Settings to use its hotkey.");
+}
+
+/** Registers the plugins' hotkeys from `pluginList`, letting go of the ones held before. One that can't be registered is said once. */
+function registerPluginKeys(): void {
+  for (const k of heldPluginKeys) globalShortcut.unregister(k.hotkey);
+  heldPluginKeys = [];
+  const own = [activeHotkey, activeSnipHotkey, activeChatHotkey, prefs.hotkey, prefs.snipHotkey, prefs.chatHotkey].filter((k): k is string => Boolean(k));
+  for (const k of pluginKeys(pluginList, own)) {
+    let ok = false;
+    try {
+      ok = globalShortcut.register(k.hotkey, unlessSettings(() => pluginKeyPressed(k.id)));
+    } catch {
+      // Not an accelerator Electron knows.
+    }
+    if (ok) {
+      heldPluginKeys.push(k);
+      pluginKeySaid.delete(k.hotkey);
+    } else if (!pluginKeySaid.has(k.hotkey)) {
+      pluginKeySaid.add(k.hotkey);
+      notify("Cleat: a plugin's hotkey is not set", `${k.hotkey} (the ${k.id} plugin) is taken by another app or is not a shortcut. Change it in Settings.`);
+    }
+  }
+}
+
+/** Takes a new plugin list (from GET /api/plugins or a 'plugins' message). */
+function applyPlugins(list: unknown[]): void {
+  pluginList = list;
+  registerPluginKeys();
+}
+
+/** GET /api/plugins, when the shell's socket opens. An older runner has no plugins: nothing to register. */
+async function fetchPlugins(): Promise<void> {
+  try {
+    const res = await fetch(new URL(PLUGINS_PATH, settings.runnerUrl), { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return;
+    const body = (await res.json()) as { plugins?: unknown };
+    if (Array.isArray(body.plugins)) applyPlugins(body.plugins);
+  } catch {
+    // The runner is not up: the next open asks again.
+  }
 }
 
 /** Takes the shell's part of the settings: the hotkeys, the dock, start on login, and the tray drawn again. */
@@ -1513,6 +1574,7 @@ function syncSettings(): void {
       void fetchSettings().then((s) => {
         if (s) applySettings(s);
         reportShell(true);
+        void fetchPlugins();
       });
     });
     ws.addEventListener("message", (event) => {
@@ -1521,6 +1583,8 @@ function syncSettings(): void {
       if (s) applySettings(s);
       const action = shellAction(data);
       if (action) doShellAction(action);
+      const plugins = pluginsMessage(data);
+      if (plugins) applyPlugins(plugins);
     });
     // An error is followed by close: that is where it connects again.
     ws.addEventListener("error", () => {});

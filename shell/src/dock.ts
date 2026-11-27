@@ -62,6 +62,8 @@ export const DOCK_CHANNEL = "cleat-dock:set-state";
 export const DOCK_CHAT_CHANNEL = "cleat-dock:chat";
 /** The chat's hotkey was pressed: the page grows into the chat, or puts it away when it shows it (D0046). Nothing else rides on it. */
 export const DOCK_CHAT_KEY_CHANNEL = "cleat-dock:chat-key";
+/** A plugin's hotkey was pressed (D0057): the page opens on that plugin's tab (its id), or closes when it shows it. */
+export const DOCK_PLUGIN_CHANNEL = "cleat-dock:plugin";
 /** The preload's bundle, beside main.cjs in the app folder. */
 export const DOCK_PRELOAD = "dock-preload.cjs";
 /** How often the shell asks whether the runner is there, to hide the dock or bring it back. */

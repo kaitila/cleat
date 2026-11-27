@@ -311,3 +311,43 @@ button.live-session { flex: 0 1 auto; min-width: var(--control-s); max-width: ca
 .panel > .sheet { inset: var(--notch-h) 0 0 0; border-radius: 0; background: transparent; }
 /* The island's own surface is the sheet's ground: what it covers is put out of sight, not dimmed through. */
 .panel[data-sheet] > :not(.sheet, .tip) { visibility: hidden; }
+
+/* The plugins' tabs (D0057, dock-plugins.js): Sessions, then one per plugin that is on, an icon each.
+   Out of a notch they sit in the notch's band, on its left wing, close to the notch; without one they
+   are a quiet row at the panel's top. A plugin's tab puts the sessions' head, list and stream away. */
+.tabs { flex: none; display: flex; align-items: center; gap: var(--hairline); padding: var(--space-1) var(--space-2) 0; }
+.island[data-notch] .tabs { position: absolute; top: 0; left: 0; width: calc((100% - var(--notch-w)) / 2); height: var(--notch-h); padding: 0 var(--space-2); justify-content: flex-end; }
+button.tab { flex: none; width: var(--control-s); padding: 0; color: var(--muted); }
+button.tab[aria-selected="true"] { background: var(--hover); color: var(--text); }
+button.tab .tool-icon { width: var(--text-m); height: var(--text-m); }
+.panel[data-tab="plugin"] > :is(.panel-head, .sessions-list, .empty, .session) { display: none; }
+.plugin { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.plugin[hidden] { display: none; }
+.plugin-top { flex: none; display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: var(--space-2) var(--space-3) var(--space-1); }
+.plugin-title { flex: none; padding-inline: var(--space-1); }
+.plugin-top .find { flex: 1; }
+.plugin-refresh { flex: none; margin-left: auto; }
+.plugin-scroll { flex: 0 1 auto; min-height: 0; }
+.plugin-body { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding: var(--space-1) var(--space-2) var(--space-2); }
+.plugin-body:empty { display: none; }
+.plugin-section { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.plugin-section-title { margin: 0; padding-inline: var(--space-2); font-weight: var(--medium); }
+.plugin-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--hairline); margin: 0; padding: 0; list-style: none; }
+/* A row: its dot, its title over its detail, its meta at the right; Ask comes up under the pointer. */
+.plugin-item { position: relative; display: flex; align-items: center; min-width: 0; }
+.plugin-row { flex: 1; min-width: 0; line-height: var(--leading-tight); }
+a.plugin-row { color: var(--text); }
+.plugin-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.plugin-row-title, .plugin-row-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-meta { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-dot[data-tone="accent"] { background: var(--accent); }
+.plugin-dot[data-tone="muted"] { background: var(--line); }
+.plugin-dot[data-tone="error"] { background: var(--danger); }
+.plugin-item:has(.plugin-dot[data-tone="muted"]) .plugin-row-title { color: var(--muted); }
+/* Ask lies over the row's right end and takes the meta's place while the pointer is on the row. */
+.plugin-ask { position: absolute; top: 50%; right: var(--space-1); transform: translateY(-50%); opacity: 0; pointer-events: none; transition: opacity var(--motion) var(--ease); }
+.plugin-item:hover .plugin-ask, .plugin-ask:focus-visible { opacity: 1; pointer-events: auto; }
+.plugin-item:has(.plugin-ask):is(:hover, :focus-within) .plugin-meta { visibility: hidden; }
+.plugin-empty, .plugin-note { margin: 0; padding-inline: var(--space-2); }
+.plugin-status { flex: none; margin: 0; padding: var(--space-1) var(--space-4) var(--space-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-status:empty { display: none; }

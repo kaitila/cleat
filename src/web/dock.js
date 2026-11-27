@@ -68,6 +68,7 @@ import {
   saveWorkspace,
   stepSession,
 } from "./dock-state.js";
+import { pluginDeck, SESSIONS } from "./dock-plugins.js";
 import { toolIcon } from "./tool-icons.js";
 import { workingIndicator } from "./working.js";
 
@@ -232,6 +233,72 @@ sheet.el.classList.remove("glass-float");
 tooltips(document, els.panel, { enabled: () => state === "open" });
 /** True while a row's title is being edited: like a reply being typed, it holds the dock open. */
 let renaming = false;
+
+/**
+ * The plugins' tabs (D0057, dock-plugins.js): Sessions, then one per plugin that is on. Back on
+ * Sessions the keyboard goes to the reply box; a row's Ask starts a session and grows into the chat on it.
+ */
+const deck = pluginDeck(document, els.panel, {
+  onTab: (id) => {
+    if (id !== SESSIONS) {
+      if (listOpen) showList(false);
+      return;
+    }
+    renderHead();
+    renderReply();
+    focusReply(true);
+  },
+  onTask: (prompt) => void startTask(prompt),
+});
+
+/** The plugins, from GET /api/plugins; later changes come on the socket ('plugins'). */
+async function loadPlugins() {
+  try {
+    const res = await fetch("/api/plugins");
+    if (res.ok) deck.setPlugins((await res.json())?.plugins ?? []);
+  } catch {
+    // An older runner, or none: no tabs until the socket says otherwise.
+  }
+}
+
+/** A plugin row's Ask: a new session on its prompt, in the workspace last used (else the first there is), shown in the chat. */
+async function startTask(prompt) {
+  // A refusal is said in the sessions' head, so that tab comes back to say it.
+  const refused = (text) => {
+    deck.show(SESSIONS);
+    sayInHead(text);
+  };
+  try {
+    const { workspaces = [], lastUsed = null } = await (await fetch("/api/workspaces")).json();
+    const workspace = lastUsed ?? workspaces.find((w) => w.exists)?.name;
+    if (!workspace) return refused("Add a workspace in Settings first");
+    const res = await fetch("/api/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspace, prompt }) });
+    if (!res.ok) return refused(await errorText(res));
+    const { session } = await res.json();
+    deck.show(SESSIONS);
+    goChat(session.id);
+  } catch (e) {
+    refused(unreachable(e));
+  }
+}
+
+/**
+ * A plugin's hotkey (the shell's onPlugin): the dock opens on the plugin's tab, with the keyboard in
+ * its find field; pressed again while that tab is shown, it closes. From the chat it steps down first.
+ */
+function pluginKey(id) {
+  if (!deck.has(id)) return;
+  if (state === "open" && deck.current === id) return close();
+  deck.show(id);
+  if (state === "chat") stepDown();
+  else if (state !== "open") {
+    open();
+    // Opened by a key, not the pointer: it stays until the pointer has been on it and left, or Esc.
+    steppedDown = true;
+  }
+  deck.opened();
+  deck.focus();
+}
 /** A refusal of Stop, Rename, Pin or Archive, said in the head for a few seconds. */
 let manageError = "";
 let manageErrorTimer = 0;
@@ -1259,7 +1326,7 @@ els.text.addEventListener("pointerdown", () => {
  * comes back on.
  */
 function focusReply(auto) {
-  if (state !== "open") return;
+  if (state !== "open" || deck.current !== SESSIONS) return;
   if (els.text.disabled) {
     wantFocus = true;
     pendingAuto = auto;
@@ -1371,7 +1438,7 @@ function holds() {
     pointerInside: inside,
     pointerDown: down,
     // A row's menu, its title being edited, or a find being typed holds it open as a focused reply box does.
-    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || menu.isOpen || sheet.isOpen || renaming || picking() || (document.hasFocus() && listOpen && els.find.value !== "") || steppedDown,
+    replyFocused: (document.hasFocus() && document.activeElement === els.text && !autoFocused) || deck.holds() || menu.isOpen || sheet.isOpen || renaming || picking() || (document.hasFocus() && listOpen && els.find.value !== "") || steppedDown,
     // A draft holds it open only while the dock has the keyboard: once the person has gone to another
     // app, nothing they could press reaches the dock (not Esc, not a press beside it), so it closes
     // when the pointer is away, and the draft is kept for when it opens again.
@@ -1407,8 +1474,13 @@ function open(onto = null) {
   renderHead();
   renderReply();
   grow();
-  // The keyboard is the dock's while it is open (the shell focuses the window): typing goes straight into the reply.
-  focusReply(true);
+  // The keyboard is the dock's while it is open (the shell focuses the window): typing goes straight
+  // into the reply, or on a plugin's tab into its find field.
+  if (deck.current === SESSIONS) focusReply(true);
+  else {
+    deck.opened();
+    deck.focus();
+  }
 }
 
 function close() {
@@ -1481,7 +1553,7 @@ document.addEventListener("keydown", (e) => {
 // Alt+Down, Ctrl+Shift+Tab and Alt+Up: the next one or the one before (dock-state.js, dockKey, D0040).
 // Picked by a key, the keyboard goes to the reply box.
 document.addEventListener("keydown", (e) => {
-  if (state !== "open" || picking() || menu.isOpen || sheet.isOpen || renaming) return;
+  if (state !== "open" || deck.current !== SESSIONS || picking() || menu.isOpen || sheet.isOpen || renaming) return;
   const key = dockKey(e);
   if (!key) return;
   e.preventDefault();
@@ -1629,6 +1701,13 @@ try {
   // An older bridge: the hotkey opens the chat through onChat.
 }
 
+// A plugin's hotkey (D0057): the shell hands the dock the plugin's id.
+try {
+  window.cleatDock?.onPlugin?.((id) => typeof id === "string" && pluginKey(id));
+} catch {
+  // An older bridge: the plugins' tabs are opened from the page only.
+}
+
 // ---------- the connection ----------
 
 let attempt = 0;
@@ -1648,6 +1727,8 @@ function onMessage(message) {
       for (const session of message.sessions ?? []) sessions.set(session.id, session);
       renderPill(true);
       checkPeek();
+      // A runner that restarted may have other plugins.
+      void loadPlugins();
       if (state !== "open") break;
       renderList();
       // Connected again: fetch what was missed while away, or pick one if the selected is gone.
@@ -1710,6 +1791,12 @@ function onMessage(message) {
     case "notification":
       onNotification(message.notification);
       break;
+    case "plugins":
+      deck.setPlugins(message.plugins);
+      break;
+    case "plugin_view":
+      deck.onView(message.plugin, message.view);
+      break;
     case "settings":
       shellKeys = message.settings?.shell ?? null;
       renderTips();
@@ -1756,6 +1843,7 @@ setInterval(() => {
   if (state !== "open") return;
   const now = Date.now();
   for (const [id, row] of rows) row.time.textContent = relativeTime(sessions.get(id)?.updatedAt ?? "", now);
+  deck.tick();
 }, 30_000);
 
 // The contract's sizes (docs/protocol.md, "Dock"). The island's box is the window; each state's

@@ -35,7 +35,7 @@ describe("bundle", () => {
     expect(code.length).toBeLessThan(200_000);
   });
 
-  test("the dock's preload is its own small file beside it, and exposes setState, onChat and onChatKey and nothing else", async () => {
+  test("the dock's preload is its own small file beside it, and exposes setState, onChat, onChatKey and onPlugin and nothing else", async () => {
     const out = join(dir, "bundle-preload");
     await buildShell(out);
     expect(readdirSync(out).sort()).toEqual([DOCK_PRELOAD, SNIP_PRELOAD, POPUP_PRELOAD, BUNDLE].sort());
@@ -53,7 +53,7 @@ describe("bundle", () => {
     // One way out of the page: a send on the dock's channel. Two ways in: the chat's channel (D0042),
     // and what comes in is a session id or null, never the event or anything else the shell sent; and
     // the chat's hotkey (D0046), which hands the page nothing at all.
-    expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send", "ipcRenderer.on", "ipcRenderer.on"]);
+    expect(src.match(/ipcRenderer\.\w+/g)).toEqual(["ipcRenderer.send", "ipcRenderer.on", "ipcRenderer.on", "ipcRenderer.on"]);
     expect(code).toContain(DOCK_CHAT_CHANNEL);
     expect(code).toContain(DOCK_CHAT_KEY_CHANNEL);
     expect(src).toContain("ipcRenderer.on(DOCK_CHAT_KEY_CHANNEL, () => callback());");
@@ -399,9 +399,9 @@ describe("settings from the runner", () => {
     expect(main).toContain('{ label: "Show dock", type: "checkbox", checked: prefs.dock, click: (item) => void changePrefs({ dock: item.checked }) }');
     expect(main).toContain('{ label: "Start on login", type: "checkbox", checked: onLogin, click: (item) => void changePrefs({ startOnLogin: item.checked }) }');
     expect(main).toContain('{ label: "Settings…", click: () => void openSettings() }');
-    // The hotkeys are registered in one place, through swapHotkey.
-    expect(main.match(/globalShortcut\.register\(/g)).toHaveLength(3);
-    // The other two are the self-test's own registration checks.
+    // The hotkeys are registered in one place, through swapHotkey; the plugins' in registerPluginKeys (D0057).
+    expect(main.match(/globalShortcut\.register\(/g)).toHaveLength(4);
+    // Two are the self-test's own registration checks.
     expect(main.match(/globalShortcut\.register\(SELF_TEST_/g)).toHaveLength(2);
     expect(main).toContain("register: (accelerator: string) => globalShortcut.register(accelerator, press),");
     // Nothing is written to the file but the migration's rewrite.
@@ -952,10 +952,10 @@ describe("no toasts for sessions", () => {
     }
     const main = readFileSync(join(src, "main.ts"), "utf8");
     // notify(): the runner is not running or is older than the shell, a hotkey could not be set, a setting or start on login was not changed,
-    // the Linux desktop may hide the tray or the hotkeys. The other Notification: macOS has not given Screen Recording.
+    // the Linux desktop may hide the tray or the hotkeys, the dock is off or a plugin's hotkey is not set (D0057). The other Notification: macOS has not given Screen Recording.
     expect(main.match(/new Notification\(/g)).toHaveLength(2);
     expect(main).toContain("new Notification({ title: SCREEN_RECORDING_NOTICE.title, body: SCREEN_RECORDING_NOTICE.body })");
-    expect(main.match(/\bnotify\(/g)).toHaveLength(7);
+    expect(main.match(/\bnotify\(/g)).toHaveLength(9);
     expect(main).toContain("notify(DOCK_STALE_RUNNER.title, DOCK_STALE_RUNNER.body);");
     expect(main).toContain("notify(n.title, n.body);");
     for (const title of ["Cleat: the runner is not running", "Cleat: the setting was not changed", "Cleat: start on login was not changed"]) expect(main).toContain(`notify("${title}"`);

@@ -200,7 +200,7 @@ describe("the Setup section", () => {
 describe("the page", () => {
   test("has every section the task names, in order", () => {
     const sections = [...html.matchAll(/<h2 id="h-[a-z]+" class="label">([^<]+)<\/h2>/g)].map((m) => m[1]);
-    expect(sections).toEqual(["Setup", "Workspaces", "Agents", "Sessions", "Appearance", "Shortcuts", "Dock", "Startup", "About"]);
+    expect(sections).toEqual(["Setup", "Workspaces", "Agents", "Sessions", "Appearance", "Shortcuts", "Dock", "Plugins", "Startup", "About"]);
   });
 
   test("has a control for every setting of the contract, each named for the 400's field", () => {

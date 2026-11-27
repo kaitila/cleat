@@ -10,6 +10,7 @@ import { MAC } from "./keys.js";
 import { GLOBAL, guide, hotkeysOf } from "./shortcuts.js";
 import { renderGuide, tooltips } from "./shortcuts-sheet.js";
 import { agentLines, fieldKeys, isDraft, keycaps, move, putBody, recordKey, setupLines, usedAgents } from "./settings-model.js";
+import { pluginSettings } from "./settings-plugins.js";
 
 const $ = (id) => document.getElementById(id);
 const main = document.querySelector(".settings");
@@ -434,6 +435,14 @@ for (const button of document.querySelectorAll("[data-shortcut]")) {
   });
 }
 
+// The plugins (D0057): a switch and a hotkey each, saved on their own route (PUT /api/plugins/:id).
+const plugins = pluginSettings(document, $("plugins"), {
+  mac: MAC,
+  taken: () => GLOBAL.map((g) => state?.shell?.[g.key]),
+  say: (text, tone) => showStatus(text, tone),
+});
+$("reload-plugins").addEventListener("click", () => void plugins.reload());
+
 // The pages' keys, read-only under the recordable ones: the guide's list less its global part.
 $("page-keys").replaceChildren(renderGuide(document, guide({ mac: MAC, global: false })));
 tooltips(document, document.body);
@@ -467,6 +476,7 @@ function connect() {
       void load();
       void loadPlatform();
       void loadAgents();
+      void plugins.load();
     }
     attempt = 0;
   });
@@ -475,6 +485,10 @@ function connect() {
     try {
       message = JSON.parse(e.data);
     } catch {
+      return;
+    }
+    if (message?.type === "plugins") {
+      plugins.set(message.plugins);
       return;
     }
     if (message?.type === "platform" && message.platform) {
@@ -499,6 +513,7 @@ function connect() {
 }
 
 void load();
+void plugins.load();
 void loadVersion();
 void loadPlatform();
 void loadAgents();
