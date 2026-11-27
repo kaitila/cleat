@@ -132,7 +132,11 @@ export type ServerMessage =
    * Something the shell is asked to do (POST /api/platform/open-screen-recording). Sent only to the
    * sockets that connected as the shell (/ws?client=shell), never to the pages.
    */
-  | { type: "shell_action"; action: ShellAction };
+  | { type: "shell_action"; action: ShellAction }
+  /** GET /api/plugins's answer, whenever it changes (loaded again, a plugin turned on or off, a hotkey changed). The shell registers the hotkeys from it. */
+  | { type: "plugins"; plugins: PluginInfo[] }
+  /** A plugin's view, each time it is worked out again (a refresh that GET /api/plugins/:id/view started). */
+  | { type: "plugin_view"; plugin: string; view: PluginViewResponse };
 
 export type Theme = "system" | "light" | "dark";
 
@@ -278,3 +282,77 @@ export const NO_MAC_SHELL = "no shell on macOS is connected to open System Setti
 export interface SentResponse { sent: true }
 /** The 400 of PUT /api/settings: the first bad field as a dotted path ("workspaces.1.path"), and why. */
 export interface SettingsErrorResponse { error: string; field: string }
+
+// ---------- Plugins (D0057, docs/plugins.md) ----------
+
+/** The glyphs a plugin's tab can carry (src/web/plugin-icons.js draws them). */
+export const PLUGIN_ICONS = ["calendar", "search", "people", "mail", "note", "star", "bolt", "globe", "chart", "list"] as const;
+export type PluginIcon = (typeof PLUGIN_ICONS)[number];
+
+/**
+ * One row of a plugin's view. Text only: the dock sets it as text, never as markup. `url` (http or
+ * https only) opens in the browser on a click; `task` is a prompt the row's Ask starts a session with.
+ */
+export interface PluginRow {
+  title: string;
+  /** A second, muted line. */
+  detail?: string;
+  /** Small text at the row's right end: a time, a count, a word. */
+  meta?: string;
+  /** A dot before the title: "accent" (now, live), "muted" (past), "error". */
+  tone?: "accent" | "muted" | "error";
+  url?: string;
+  task?: string;
+}
+
+export interface PluginSection {
+  title?: string;
+  rows: PluginRow[];
+  /** Shown when `rows` is empty. */
+  empty?: string;
+}
+
+/** What a plugin's view() and search() give: sections of rows, and an optional line under them. */
+export interface PluginView {
+  sections: PluginSection[];
+  note?: string;
+}
+
+/** A plugin as GET /api/plugins lists it. */
+export interface PluginInfo {
+  /** Its folder's name: lowercase letters, digits and dashes. */
+  id: string;
+  title: string;
+  icon: PluginIcon;
+  /** Built in (the repo's plugins/ folder), or the person's own (plugins/ beside the config file). */
+  builtIn: boolean;
+  enabled: boolean;
+  /** The Electron accelerator that opens the dock on its tab: the config's, else the plugin's own; null for none. */
+  hotkey: string | null;
+  /** It has a view (worked out when its tab opens) and/or a search (a find field at the tab's top). */
+  view: boolean;
+  search: boolean;
+  /** The find field's placeholder. */
+  placeholder: string | null;
+  /** Searches as the person types (a cheap search), or only on Enter (one that runs an agent). */
+  live: boolean;
+  /** The MCP tools it may call (ctx.tool, ctx.ask), as declared: nothing else runs for it. */
+  tools: string[];
+  /** Why it could not be loaded. A plugin with an error is listed, never run. */
+  error: string | null;
+}
+
+export interface PluginsResponse { plugins: PluginInfo[] }
+
+/**
+ * GET /api/plugins/:id/view: the last view worked out and when (null before the first), whether a
+ * new one is being worked out now, and the last refresh's error (null when it worked).
+ */
+export interface PluginViewResponse { view: PluginView | null; at: string | null; loading: boolean; error: string | null }
+
+/** POST /api/plugins/:id/search's body and answer. */
+export interface PluginSearchRequest { query: string }
+export interface PluginSearchResponse { query: string; view: PluginView }
+
+/** PUT /api/plugins/:id: turns it on or off and sets its hotkey (null: none; absent: unchanged). */
+export interface PluginSettingsRequest { enabled?: boolean; hotkey?: string | null }

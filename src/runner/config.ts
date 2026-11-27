@@ -30,6 +30,19 @@ export const SettingsSchema = z.object({
     .default(null),
 });
 
+/** A plugin's id: its folder's name (D0057). */
+export const PLUGIN_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/** One plugin's settings in the config file's `plugins`: on or off, its hotkey (null: none), its own options. */
+const PluginSetting = z.object({
+  enabled: z.boolean().optional(),
+  hotkey: z.string().min(1).nullable().optional(),
+  options: z.record(z.string(), z.unknown()).optional(),
+});
+export type PluginSetting = z.infer<typeof PluginSetting>;
+export const PluginSettingsSchema = z.record(z.string().regex(PLUGIN_ID, "a plugin id is lowercase letters, digits and dashes"), PluginSetting);
+export type PluginSettings = z.infer<typeof PluginSettingsSchema>;
+
 /** The settings without the port, as stored in Config and written by the runner. */
 export type StoredSettings = Omit<Settings, "port" | "agent"> & { agent: AgentKind };
 
@@ -52,6 +65,10 @@ export interface Config {
   settings: StoredSettings;
   dataDir: string;
   configPath: string;
+  /** The config file's `plugins`, by id ({} when left out). Changed by PUT /api/plugins/:id. */
+  plugins: PluginSettings;
+  /** The person's own plugins: plugins/ beside the config file. */
+  pluginsDir: string;
   /** CLEAT_FAKE_AGENT=1: sessions run against the scripted fake (agent-fake.ts), not Claude Code. */
   fakeAgent: boolean;
   /** CLEAT_BUILD_ID: the build id the runner reports and `start` expects, instead of the hash of the code (tests only). */
@@ -137,6 +154,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   // The default folder is ~/.local/share/cleat, moved there once from its old name (legacy.ts).
   const dataDir = resolve(expandHome(env.CLEAT_DATA_DIR ?? runnerFolders(env).data));
   mkdirSync(dataDir, { recursive: true });
+  const plugins = PluginSettingsSchema.safeParse((raw as { plugins?: unknown }).plugins ?? {});
+  if (!plugins.success) throw new Error(`${path}: plugins: ${z.prettifyError(plugins.error)}`);
   const { port, ...settings } = parsed.data;
   const config: Config = {
     port: env.CLEAT_PORT !== undefined ? Number(env.CLEAT_PORT) : port,
@@ -148,6 +167,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     settings,
     dataDir,
     configPath: path,
+    plugins: plugins.data,
+    pluginsDir: join(dirname(path), "plugins"),
     fakeAgent: env.CLEAT_FAKE_AGENT === "1",
     buildId: env.CLEAT_BUILD_ID || null,
   };

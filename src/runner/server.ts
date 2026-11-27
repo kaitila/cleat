@@ -17,6 +17,8 @@ import {
   type ImageUploadResponse,
   type NotificationsResponse,
   type PlatformResponse,
+  type PluginSearchResponse,
+  type PluginsResponse,
   type SentResponse,
   type ServerMessage,
   type SessionMeta,
@@ -34,9 +36,11 @@ import { BAD_IMAGES, IMAGE_NAME, imagesFolder, imagesOf, savePasted } from "./im
 import { DELETING, Manage, fakeOps, sdkOps, type Refused, type TranscriptOps } from "./manage";
 import { agentFor, applySettings, permissionModeFor, type Config } from "./config";
 import { Notifications } from "./notifications";
+import { claudePluginAgent, fakePluginAgent, type PluginAgent } from "./plugin-agent";
+import { BUILT_IN_DIR, MAX_QUERY, Plugins } from "./plugins";
 import { layoutOrNull, parseReport, ShellState } from "./platform";
 import { NO_APPROVAL, Sessions, busy } from "./sessions";
-import { settingsOf, validateSettings, writeSettings } from "./settings";
+import { settingsOf, validateSettings, writePluginSetting, writeSettings } from "./settings";
 import { Store } from "./store";
 import { Sync, noThreads, noTranscripts, type SyncOptions } from "./sync";
 
@@ -46,6 +50,9 @@ const WEB_DIR = join(import.meta.dir, "..", "web");
 export interface Runner {
   port: number;
   url: string;
+  plugins: Plugins;
+  /** Resolves once the plugins have been loaded the first time. */
+  pluginsLoaded: Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -92,6 +99,8 @@ interface App {
   mounts: ImageRule;
   /** The shell's side for GET /api/platform: its sockets and its last report. */
   shell: ShellState;
+  /** The plugins: the tabs in the notch (plugins.ts, D0057). */
+  plugins: Plugins;
   /** GET /api/agents: each agent's doctor status (agent-status.ts). */
   agentStatus: AgentStatusSource;
   /** The port the server listens on (config.port may be 0 in tests). */
@@ -288,16 +297,59 @@ async function openScreenRecording(req: Request, app: App): Promise<Response> {
   return json({ sent: true } satisfies SentResponse, 202);
 }
 
+/** PUT /api/plugins/:id: turns a plugin on or off and sets its hotkey, in the config file, and sends the new list. */
+async function putPlugin(req: Request, app: App, id: string): Promise<Response> {
+  if (!app.plugins.has(id)) return fail(404, "no such plugin");
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  if (b.enabled !== undefined && typeof b.enabled !== "boolean") return fail(400, "enabled must be true or false");
+  if (b.hotkey !== undefined && b.hotkey !== null && (typeof b.hotkey !== "string" || !b.hotkey.trim() || b.hotkey.length > 80)) return fail(400, "hotkey must be an accelerator or null");
+  const setting = {
+    ...(b.enabled !== undefined ? { enabled: b.enabled as boolean } : {}),
+    ...(b.hotkey !== undefined ? { hotkey: b.hotkey === null ? null : (b.hotkey as string).trim() } : {}),
+  };
+  writePluginSetting(app.config.configPath, id, setting);
+  app.config.plugins = { ...app.config.plugins, [id]: { ...app.config.plugins[id], ...setting } };
+  app.plugins.changed();
+  return json({ plugins: app.plugins.list() } satisfies PluginsResponse);
+}
+
+/** POST /api/plugins/:id/search: the plugin's search, answered when it is done. 409 when a newer search replaced it. */
+async function searchPlugin(req: Request, app: App, id: string): Promise<Response> {
+  if (!app.plugins.has(id)) return fail(404, "no such plugin");
+  const b = await body(req);
+  if (!b) return fail(400, "the body must be a JSON object");
+  if (typeof b.query !== "string" || b.query.length > MAX_QUERY) return fail(400, `query must be a string of at most ${MAX_QUERY} characters`);
+  const query = b.query.trim();
+  try {
+    const view = await app.plugins.search(id, query);
+    if (!view) return fail(409, "the plugin is off or has no search");
+    return json({ query, view } satisfies PluginSearchResponse);
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    return fail(why === "stopped" ? 409 : 502, why);
+  }
+}
+
 async function handle(req: Request, app: App): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
   if (req.method === "PUT" && path === "/api/settings") return putSettings(req, app);
   if (req.method === "PUT" && path === "/api/platform/shell") return putShellReport(req, app);
+  const pluginPut = req.method === "PUT" ? /^\/api\/plugins\/([a-z0-9-]+)$/.exec(path) : null;
+  if (pluginPut) return putPlugin(req, app, pluginPut[1]!);
   if (req.method === "POST") {
     if (path === "/api/sessions") return startSession(req, app);
     if (path === "/api/platform/open-screen-recording") return openScreenRecording(req, app);
     if (path === "/api/clipboard") return postClipboard(req, app);
     if (path === "/api/images") return postImage(req, app);
+    if (path === "/api/plugins/reload") {
+      if (!(await body(req))) return fail(400, "the body must be a JSON object");
+      await app.plugins.load();
+      return json({ plugins: app.plugins.list() } satisfies PluginsResponse);
+    }
+    const pluginSearch = /^\/api\/plugins\/([a-z0-9-]+)\/search$/.exec(path);
+    if (pluginSearch) return searchPlugin(req, app, pluginSearch[1]!);
     const messages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path);
     if (messages) return reply(req, app, messages[1]!);
     const approval = /^\/api\/sessions\/([^/]+)\/approvals\/([^/]+)$/.exec(path);
@@ -316,6 +368,15 @@ async function handle(req: Request, app: App): Promise<Response> {
     if (path === "/api/platform") return json(app.shell.response() satisfies PlatformResponse);
     if (path === "/api/agents") return json((await app.agentStatus()) satisfies AgentsResponse);
     if (path === "/api/sessions") return listSessions(app, url);
+    if (path === "/api/plugins") return json({ plugins: app.plugins.list() } satisfies PluginsResponse);
+    const pluginView = /^\/api\/plugins\/([a-z0-9-]+)\/view$/.exec(path);
+    if (pluginView) {
+      if (!app.plugins.has(pluginView[1]!)) return fail(404, "no such plugin");
+      const fresh = url.searchParams.get("fresh");
+      if (fresh !== null && fresh !== "0" && fresh !== "1") return fail(400, "fresh must be 0 or 1");
+      const view = app.plugins.view(pluginView[1]!, fresh === "1");
+      return view ? json(view) : fail(409, "the plugin is off or has no view");
+    }
     const events = /^\/api\/sessions\/([^/]+)\/events$/.exec(path);
     if (events) {
       if (!app.store.get(events[1]!)) return fail(404, "no such session");
@@ -365,6 +426,7 @@ export function startServer(
   sync: Partial<SyncOptions> = {},
   ops: TranscriptOps = config.fakeAgent ? fakeOps() : sdkOps(),
   agentStatus: AgentStatusSource = config.fakeAgent ? fakeStatus() : machineStatus(),
+  plugins: { agent?: PluginAgent; builtInDir?: string } = {},
 ): Runner {
   const store = new Store(config.dataDir);
   const send = (message: ServerMessage) => void server.publish(TOPIC, JSON.stringify(message));
@@ -378,7 +440,15 @@ export function startServer(
   });
   sessions.watcher = transcriptSync;
   const manage = new Manage(store, sessions, transcriptSync, ops, send);
-  const app: App = { config, store, sessions, sync: transcriptSync, manage, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, shell, agentStatus, port: () => server.port ?? config.port, send, sendShell };
+  const pluginSet = new Plugins({
+    builtInDir: plugins.builtInDir ?? BUILT_IN_DIR,
+    userDir: config.pluginsDir,
+    settings: () => config.plugins,
+    dataDir: config.dataDir,
+    agent: plugins.agent ?? (config.fakeAgent ? fakePluginAgent() : claudePluginAgent()),
+    send,
+  });
+  const app: App = { config, store, sessions, sync: transcriptSync, manage, clipboard: new Clipboard(mounts), notifications, build: buildId(config.buildId), mounts, shell, plugins: pluginSet, agentStatus, port: () => server.port ?? config.port, send, sendShell };
   const server = Bun.serve<SocketData>({
     hostname: HOST,
     port: config.port,
@@ -417,10 +487,14 @@ export function startServer(
   });
   const port = server.port ?? config.port;
   transcriptSync.start();
+  const pluginsLoaded = pluginSet.load().catch((e) => console.error("loading the plugins failed", e));
   return {
     port,
     url: `http://${HOST}:${port}`,
+    plugins: pluginSet,
+    pluginsLoaded,
     async stop() {
+      pluginSet.stop();
       await transcriptSync.stop();
       await sessions.stop();
       await server.stop(true);

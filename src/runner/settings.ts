@@ -105,6 +105,27 @@ export function writeSettings(path: string, settings: StoredSettings): void {
   renameSync(temp, path);
 }
 
+/**
+ * Writes one plugin's settings into the config file's `plugins` (PUT /api/plugins/:id), atomically,
+ * keeping everything else in the file as it is, the plugin's own `options` too.
+ */
+export function writePluginSetting(path: string, id: string, setting: { enabled?: boolean; hotkey?: string | null }): void {
+  let raw: Record<string, unknown> = {};
+  try {
+    const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) raw = value as Record<string, unknown>;
+  } catch {
+    // A missing or broken file gets the plugin's settings alone.
+  }
+  const plugins = typeof raw.plugins === "object" && raw.plugins !== null && !Array.isArray(raw.plugins) ? (raw.plugins as Record<string, unknown>) : {};
+  const before = plugins[id];
+  const mine = typeof before === "object" && before !== null && !Array.isArray(before) ? (before as Record<string, unknown>) : {};
+  const file = { ...raw, plugins: { ...plugins, [id]: { ...mine, ...setting } } };
+  const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temp, JSON.stringify(file, null, 2) + "\n");
+  renameSync(temp, path);
+}
+
 /** The Settings GET /api/settings answers and the 'settings' message carries. */
 export function settingsOf(stored: StoredSettings, port: number): Settings {
   return { ...stored, port };
