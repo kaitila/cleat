@@ -8,6 +8,8 @@ Press a hotkey and a small pop-up appears in the middle of the screen with whate
 
 There is also a snip key: the screen freezes, you drag a box around something, and type the task right beside it.
 
+Plugins add tabs to the dock, each with a hotkey if you want one: your calendar for today, a search of your CRM, anything that is a list of rows. A plugin is one TypeScript file; `cleat plugin new <name>` writes one to start from. See [plugins](docs/plugins.md).
+
 <!-- Screenshot to come: docs/images/ will hold one from the browser checks. -->
 *What it looks like:* the pop-up is a plain, frameless box, 520 wide, that opens small and grows as you type or paste: the workspace picker on top, a text field where pasted text and pictures go in at the cursor (a long paste or a picture as a chip). The chat view is a two-pane window: sessions on the left, the conversation on the right, with tool calls folded into one-line rows and approval cards in the stream.
 
@@ -63,6 +65,7 @@ It turns start at login off, quits and removes the tray app, stops the runner an
 | What | Where |
 |---|---|
 | Configuration: workspaces, port, permission mode, the agent (`"claude"` or `"codex"`, see [agents](docs/agents.md)), the theme, and the tray app's hotkeys, dock and start on login (the Settings window edits them) | `~/.config/cleat/config.json` |
+| Your plugins, one folder each ([plugins](docs/plugins.md)); turning them on, their hotkeys and options are under `plugins` in the configuration | `~/.config/cleat/plugins/<name>/plugin.ts` |
 | Sessions, their events, the runner's log | `~/.local/share/cleat/` |
 | Windows: where the tray app finds the runner (`runnerUrl` and `wsl` only) | `%APPDATA%\cleat-shell\settings.json` |
 | Windows: the installed tray app | `%LOCALAPPDATA%\cleat\` |
@@ -98,6 +101,7 @@ Sessions sync with Claude Code both ways ([D0015](docs/decisions/D0015-transcrip
 | `cleat logs` | The end of the runner's log |
 | `cleat shell install` / `start` / `stop` | The tray app: install or update it, start it, quit it |
 | `cleat shell login on` / `off` / `status` | Start the tray app at login |
+| `cleat plugin new <name>` | Write a plugin to start from, beside the configuration, and have a running runner load it ([plugins](docs/plugins.md)) |
 | `cleat uninstall [--purge]` | Remove everything `setup` set up |
 | `cleat help` | The list of commands |
 
@@ -107,6 +111,7 @@ Without the tray app, the chat view is a web page at `http://127.0.0.1:4777/`.
 - **Runner** (`src/runner/`, bun and TypeScript): a small server on `127.0.0.1:4777` that starts and resumes Claude Code sessions through the Claude Agent SDK, or OpenAI Codex sessions through the Codex SDK ([agents](docs/agents.md)), streams their events over a WebSocket and stores session metadata. On Windows it runs in WSL.
 - **Pages** (`src/web/`): the pop-up (`/prompt`), the chat view (`/`) and the dock, plain HTML, CSS and JavaScript served by the runner.
 - **Tray app** (`shell/`, Electron and TypeScript): the tray icon, the global hotkeys, the pop-up, the snip, the dock and start at login.
+- **Plugins** (`plugins/`, and yours beside the configuration): tabs in the dock, loaded by the runner; the API is `src/plugin.ts` ([plugins](docs/plugins.md)).
 
 How the parts talk: [protocol](docs/protocol.md). The tray app in detail: [the Windows shell](docs/windows-shell.md). Why it is built this way: [decisions](docs/decisions/README.md). Security: [SECURITY.md](SECURITY.md).
 

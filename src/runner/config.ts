@@ -43,6 +43,25 @@ export type PluginSetting = z.infer<typeof PluginSetting>;
 export const PluginSettingsSchema = z.record(z.string().regex(PLUGIN_ID, "a plugin id is lowercase letters, digits and dashes"), PluginSetting);
 export type PluginSettings = z.infer<typeof PluginSettingsSchema>;
 
+/**
+ * The config file's `plugins`: each entry that is valid. One that isn't (a bad id, a hotkey that is
+ * not a string) is left out and `say` is told why: a typo there never keeps the runner from starting.
+ */
+export function pluginSettingsOf(value: unknown, say: (why: string) => void = () => {}): PluginSettings {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    say("must be an object of plugin ids; left out");
+    return {};
+  }
+  const out: PluginSettings = {};
+  for (const [id, entry] of Object.entries(value)) {
+    const one = PluginSettingsSchema.safeParse({ [id]: entry });
+    if (one.success) Object.assign(out, one.data);
+    else say(`"${id}" left out: ${z.prettifyError(one.error)}`);
+  }
+  return out;
+}
+
 /** The settings without the port, as stored in Config and written by the runner. */
 export type StoredSettings = Omit<Settings, "port" | "agent"> & { agent: AgentKind };
 
@@ -154,8 +173,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   // The default folder is ~/.local/share/cleat, moved there once from its old name (legacy.ts).
   const dataDir = resolve(expandHome(env.CLEAT_DATA_DIR ?? runnerFolders(env).data));
   mkdirSync(dataDir, { recursive: true });
-  const plugins = PluginSettingsSchema.safeParse((raw as { plugins?: unknown }).plugins ?? {});
-  if (!plugins.success) throw new Error(`${path}: plugins: ${z.prettifyError(plugins.error)}`);
+  const plugins = { data: pluginSettingsOf((raw as { plugins?: unknown }).plugins, (why) => console.error(`${path}: plugins: ${why}`)) };
   const { port, ...settings } = parsed.data;
   const config: Config = {
     port: env.CLEAT_PORT !== undefined ? Number(env.CLEAT_PORT) : port,

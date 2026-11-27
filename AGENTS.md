@@ -7,6 +7,8 @@ Three parts:
 - **Web UI** (`src/web/`, served by the runner): the pop-up prompt (`/prompt`) and the chat view (`/`). Plain HTML, CSS and JavaScript modules, no build step.
 - **Shell** (`shell/`, Electron + TypeScript; on Windows, macOS or Linux): tray icon (the menu bar on a Mac), global hotkey, the pop-up that grows with its task, the dock, start on login, and small windows on the runner's pages. Its code is `shell/src/`, bundled by bun, with what differs per OS in `shell/src/os.ts`; Electron itself is installed into the layout's shell folder by `cleat shell install`.
 
+Plugins ([plugins](docs/plugins.md), D0057) are tabs in the dock: one `plugins/<id>/plugin.ts` each, built in (the repo's `plugins/`) or the person's (beside the config file), loaded by the runner (`src/runner/plugins.ts`). Their API is `src/plugin.ts`; what they give back is rows of text, never HTML.
+
 ## Commands
 - `bun run check`: typecheck and tests. Run it before every commit; CI runs the same.
 - `bun test test/base.test.ts`: one test file.
@@ -35,6 +37,7 @@ Work here is tracked in foreman: the MCP server `foreman` in `.mcp.json`, or its
 - The Claude Agent SDK changes often. Before writing against it, read its types in `node_modules/@anthropic-ai/claude-agent-sdk/sdk.d.ts` (and its README there); don't rely on memory for its API.
 - The Codex SDK (`@openai/codex-sdk`) changes often too. Before writing against it, read `node_modules/@openai/codex-sdk/dist/index.d.ts` and its README. The runner never gives Codex `danger-full-access`, the `never` approval policy or a bypass flag: its permissions come only from `codexPermissions()` in `src/runner/agent-codex.ts`.
 - Sessions run in the SDK's `auto` mode by default (config `permissionMode`, `"auto"` or `"default"`, per workspace too) and with the workspace's own settings. A call that reaches `canUseTool` still waits for the person's Allow or Deny in the chat view: never answer it without the person. Never pass `bypassPermissions`, `acceptEdits` or `allowDangerouslySkipPermissions`.
+- A plugin reaches MCP tools only through `src/runner/plugin-agent.ts` and its `pluginOptions`: no built-in tools, `allowedTools` the plugin's declared tools, `dontAsk`, `settingSources: []`, `persistSession: false`, no `canUseTool`. Don't widen them, and never run a plugin's call in a workspace.
 - The runner binds `127.0.0.1` only, and every request passes `refusal()` in `src/runner/server.ts` (Host, Origin, JSON content type). New routes go through the same check.
 - Read configuration only through `src/runner/config.ts`. Tests set `CLEAT_CONFIG`, `CLEAT_DATA_DIR` and `CLEAT_PORT=0`, and never touch the real `~/.config/cleat` or `~/.local/share/cleat`.
 - Tests that run in CI use the fake agent (`CLEAT_FAKE_AGENT=1`): CI has no Claude Code login. A check that needs real Claude Code, Windows or a desktop is a script under `scripts/` that a person or verifier runs on a machine that has them, and the test suite skips it when `CI` is set.

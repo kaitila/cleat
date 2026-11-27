@@ -285,7 +285,7 @@ export interface SettingsErrorResponse { error: string; field: string }
 
 // ---------- Plugins (D0057, docs/plugins.md) ----------
 
-/** The glyphs a plugin's tab can carry (src/web/plugin-icons.js draws them). */
+/** The glyphs a plugin's tab can carry (src/web/tool-icons.js draws them, through iconFor in dock-plugins.js). */
 export const PLUGIN_ICONS = ["calendar", "search", "people", "mail", "note", "star", "bolt", "globe", "chart", "list"] as const;
 export type PluginIcon = (typeof PLUGIN_ICONS)[number];
 

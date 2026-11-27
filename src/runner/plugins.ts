@@ -25,6 +25,8 @@ export const MAX_ROWS = 200;
 export const MAX_TEXT = 500;
 export const MAX_TASK = 8000;
 export const MAX_QUERY = 500;
+/** After a failed refresh, how long showing the tab waits before trying again (Refresh tries at once). */
+export const RETRY_MS = 60_000;
 
 const Definition = z.object({
   title: z.string().trim().min(1).max(40),
@@ -105,6 +107,8 @@ interface Cached {
   view: PluginView | null;
   at: string | null;
   error: string | null;
+  /** When the last refresh failed (ms), or 0. */
+  failedAt: number;
   running: Promise<void> | null;
 }
 
@@ -262,7 +266,7 @@ export class Plugins {
   private cached(id: string): Cached {
     let c = this.cache.get(id);
     if (!c) {
-      c = { view: null, at: null, error: null, running: null };
+      c = { view: null, at: null, error: null, failedAt: 0, running: null };
       // The last view from before a restart, so the tab shows something at once.
       try {
         const saved = JSON.parse(readFileSync(join(this.options.dataDir, "plugins", id, "view.json"), "utf8")) as { view?: unknown; at?: unknown };
@@ -293,7 +297,8 @@ export class Plugins {
     if (!p?.definition.view) return null;
     const c = this.cached(id);
     const stale = c.at === null || now - Date.parse(c.at) >= (p.definition.refreshMs ?? DEFAULT_REFRESH_MS);
-    if ((fresh || stale || c.error !== null) && !c.running) c.running = this.refresh(id, p.definition, c);
+    const retry = c.error === null || now - c.failedAt >= RETRY_MS;
+    if ((fresh || (stale && retry)) && !c.running) c.running = this.refresh(id, p.definition, c);
     return this.answer(c);
   }
 
@@ -312,6 +317,7 @@ export class Plugins {
       c.view = view;
       c.at = new Date().toISOString();
       c.error = null;
+      c.failedAt = 0;
       try {
         writeFileSync(join(this.folder(id), "view.json"), JSON.stringify({ view, at: c.at }));
       } catch {
@@ -319,6 +325,7 @@ export class Plugins {
       }
     } catch (e) {
       c.error = message(e);
+      c.failedAt = Date.now();
       (this.options.log ?? console.error)(`plugin ${id}: view failed: ${c.error}`);
     } finally {
       c.running = null;

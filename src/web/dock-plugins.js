@@ -167,7 +167,8 @@ export function pluginDeck(doc, panel, { onTab, onTask }) {
     refresh.hidden = !p.view;
     const s = searches.get(p.id);
     const query = find.value.trim();
-    if (p.search && query) {
+    // A plugin with no view shows its search's answer to "" while the field is empty (its own hint).
+    if (p.search && (query || !p.view)) {
       if (s?.running === query) {
         status.textContent = "Searching…";
         if (s.query !== query) renderView(null);
@@ -176,7 +177,7 @@ export function pluginDeck(doc, panel, { onTab, onTask }) {
         status.textContent = s.error ? `Failed: ${s.error}` : "";
       } else {
         renderView(null);
-        status.textContent = p.live ? "" : "Enter to search";
+        status.textContent = p.live || !query ? "" : "Enter to search";
       }
       return;
     }
@@ -251,6 +252,7 @@ export function pluginDeck(doc, panel, { onTab, onTask }) {
     render();
     const p = plugin();
     if (p?.view) void loadView(p.id);
+    else if (p?.search && !find.value.trim() && searches.get(p.id)?.query !== "") void search("");
     if (focus && p?.search) find.focus({ preventScroll: true });
     if (changed) onTab(current);
   }
