@@ -127,8 +127,26 @@ describe("every command into a pipe", () => {
   test("help is grouped, gh-style, and fits 80 columns", () => {
     const { out, code } = run(["help"]);
     expect(code).toBe(0);
-    for (const heading of ["USAGE", "GET STARTED", "RUNNER", "SHELL", "MORE", "SETUP FLAGS", "EXAMPLES"]) expect(out).toContain(`\n${heading}`);
+    for (const heading of ["USAGE", "GET STARTED", "RUNNER", "SHELL", "PLUGINS", "MORE", "SETUP FLAGS", "EXAMPLES"]) expect(out).toContain(`\n${heading}`);
     for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(80);
+  });
+
+  test("plugin new writes the plugin beside the config in plain lines; a bad or taken name exits 1; no name is a usage error", () => {
+    const e = env();
+    const go = (words: string[]) => {
+      const p = Bun.spawnSync([process.execPath, CLI, ...words], { cwd: REPO, env: e, stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 20_000 });
+      return { out: p.stdout.toString() + p.stderr.toString(), code: p.exitCode };
+    };
+    const made = go(["plugin", "new", "hacker-news"]);
+    expect(made.code).toBe(0);
+    const file = join(e.CLEAT_CONFIG, "..", "plugins", "hacker-news", "plugin.ts");
+    expect(existsSync(file)).toBe(true);
+    expect(made.out).toContain(`wrote ${file}`);
+    expect(made.out).toContain("the runner is not running");
+    expect(made.out).not.toContain("\x1b");
+    expect(go(["plugin", "new", "hacker-news"])).toMatchObject({ code: 1, out: expect.stringContaining("is there already") });
+    expect(go(["plugin", "new", "Bad_Name"]).code).toBe(1);
+    expect(go(["plugin", "new"]).code).not.toBe(0);
   });
 
   test("FORCE_COLOR colours even a pipe", () => {

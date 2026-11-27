@@ -231,7 +231,7 @@ export function problems(r: Partial<SelfTestResult>, seen: Seen, runnerUrl: stri
   const notch: Notch | null = r.dockNotch ?? null;
   need(notch === null || (OS_OF[layout] === "macos" && notch.width >= 40 && notch.height >= 16), `the shell measured a notch ${JSON.stringify(r.dockNotch)} on ${layout}`);
   need(r.dockVisible, "the dock was not shown");
-  need(r.dockBridge === "object:setState,onChat,onChatKey:undefined:undefined", `the page sees more or less than cleatDock.setState, onChat and onChatKey: ${r.dockBridge}`);
+  need(r.dockBridge === "object:setState,onChat,onChatKey,onPlugin:undefined:undefined", `the page sees more or less than cleatDock.setState, onChat, onChatKey and onPlugin: ${r.dockBridge}`);
   // The same pure function the shell uses, run here on the display the shell reported.
   const display = isArea(r.primaryDisplay) && r.primaryDisplay.width > 0 && r.primaryDisplay.height > 0 ? r.primaryDisplay : null;
   need(display, `the primary display's bounds are ${JSON.stringify(r.primaryDisplay)}`);
