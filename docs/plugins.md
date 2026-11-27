@@ -68,6 +68,7 @@ A plugin of yours, outside the repo, takes the types alone, as `cleat plugin new
 | `refreshMs` | How long a view is shown before opening the tab works it out again. Default 5 minutes, at least 1000. |
 | `view(ctx)` | The tab's content when it opens, and while the find field is empty. |
 | `search` | `{ placeholder?, live?, run(query, ctx) }`: a find field at the tab's top. `run` gives a view for the query. A plugin with a search and no view is asked `run("")` when its tab opens, so a hint (a `note`) shows there; answer it without calling a tool. |
+| `login(ctx)` | A sign-in the plugin needs first, such as an OAuth grant for an API it calls directly. `cleat plugin login <id>` runs it in the terminal (not in the runner), and it gives back one line saying what it did. Its `ctx` has `id`, `options`, `dataDir` and `signal` as a view's does, plus `openUrl(url)` (the person's browser), `input(question, { secret?, initial? })` (asks in the terminal) and `log`. Keep what it gets (a refresh token) in `ctx.dataDir`, where `view()` and `search()` find it. |
 
 A plugin needs a `view()`, a `search`, or both. One that doesn't load (a syntax error, no default export, a field of the wrong kind) is listed in Settings with the reason and never runs.
 
@@ -148,7 +149,7 @@ export default {
 };
 ```
 
-`live: true` searches as you type, 350 ms after the last key: only for a cheap search like this one. Without it a search runs when you press Enter, which is right for one that calls `ctx.tool`. A newer search aborts the one before (its `ctx.signal`). The built-in Gamma plugin (`plugins/gamma/plugin.ts`) is a search on Enter through a connector, the Calendar plugin (`plugins/calendar/plugin.ts`) a view through one.
+`live: true` searches as you type, 350 ms after the last key: only for a cheap search like this one. Without it a search runs when you press Enter, which is right for one that calls `ctx.tool`. A newer search aborts the one before (its `ctx.signal`). The built-in Gamma plugin (`plugins/gamma/plugin.ts`) is a search on Enter through a connector; the Calendar plugin (`plugins/calendar/plugin.ts`) is a view that calls an API directly, after a `login` (D0059).
 
 ## Turning plugins on, hotkeys, options
 In Settings → Plugins each plugin has a switch and a hotkey (record it, or Clear for none), and the line under its name says whether it is built in or yours, and which tools it uses. Settings refuses a plugin's hotkey that is one of Cleat's own three or another plugin's; set by hand in the file, Cleat's own win, then the first plugin (built-in ones first, then by id) that asks for the key. Both are saved into the config file, beside the plugin's `options`, which only the file sets:
@@ -166,12 +167,22 @@ In Settings → Plugins each plugin has a switch and a hotkey (record it, or Cle
 `hotkey: null` means none; left out, the plugin's own. The ids are checked when the config is read: a bad one stops the runner from starting, with the reason.
 
 ## The built-in plugins
-Both use the owner's claude.ai connectors, so they are off until turned on.
+Both are off until turned on.
 
 | Plugin | What it shows | Hotkey |
 |---|---|---|
-| `calendar` | Today's and tomorrow's events from the Google Calendar connector (`list_events`): times, place, a Meet link, the event now in the accent, past and declined ones muted; Ask prepares you for the meeting. Refreshed every 10 minutes. | CommandOrControl+Alt+C |
+| `calendar` | Today's and tomorrow's events, read from the Google Calendar API directly (no Claude, a fraction of a second; D0059): times, place, a Meet link, the event now in the accent, past and declined ones muted; Ask prepares you for the meeting. Refreshed every 2 minutes. Needs `cleat plugin login calendar` once (below). | CommandOrControl+Alt+C |
 | `gamma` | People and companies in Gamma (`search_people`, `search_organizations`) on Enter: a name or a company searches both, three words or more search people by description; Ask tells you about the person or company. | CommandOrControl+Alt+G |
+
+### Calendar: signing in to Google
+Calendar calls Google with an OAuth client of your own (Google doesn't let a shared one read calendars without its review). Making one takes a couple of minutes, once:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), pick or create a project, and under **APIs & Services → Library** enable the **Google Calendar API**.
+2. Under **APIs & Services → OAuth consent screen**, set it up: **Internal** if your Google account is a Workspace one (only your organization can use it, no review), otherwise **External** with yourself added as a test user. The scope it asks is `calendar.readonly`.
+3. Under **APIs & Services → Credentials**, **Create credentials → OAuth client ID**, application type **Desktop app**. Keep its client ID and client secret.
+4. Run `cleat plugin login calendar`. It asks for the client ID and secret (or takes `clientId` and `clientSecret` from the config's `plugins.calendar.options`), opens Google's consent page, and takes Google's answer on `127.0.0.1`. The refresh token is kept in `<data folder>/plugins/calendar/google.json`, readable by you only; the tab shows your events at once.
+
+Signed out (no `google.json`, or the sign-in revoked or expired) the tab says to run the command again. By default it shows your primary calendar; `"options": { "calendars": ["primary", "team@group.calendar.google.com"] }` shows several (the ids are in Google Calendar's settings for each calendar).
 
 ## In the dock
 The tabs show when at least one plugin is on: Sessions first, then one per plugin, an icon each (the name and hotkey as the tooltip). On a Mac's notch they sit in the notch's band, on its left wing; without one, as a row at the panel's top. A plugin's tab has its title, the find field when it has a search, Refresh when it has a view, the rows, and a status line: when the view was worked out, "updating…" while a new one loads, or the last error.

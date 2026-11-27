@@ -42,6 +42,7 @@ const Definition = z.object({
       run: z.custom<NonNullable<PluginDefinition["search"]>["run"]>((v) => typeof v === "function", "search.run must be a function"),
     })
     .optional(),
+  login: z.custom<NonNullable<PluginDefinition["login"]>>((v) => typeof v === "function", "login must be a function").optional(),
 });
 
 const text = (max = MAX_TEXT) => z.string().transform((s) => (s.length > max ? s.slice(0, max - 1) + "…" : s));
