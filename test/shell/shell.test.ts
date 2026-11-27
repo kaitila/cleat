@@ -972,7 +972,7 @@ describe("self-test runner", () => {
     popupVisible: true, popupCentred: true, foreignNavigationRefused: true, foreignWindowRefused: true, pageClosedPopup: true,
     noWindowWithoutRunner: true, clipboardRestored: true, loginItemRead: true, openAtLogin: false,
     // On 2560x1440 the chat is 1180x860 (chatSize), and the window is as large as that.
-    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock?chat=1180x860", dockNotch: null, dockVisible: true, dockBridge: "object:setState,onChat,onChatKey:undefined:undefined",
+    dockOffNoWindow: true, dockCreated: true, dockUrl: "http://127.0.0.1:5000/dock?chat=1180x860", dockNotch: null, dockVisible: true, dockBridge: "object:setState,onChat,onChatKey,onPlugin:undefined:undefined",
     primaryDisplay: display, dockIgnoresMouseBeforeLoad: true, dockIdleBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockIdleFocusable: false, dockIdleFocused: false,
     dockMouseOnIdleIsland: true, dockMouseAwayIgnored: true, dockMouseBelowPillIgnored: true,
     dockPeekBounds: { x: 690, y: 0, width: 1180, height: 860 }, dockPeekFocusable: false, dockMouseOnPeekIsland: true,
