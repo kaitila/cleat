@@ -769,8 +769,73 @@ describe("Calendar (built in)", () => {
     expect(next!.rows).toMatchObject([{ title: "Offsite", meta: "All day" }]);
     expect(h.tools).toHaveLength(1);
     expect(h.tools[0]!.tool).toBe("mcp__claude_ai_Google_Calendar__list_events");
-    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    expect(h.tools[0]!.args).toMatchObject({ startTime: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}T00:00:00`, orderBy: "startTime" });
+    const day = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const last = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
+    expect(h.tools[0]!.args).toMatchObject({
+      startTime: `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}T00:00:00`,
+      endTime: `${last.getFullYear()}-${pad(last.getMonth() + 1)}-${pad(last.getDate())}T00:00:00`,
+      orderBy: "startTime",
+    });
+  });
+
+  test("lists an event that started before the day and still runs: several days, overnight", async () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const date = (offset: number) => {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    const at = (dayOffset: number, hour: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour).toISOString();
+    const events = [
+      { summary: "Conference", start: { date: date(-1) }, end: { date: date(2) } },
+      { summary: "Yesterday's offsite", start: { date: date(-1) }, end: { date: date(0) } },
+      { summary: "Night shift", start: { dateTime: at(-1, 22) }, end: { dateTime: at(0, 2) } },
+      { summary: "Last night", start: { dateTime: at(-1, 20) }, end: { dateTime: at(-1, 23) } },
+      { summary: "Into tomorrow", start: { dateTime: at(0, 23) }, end: { dateTime: at(1, 1) } },
+    ];
+    const h = harness({ builtInDir: BUILT_IN_DIR, settings: { calendar: { enabled: true } }, tool: () => JSON.stringify({ events }) });
+    await h.plugins.load();
+    const v = await settle(h, "calendar");
+    expect(v?.error).toBeNull();
+    const [today, next] = v!.view!.sections;
+    expect(today!.rows.map((r) => r.title)).toEqual(["Conference", "Night shift", "Into tomorrow"]);
+    expect(today!.rows[0]).toMatchObject({ meta: "All day" });
+    expect(next!.rows.map((r) => r.title)).toEqual(["Conference", "Into tomorrow"]);
+  });
+
+  test("days and times are the calendar's time zone's, not the runner's", async () => {
+    const { addDays, dateIn, eventRow, midnightIn, overlaps } = await import("../../plugins/calendar/plugin");
+    // Midnight in Helsinki (UTC+2 in winter, +3 in summer) and in Los Angeles (UTC-8, -7).
+    expect(midnightIn("2026-11-27", "Europe/Helsinki").toISOString()).toBe("2026-11-26T22:00:00.000Z");
+    expect(midnightIn("2026-07-01", "Europe/Helsinki").toISOString()).toBe("2026-06-30T21:00:00.000Z");
+    expect(midnightIn("2026-11-27", "America/Los_Angeles").toISOString()).toBe("2026-11-27T08:00:00.000Z");
+    expect(midnightIn("2026-03-08", "America/Los_Angeles").toISOString()).toBe("2026-03-08T08:00:00.000Z");
+    expect(addDays("2026-12-31", 1)).toBe("2027-01-01");
+    // 23:30 UTC on the 26th is already the 27th in Helsinki.
+    const late = new Date("2026-11-26T23:30:00Z");
+    expect(dateIn(late, "Europe/Helsinki")).toBe("2026-11-27");
+    expect(dateIn(late, "America/Los_Angeles")).toBe("2026-11-26");
+    const meeting = { summary: "Sync", start: { dateTime: "2026-11-26T23:30:00Z" }, end: { dateTime: "2026-11-27T00:30:00Z" } };
+    expect(overlaps(meeting, "2026-11-27", "Europe/Helsinki")).toBe(true);
+    expect(overlaps(meeting, "2026-11-26", "Europe/Helsinki")).toBe(false);
+    expect(overlaps(meeting, "2026-11-26", "America/Los_Angeles")).toBe(true);
+    expect(eventRow(meeting, "today", late, "Europe/Helsinki").meta).toBe("01:30–02:30");
+  });
+
+  test("a calendar's time zone in the answer decides which day an event is on", async () => {
+    // An event at the runner's 12:00 today, in a zone 14 hours away either way, falls on another day there.
+    const now = new Date();
+    const noon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+    const zone = "Pacific/Kiritimati"; // UTC+14
+    const { dateIn } = await import("../../plugins/calendar/plugin");
+    const events = [{ summary: "Lunch", start: { dateTime: noon.toISOString() }, end: { dateTime: new Date(noon.getTime() + 3_600_000).toISOString() } }];
+    const h = harness({ builtInDir: BUILT_IN_DIR, settings: { calendar: { enabled: true } }, tool: () => JSON.stringify({ events, timeZone: zone }) });
+    await h.plugins.load();
+    const v = await settle(h, "calendar");
+    const [today, next] = v!.view!.sections;
+    const onToday = dateIn(noon, zone) === dateIn(now, zone);
+    expect(today!.rows.map((r) => r.title)).toEqual(onToday ? ["Lunch"] : []);
+    expect(next!.rows.map((r) => r.title)).toEqual(onToday ? [] : ["Lunch"]);
   });
 
   test("an empty calendar says so", async () => {
